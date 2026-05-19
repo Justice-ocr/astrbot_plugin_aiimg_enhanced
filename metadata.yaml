@@ -1,0 +1,19 @@
+name: astrbot_plugin_aiimg_enhanced
+display_name: AI绘图站
+desc: >
+  多服务商文生图 / 改图 / 多人设自拍 / 视频生成插件。支持 Gemini、Gitee AI、Grok、OpenAI 等 12+ 服务商，批量出图、LLM 工具调用、多人设管理、自定义状态文案，附可视化配置页面。
+version: v4.4.0
+author: 木有知、Zhalslar
+astrbot_version: ">=4.16.0,<5"
+support_platforms:
+  - aiocqhttp
+repo: https://github.com/muyouzhi6/astrbot_plugin_aiimg_enhanced
+
+
+
+
+
+
+
+
+

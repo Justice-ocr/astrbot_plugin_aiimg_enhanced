@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>AI绘图站 · 配置</title>
+  <link rel="stylesheet" href="./style.css"/>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">🎨</div>
+      <div>
+        <div class="brand-name">AI绘图站</div>
+        <div class="brand-sub">Plugin Settings</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">功能</div>
+      <button class="nav-btn active" data-tab="tab-features">⚡ 功能开关</button>
+      <button class="nav-btn" data-tab="tab-providers">🔌 服务商</button>
+      <button class="nav-btn" data-tab="tab-presets">⌘ 预设指令</button>
+      <div class="nav-section">人设</div>
+      <button class="nav-btn" data-tab="tab-persona">🎭 人设管理</button>
+      <div class="nav-section">系统</div>
+      <button class="nav-btn" data-tab="tab-reply">💬 状态文案</button>
+      <button class="nav-btn" data-tab="tab-advanced">⚙️ 高级配置</button>
+    </nav>
+    <div class="sidebar-stats">
+      <div class="stat-item"><span id="stat-providers">0</span><small>服务商</small></div>
+      <div class="stat-item"><span id="stat-personas">0</span><small>人设</small></div>
+      <div class="stat-item"><span id="stat-presets">0</span><small>预设</small></div>
+    </div>
+    <div class="save-area">
+      <div id="save-hint" class="save-hint">配置已同步</div>
+      <button id="btn-save" class="btn-save" data-action="save-config" type="button">保存更改</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="topbar-label">PLUGIN SETTINGS</div>
+        <h2 id="topbar-title">功能开关</h2>
+      </div>
+      <div class="status-badge">● 运行中</div>
+    </header>
+    <div class="content-scroll">
+
+      <section id="tab-features" class="tab active">
+        <div class="cards">
+          <div class="card">
+            <div class="card-title">文生图</div>
+            <div class="field-row"><label>启用文生图</label><input type="checkbox" class="toggle" id="feat-draw-enabled"/></div>
+            <div class="field-row"><label>允许 LLM 调用</label><input type="checkbox" class="toggle" id="feat-draw-llm"/></div>
+            <div class="field-row"><label>默认输出尺寸</label>
+              <select class="sel" id="feat-draw-output">
+                <option value="">服务商默认</option>
+                <option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option>
+                <option value="512x512">512×512</option><option value="1024x1024">1024×1024</option>
+                <option value="2048x2048">2048×2048</option><option value="1152x896">1152×896</option>
+                <option value="768x1024">768×1024</option><option value="1536x2048">1536×2048</option>
+              </select>
+            </div>
+            <div class="field-row"><label>批量并发数</label><input type="number" class="inp sm" id="feat-draw-batch" min="1" max="8"/></div>
+
+            <div class="chain-section">
+              <div class="chain-label">服务商链路 <span class="hint">主用在前，后续为备用兜底</span></div>
+              <div id="chain-draw" class="chain-container"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">改图 / 图生图</div>
+            <div class="field-row"><label>启用改图</label><input type="checkbox" class="toggle" id="feat-edit-enabled"/></div>
+            <div class="field-row"><label>允许 LLM 调用</label><input type="checkbox" class="toggle" id="feat-edit-llm"/></div>
+            <div class="field-row"><label>默认输出尺寸</label>
+              <select class="sel" id="feat-edit-output">
+                <option value="">服务商默认</option>
+                <option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option>
+                <option value="1024x1024">1024×1024</option><option value="2048x2048">2048×2048</option>
+              </select>
+            </div>
+            <div class="field-row"><label>批量并发数</label><input type="number" class="inp sm" id="feat-edit-batch" min="1" max="8"/></div>
+
+            <div class="chain-section">
+              <div class="chain-label">服务商链路 <span class="hint">主用在前，后续为备用兜底</span></div>
+              <div id="chain-edit" class="chain-container"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">自拍参考照</div>
+            <div class="field-row"><label>启用自拍</label><input type="checkbox" class="toggle" id="feat-selfie-enabled"/></div>
+            <div class="field-row"><label>允许 LLM 调用</label><input type="checkbox" class="toggle" id="feat-selfie-llm"/></div>
+            <div class="field-row"><label>默认输出尺寸</label>
+              <select class="sel" id="feat-selfie-output">
+                <option value="">服务商默认</option>
+                <option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option>
+                <option value="1024x1024">1024×1024</option><option value="2048x2048">2048×2048</option>
+              </select>
+            </div>
+            <div class="field-row"><label>复用改图链路兜底</label><input type="checkbox" class="toggle" id="feat-selfie-fallback"/></div>
+            <div class="field-group"><label class="field-label">自拍提示词前缀 <span class="hint">留空使用内置默认</span></label>
+              <textarea class="ta" id="feat-selfie-prefix" rows="3" placeholder="留空使用内置默认提示词..."></textarea></div>
+
+            <div class="chain-section">
+              <div class="chain-label">服务商链路 <span class="hint">主用在前，后续为备用兜底</span></div>
+              <div id="chain-selfie" class="chain-container"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">视频生成</div>
+            <div class="field-row"><label>启用视频生成</label><input type="checkbox" class="toggle" id="feat-video-enabled"/></div>
+            <div class="field-row"><label>允许 LLM 调用</label><input type="checkbox" class="toggle" id="feat-video-llm"/></div>
+            <div class="field-row"><label>发送方式</label>
+              <select class="sel" id="feat-video-send">
+                <option value="auto">auto（URL失败再下载）</option>
+                <option value="url">仅 URL</option>
+                <option value="file">下载为文件</option>
+              </select>
+            </div>
+            <div class="field-row"><label>发送超时(秒)</label><input type="number" class="inp sm" id="feat-video-send-timeout" min="10" max="300"/></div>
+            <div class="field-row"><label>下载超时(秒)</label><input type="number" class="inp sm" id="feat-video-dl-timeout" min="30" max="3600"/></div>
+
+            <div class="chain-section">
+              <div class="chain-label">服务商链路 <span class="hint">主用在前，后续为备用兜底</span></div>
+              <div id="chain-video" class="chain-container"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">批量任务</div>
+            <div class="field-row"><label>单次批量最大张数</label><input type="number" class="inp sm" id="feat-batch-max" min="1" max="32"/></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-providers" class="tab">
+        <div class="card wide">
+          <div class="card-header">
+            <div>
+              <div class="card-title">服务商列表</div>
+              <div class="card-desc">配置图像/视频服务商。id 需唯一，功能链路中引用此 id。</div>
+            </div>
+            <div class="btn-group">
+              <select class="sel" id="provider-template-sel">
+                <option value="openai_images">OpenAI Images</option>
+                <option value="openai_chat">OpenAI Chat图</option>
+                <option value="gemini_native">Gemini 原生</option>
+                <option value="flow2api">Flow2API（出图）</option>
+                <option value="vertex_ai_anonymous">Vertex AI 匿名</option>
+                <option value="grok_images">Grok Images</option>
+                <option value="grok_chat">Grok Chat图</option>
+                <option value="grok2api_images">Grok2API Images</option>
+                <option value="gemini_openai_images">Gemini Images</option>
+                <option value="gemini_openai_chat">Gemini Chat图</option>
+                <option value="gitee_images">Gitee Images</option>
+                <option value="gitee_async">Gitee 异步改图</option>
+                <option value="jimeng">即梦（豆包）</option>
+                <option value="grok_video">Grok 视频</option>
+                <option value="flow2api_video">Flow2API 视频</option>
+                <option value="modelscope_openai_images">魔搭 Images</option>
+                <option value="openai_full_url_images">OpenAI ImagesURL</option>
+              </select>
+              <button class="btn-primary" id="btn-add-provider">+ 添加服务商</button>
+            </div>
+          </div>
+          <div id="providers-list" class="provider-list"></div>
+        </div>
+      </section>
+
+      <section id="tab-presets" class="tab">
+        <div class="card wide">
+          <div class="card-header">
+            <div><div class="card-title">文生图预设</div><div class="card-desc">格式：<code>预设名:英文提示词</code></div></div>
+            <button class="btn-primary" id="btn-add-draw-preset">+ 添加</button>
+          </div>
+          <div id="draw-presets-list" class="preset-list"></div>
+        </div>
+        <div class="card wide">
+          <div class="card-header">
+            <div><div class="card-title">改图预设</div><div class="card-desc">格式：<code>预设名:英文提示词</code></div></div>
+            <button class="btn-primary" id="btn-add-edit-preset">+ 添加</button>
+          </div>
+          <div id="edit-presets-list" class="preset-list"></div>
+        </div>
+        <div class="card wide">
+          <div class="card-header">
+            <div><div class="card-title">视频预设</div><div class="card-desc">格式：<code>预设名:英文提示词</code></div></div>
+            <button class="btn-primary" id="btn-add-video-preset">+ 添加</button>
+          </div>
+          <div id="video-presets-list" class="preset-list"></div>
+        </div>
+      </section>
+
+      <section id="tab-persona" class="tab">
+        <div class="card wide">
+          <div class="card-header">
+            <div><div class="card-title">人设列表</div><div class="card-desc">为 /自拍 配置多套人设，每套有独立名称、外貌描述和参考图组。</div></div>
+            <button class="btn-primary" id="btn-add-persona">+ 新建人设</button>
+          </div>
+          <div id="persona-list" class="persona-list"></div>
+        </div>
+      </section>
+
+      <section id="tab-reply" class="tab">
+        <div class="cards">
+          <div class="card">
+            <div class="card-title">等待提示</div>
+            <div class="card-desc">支持占位符：<code>{prompt}</code> <code>{persona_name}</code></div>
+            <div class="field-group"><label class="field-label">/aiimg 文生图</label><textarea class="ta" id="rc-draw-pending" rows="2" placeholder="🎨 收到灵感，正在绘制..."></textarea></div>
+            <div class="field-group"><label class="field-label">/改图</label><textarea class="ta" id="rc-edit-pending" rows="2" placeholder="🖌️ 正在处理图片..."></textarea></div>
+            <div class="field-group"><label class="field-label">/自拍</label><textarea class="ta" id="rc-selfie-pending" rows="2" placeholder="📸 正在为「{persona_name}」生成自拍，请稍候..."></textarea></div>
+            <div class="field-group"><label class="field-label">/视频</label><textarea class="ta" id="rc-video-pending" rows="2" placeholder="🎬 视频任务已提交后台渲染..."></textarea></div>
+          </div>
+          <div class="card">
+            <div class="card-title">失败提示</div>
+            <div class="card-desc">支持占位符：<code>{error}</code> <code>{persona_name}</code></div>
+            <div class="field-group"><label class="field-label">/aiimg 失败</label><textarea class="ta" id="rc-draw-error" rows="2" placeholder="💥 绘制失败: {error}"></textarea></div>
+            <div class="field-group"><label class="field-label">/自拍 失败</label><textarea class="ta" id="rc-selfie-error" rows="2" placeholder="💥 自拍生成失败: {error}"></textarea></div>
+          </div>
+          <div class="card">
+            <div class="card-title">调试模式</div>
+            <div class="field-row"><label>等待消息附加调试信息<span class="hint">（提示词、人设、参考图数量）</span></label><input type="checkbox" class="toggle" id="rc-verbose"/></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-advanced" class="tab">
+        <div class="cards">
+          <div class="card">
+            <div class="card-title">并发与防抖</div>
+            <div class="field-row"><label>防抖时长(秒)</label><input type="number" class="inp sm" id="adv-debounce" min="0" max="60"/></div>
+            <div class="field-row"><label>单用户图像并发上限</label><input type="number" class="inp sm" id="adv-concur-img" min="1" max="10"/></div>
+            <div class="field-row"><label>单用户视频并发上限</label><input type="number" class="inp sm" id="adv-concur-vid" min="1" max="5"/></div>
+          </div>
+          <div class="card">
+            <div class="card-title">缓存管理</div>
+            <div class="field-row"><label>图片最大缓存数</label><input type="number" class="inp sm" id="adv-cache-img" min="10" max="500"/></div>
+            <div class="field-row"><label>视频最大缓存数</label><input type="number" class="inp sm" id="adv-cache-vid" min="0" max="500"/></div>
+          </div>
+          <div class="card">
+            <div class="card-title">网络安全</div>
+            <div class="field-row"><label>允许从私有地址下载 <span class="hint warn">⚠ 高风险</span></label><input type="checkbox" class="toggle" id="adv-net-private"/></div>
+            <div class="field-row"><label>图片下载上限(字节)</label><input type="number" class="inp" id="adv-net-img-bytes" min="262144"/></div>
+            <div class="field-row"><label>视频下载上限(字节)</label><input type="number" class="inp" id="adv-net-vid-bytes" min="5242880"/></div>
+            <div class="field-row"><label>最大重定向次数</label><input type="number" class="inp sm" id="adv-net-redirects" min="0" max="10"/></div>
+            <div class="field-row"><label>DNS 解析超时(秒)</label><input type="number" class="inp sm" id="adv-net-dns" min="1" max="10"/></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<div id="persona-modal" class="modal-backdrop" style="display:none">
+  <div class="modal">
+    <div class="modal-head"><span id="modal-persona-title">编辑人设</span><button class="modal-close" id="btn-modal-close">✕</button></div>
+    <div class="modal-body">
+      <div class="field-group"><label class="field-label">人设 ID <span class="hint">英文/数字/下划线</span></label><input type="text" class="inp full" id="modal-id" placeholder="default"/></div>
+      <div class="field-group"><label class="field-label">显示名称</label><input type="text" class="inp full" id="modal-name" placeholder="默认助理"/></div>
+      <div class="field-group"><label class="field-label">人物描述 <span class="hint">融入自拍 prompt</span></label><textarea class="ta" id="modal-prompt" rows="4" placeholder="外貌、气质、服装习惯..."></textarea></div>
+      <div class="field-group">
+        <label class="field-label">参考图</label>
+        <!-- 图片预览缩略图 -->
+        <div id="modal-ref-previews" class="ref-previews"></div>
+        <!-- 上传按钮 -->
+        <div class="upload-row">
+          <button class="btn-upload" id="modal-upload-btn" type="button">📁 上传图片</button>
+          <span class="upload-status" id="modal-upload-status"></span>
+          <input type="file" id="modal-file-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none"/>
+        </div>
+        <label class="field-label" style="margin-top:8px">或手动填写路径 / URL <span class="hint">每行一个</span></label>
+        <textarea class="ta" id="modal-refs" rows="3" placeholder="/data/.../ref.jpg&#10;https://example.com/photo.jpg"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-modal-cancel">取消</button>
+      <button class="btn-primary" id="btn-modal-ok">保存人设</button>
+    </div>
+  </div>
+</div>
+
+<div id="provider-modal" class="modal-backdrop" style="display:none">
+  <div class="modal modal-wide">
+    <div class="modal-head"><span id="modal-provider-title">编辑服务商</span><button class="modal-close" id="btn-provider-modal-close">✕</button></div>
+    <div class="modal-body" id="provider-modal-body"></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-provider-modal-cancel">取消</button>
+      <button class="btn-primary" id="btn-provider-modal-ok">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" style="display:none"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
