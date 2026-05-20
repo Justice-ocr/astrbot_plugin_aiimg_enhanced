@@ -1170,8 +1170,12 @@ class GiteeAIImagePlugin(Star):
         candidate = first.lstrip("@").strip()
         if not candidate:
             return None, s
-        if candidate in set(self.registry.provider_ids()):
-            return candidate, rest.strip()
+        # 大小写不敏感匹配，找到后返回实际注册的 id
+        provider_ids = self.registry.provider_ids()
+        candidate_lower = candidate.lower()
+        for pid in provider_ids:
+            if pid.lower() == candidate_lower:
+                return pid, rest.strip()
         logger.debug(
             "[provider_override] 忽略未知 @token，继续走自动链路: token=%s",
             candidate,
