@@ -1517,6 +1517,125 @@ class GiteeAIImagePlugin(Star):
         await self._do_edit_direct(event, extra_prompt, preset=used_preset)
         event.stop_event()
 
+    # ==================== 服务商 & 链路管理 ====================
+
+    @filter.command("服务商")
+    async def provider_list_command(self, event: AstrMessageEvent):
+        """查看所有已配置的服务商。用法: /服务商"""
+        event.should_call_llm(True)
+        ids = self.registry.provider_ids()
+        if not ids:
+            yield event.plain_result("⚠️ 暂无已配置的服务商，请在配置页添加。")
+            return
+        from .core.provider_registry import _TEMPLATE_KEY_ALIASES
+        lines = ["🔌 已配置服务商："]
+        for pid in ids:
+            p = self.registry.get(pid)
+            tkey = str((p or {}).get("__template_key") or "")
+            label = str((p or {}).get("label") or "")
+            model = str((p or {}).get("model") or "")
+            meta = " · ".join(x for x in [tkey, model] if x)
+            lines.append(f"  [{pid}]  {meta}")
+        lines.append("\n用 /链路 查看各功能当前链路配置。")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("链路")
+    async def chain_command(self, event: AstrMessageEvent):
+        """查看或设置各功能的服务商链路。
+
+        用法:
+        - /链路                           查看当前链路
+        - /链路 draw @主用 @备用1 @备用2  设置文生图链路
+        - /链路 edit @主用 @备用          设置改图链路
+        - /链路 selfie @主用              设置自拍链路
+        - /链路 video @主用               设置视频链路
+        """
+        event.should_call_llm(True)
+        arg = self._extract_extra_prompt(event, "链路").strip()
+
+        # 无参数：查看当前链路
+        if not arg:
+            yield event.plain_result(self._format_chain_status())
+            return
+
+        # 解析 "draw @p1 @p2 ..." 格式
+        parts = arg.split()
+        feat_key = parts[0].lower()
+        feat_map = {"draw": "draw", "文生图": "draw",
+                    "edit": "edit", "改图": "edit", "图生图": "edit",
+                    "selfie": "selfie", "自拍": "selfie",
+                    "video": "video", "视频": "video"}
+        if feat_key not in feat_map:
+            yield event.plain_result(
+                f"⚠️ 未知功能「{parts[0]}」\n"
+                "可用功能：draw/文生图、edit/改图、selfie/自拍、video/视频"
+            )
+            return
+
+        feat = feat_map[feat_key]
+        provider_ids = self.registry.provider_ids()
+
+        # 解析 @provider_id 列表
+        raw_ids = [p.lstrip("@") for p in parts[1:] if p.startswith("@")]
+        if not raw_ids:
+            # 无@参数则只显示该功能当前链路
+            yield event.plain_result(self._format_chain_status(feat))
+            return
+
+        # 验证每个 id，大小写不敏感
+        resolved, unknown = [], []
+        for rid in raw_ids:
+            matched = next((p for p in provider_ids if p.lower() == rid.lower()), None)
+            if matched:
+                resolved.append(matched)
+            else:
+                unknown.append(rid)
+
+        if unknown:
+            yield event.plain_result(
+                f"⚠️ 以下服务商未配置：{', '.join(unknown)}\n"
+                f"用 /服务商 查看可用列表。"
+            )
+            return
+
+        # 更新 chain
+        has_output = feat != "video"
+        new_chain = [{"provider_id": pid, "output": ""} if has_output else {"provider_id": pid}
+                     for pid in resolved]
+
+        if isinstance(self.config, dict):
+            feats = self.config.setdefault("features", {})
+            feats.setdefault(feat, {})["chain"] = new_chain
+        self._safe_update_config()
+
+        # 格式化确认消息
+        order_labels = ["主用"] + [f"备用{i}" for i in range(1, len(resolved))]
+        lines = [f"✅ 已更新「{feat}」链路："]
+        for label, pid in zip(order_labels, resolved):
+            lines.append(f"  {label}：{pid}")
+        yield event.plain_result("\n".join(lines))
+
+    def _format_chain_status(self, feat_filter: str | None = None) -> str:
+        """格式化各功能链路状态。"""
+        feat_names = {"draw": "文生图", "edit": "改图", "selfie": "自拍", "video": "视频"}
+        feats = (self.config or {}).get("features", {}) if isinstance(self.config, dict) else {}
+        lines = ["🔗 当前链路配置："]
+        for feat_key, feat_label in feat_names.items():
+            if feat_filter and feat_key != feat_filter:
+                continue
+            chain = (feats.get(feat_key) or {}).get("chain") or []
+            if not chain:
+                lines.append(f"  {feat_label}：（未配置，使用系统默认）")
+            else:
+                pids = [str(item.get("provider_id") or "") for item in chain if isinstance(item, dict)]
+                pids = [p for p in pids if p]
+                order_labels = ["主"] + [f"备{i}" for i in range(1, len(pids))]
+                chain_str = "  →  ".join(f"{l}:{p}" for l, p in zip(order_labels, pids))
+                lines.append(f"  {feat_label}：{chain_str}")
+        if not feat_filter:
+            lines.append("\n用 /服务商 查看所有可用服务商。")
+        return "\n".join(lines)
+
     # ==================== 人设管理 ====================
 
     @filter.command("人设")
