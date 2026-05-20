@@ -439,9 +439,12 @@ class OpenAIFullURLBackend:
             raise RuntimeError("未配置 model")
 
         final_size = self._resolve_size(size, resolution)
+        prompt_text = (prompt or "").strip() or "a high quality image"
+        # /v1/responses 接口用 input 而不是 prompt
+        prompt_key = "input" if "/responses" in self.full_generate_url else "prompt"
         payload: dict[str, Any] = {
             "model": final_model,
-            "prompt": (prompt or "").strip() or "a high quality image",
+            prompt_key: prompt_text,
         }
         if final_size:
             payload["size"] = final_size
