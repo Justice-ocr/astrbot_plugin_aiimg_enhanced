@@ -1527,7 +1527,6 @@ class GiteeAIImagePlugin(Star):
         if not ids:
             yield event.plain_result("⚠️ 暂无已配置的服务商，请在配置页添加。")
             return
-        from .core.provider_registry import _TEMPLATE_KEY_ALIASES
         lines = ["🔌 已配置服务商："]
         for pid in ids:
             p = self.registry.get(pid)
@@ -1577,9 +1576,18 @@ class GiteeAIImagePlugin(Star):
 
         # 解析 @provider_id 列表
         raw_ids = [p.lstrip("@") for p in parts[1:] if p.startswith("@")]
-        if not raw_ids:
-            # 无@参数则只显示该功能当前链路
+        non_at  = [p for p in parts[1:] if not p.startswith("@")]
+        if not raw_ids and not non_at:
+            # 无参数：只显示该功能当前链路
             yield event.plain_result(self._format_chain_status(feat))
+            return
+        if not raw_ids and non_at:
+            # 有参数但忘写@
+            yield event.plain_result(
+                f"⚠️ 服务商 ID 需要以 @ 开头。\n"
+                f"示例：/链路 {parts[0]} @{non_at[0]}\n"
+                f"用 /服务商 查看可用 ID。"
+            )
             return
 
         # 验证每个 id，大小写不敏感
