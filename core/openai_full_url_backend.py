@@ -282,10 +282,14 @@ class OpenAIFullURLBackend:
         self, payload: dict[str, Any], extra_body: dict | None = None
     ) -> dict[str, Any]:
         out = dict(payload)
-        if isinstance(self.extra_body, dict):
-            out.update(self.extra_body)
-        if isinstance(extra_body, dict):
-            out.update(extra_body)
+        for src in (self.extra_body, extra_body):
+            if not isinstance(src, dict):
+                continue
+            for k, v in src.items():
+                if v is None:
+                    out.pop(k, None)   # None 表示删除该字段（用于覆盖默认字段如 prompt）
+                else:
+                    out[k] = v
         return out
 
     async def _post_json(
