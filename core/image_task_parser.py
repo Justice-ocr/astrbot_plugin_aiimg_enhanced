@@ -56,8 +56,13 @@ def parse_provider_override_prefix(
 
     token, rest = split_first_token_and_rest(s)
     candidate = token.lstrip("@").strip()
-    if candidate and candidate in known_provider_ids:
-        return candidate, rest
+    if not candidate:
+        return None, s
+    # 大小写不敏感匹配，返回实际注册的 id
+    candidate_lower = candidate.lower()
+    for pid in known_provider_ids:
+        if pid.lower() == candidate_lower:
+            return pid, rest
     return None, s
 
 
