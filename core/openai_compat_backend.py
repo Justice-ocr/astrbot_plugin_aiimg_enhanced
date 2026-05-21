@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
 import io
 import re
@@ -484,33 +483,20 @@ class OpenAICompatBackend:
                 raise RuntimeError(
                     "该后端 images.generate 暂时不可用（此前返回 404，已进入冷却期）"
                 )
-            resp: ImagesResponse = await asyncio.wait_for(
-                client.images.generate(**kwargs),
-                timeout=float(self.timeout),
-            )
-        except asyncio.TimeoutError:
-            raise RuntimeError(
-                f"该服务商 images.generate 请求超时（{self.timeout}s）。"
-            )
+            resp: ImagesResponse = await client.images.generate(**kwargs)
         except Exception as e:
             if _is_client_closed_error(e):
                 logger.warning(
                     "[OpenAICompat][generate] client 已关闭，重建 client 后重试一次"
                 )
                 client = await self._recreate_client(key)
-                resp = await asyncio.wait_for(
-                    client.images.generate(**kwargs),
-                    timeout=float(self.timeout),
-                )
+                resp = await client.images.generate(**kwargs)
             elif final_size == "4096x4096" and self._is_invalid_size_error(e):
                 logger.warning(
                     f"[OpenAICompat][generate] 4096x4096 可能不受该后端支持，尝试降级到 2048x2048: {e}"
                 )
                 kwargs["size"] = "2048x2048"
-                resp = await asyncio.wait_for(
-                    client.images.generate(**kwargs),
-                    timeout=float(self.timeout),
-                )
+                resp = await client.images.generate(**kwargs)
             else:
                 if "404" in str(e):
                     self._disable_generate_temporarily()
@@ -570,6 +556,23 @@ class OpenAICompatBackend:
 
         # Some providers only accept a single input image for edits.
         packed = _build_collage(images) if len(images) > 1 else images[0]
+        # 图片超过 4MB 时压缩，避免上传超时（部分服务商对大图有限制）
+        if len(packed) > 4 * 1024 * 1024:
+            try:
+                from PIL import Image as _PILImg
+                _bio_in = io.BytesIO(packed)
+                _img = _PILImg.open(_bio_in).convert("RGB")
+                _bio_out = io.BytesIO()
+                # 限制最大边长 2048
+                _img.thumbnail((2048, 2048), _PILImg.LANCZOS)
+                _img.save(_bio_out, format="JPEG", quality=85)
+                packed = _bio_out.getvalue()
+                logger.info(
+                    "[OpenAICompat][edit] 图片压缩: %dKB → %dKB",
+                    len(packed) // 1024, len(_bio_out.getvalue()) // 1024,
+                )
+            except Exception as _e:
+                logger.warning("[OpenAICompat][edit] 图片压缩失败，使用原图: %s", _e)
         mime, ext = guess_image_mime_and_ext(packed)
         upload = _bytes_to_upload_file(packed, f"input.{ext}")
 
@@ -591,26 +594,14 @@ class OpenAICompatBackend:
                 raise RuntimeError(
                     "该后端 images.edit 暂时不可用（此前返回 404，已进入冷却期）"
                 )
-            resp: ImagesResponse = await asyncio.wait_for(
-                client.images.edit(**kwargs),
-                timeout=float(self.timeout),
-            )
-        except asyncio.TimeoutError:
-            raise RuntimeError(
-                f"该服务商 images.edit 请求超时（{self.timeout}s）。"
-                "可能原因：服务商不支持改图接口（/v1/images/edits），"
-                "请在配置页将「支持改图」关闭，或改用 openai_chat 类型。"
-            )
+            resp: ImagesResponse = await client.images.edit(**kwargs)
         except Exception as e:
             if _is_client_closed_error(e):
                 logger.warning(
                     "[OpenAICompat][edit] client 已关闭，重建 client 后重试一次"
                 )
                 client = await self._recreate_client(key)
-                resp = await asyncio.wait_for(
-                    client.images.edit(**kwargs),
-                    timeout=float(self.timeout),
-                )
+                resp = await client.images.edit(**kwargs)
             elif final_size == "4096x4096" and self._is_invalid_size_error(e):
                 logger.warning(
                     f"[OpenAICompat][edit] 4096x4096 可能不受该后端支持，尝试降级到 2048x2048: {e}"
