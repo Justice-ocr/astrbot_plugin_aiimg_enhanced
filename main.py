@@ -3494,16 +3494,17 @@ class GiteeAIImagePlugin(Star):
                     self.config[key] = data[key]
 
             # providers: 把前端的 __type 转换为 __template_key（registry所需），再保存
+            providers_changed = False
             if "providers" in data and isinstance(data["providers"], list):
                 clean_providers = []
                 for p in data["providers"]:
                     if isinstance(p, dict):
                         cleaned = {k: v for k, v in p.items() if k != "__type"}
-                        # 如果没有 __template_key，用 __type 的值补充
                         if "__template_key" not in cleaned and "__type" in p:
                             cleaned["__template_key"] = p["__type"]
                         clean_providers.append(cleaned)
                 self.config["providers"] = clean_providers
+                providers_changed = True
 
             # persona_config：先把 base64 参考图转存为本地文件，再替换
             if "persona_config" in data:
@@ -3516,6 +3517,15 @@ class GiteeAIImagePlugin(Star):
                             )
                 self.config["persona_config"] = pc
                 self.persona_mgr = PersonaManager(self.config, self.data_dir)
+
+            # providers有变化时热重载 registry（draw/edit同一引用，自动生效）
+            if providers_changed:
+                self.registry._providers.clear()
+                self.registry._backends.clear()
+                self.registry._video_backends.clear()
+                self.registry._load_providers()
+                logger.info("[AI绘图站] Registry 已热重载，providers=%s",
+                            list(self.registry._providers.keys()))
 
             # 对齐 omnidraw：先写 JSON 持久化，再同步到 native config
             self._safe_update_config()
