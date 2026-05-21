@@ -825,11 +825,19 @@ class GiteeAIImagePlugin(Star):
         return "自拍参考图模式已关闭（features.selfie.enabled=false）"
 
     async def _send_image_with_fallback(
-        self, event: AstrMessageEvent, image_path: Path, *, max_attempts: int = 2
+        self, event: AstrMessageEvent, image_path: Path, *, max_attempts: int = 3
     ) -> SendImageResult:
-        """Send image with retries and fallback to base64 bytes.
+        """发送图片，按顺序尝试不同方式，每次只发一次，成功立即返回。
 
-        Avoids wasting generation credits when platform send fails transiently.
+        发送顺序：
+        1. 大图（>阈值）优先以文件形式发送
+        2. fromFileSystem（路径引用）
+        3. fromBytes（字节流，兼容性更好）
+        4. 压缩版 fromBytes（rich_media 失败时）
+        5. File 文件发送（rich_media 失败兜底）
+
+        关键设计：每次 event.send 只调用一次后立即 return 或记录失败，
+        绝不在同一次调用后再次发送，防止重复发送同一张图。
         """
         p = Path(image_path)
 
@@ -837,186 +845,73 @@ class GiteeAIImagePlugin(Star):
             logger.warning("[send_image] file not found: %s", p)
             return SendImageResult(ok=False, reason="file_not_found", cached_path=p)
 
-        # Large original images (e.g. 4K 20MB+) are likely to fail rich-media upload.
-        # Prefer sending as a normal file first so the original bytes are preserved.
         try:
             size_bytes = int(p.stat().st_size)
         except Exception:
             size_bytes = 0
 
-        file_send_tries = 0
-
-        async def try_send_as_file(trigger: str) -> bool:
-            nonlocal file_send_tries
-            if file_send_tries >= 2:
-                return False
-            file_send_tries += 1
+        # 大图优先以文件发送
+        if size_bytes > self.IMAGE_AS_FILE_THRESHOLD_BYTES:
             try:
                 await event.send(event.chain_result([File(name=p.name, file=str(p))]))
-                logger.info(
-                    "[send_image][file-fallback-v2] file send success: %s (%s bytes), trigger=%s, try=%s",
-                    p.name,
-                    size_bytes,
-                    trigger,
-                    file_send_tries,
-                )
-                return True
-            except Exception as e:
-                logger.warning(
-                    "[send_image][file-fallback-v2] file send failed: trigger=%s, try=%s, err=%s",
-                    trigger,
-                    file_send_tries,
-                    e,
-                )
-                return False
-
-        if size_bytes > self.IMAGE_AS_FILE_THRESHOLD_BYTES:
-            if await try_send_as_file("size_threshold"):
+                logger.info("[send_image] large image sent as file: %s bytes", size_bytes)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=True)
+            except Exception as e:
+                logger.warning("[send_image] large image file send failed: %s", e)
 
-        delay = 1.5
         last_exc: Exception | None = None
-        attempts = max(1, int(max_attempts))
-        rich_media_failures = 0
-        compact_bytes: bytes | None = None
-        compact_prepared = False
-        for attempt in range(1, attempts + 1):
-            fs_exc: Exception | None = None
-            bytes_exc: Exception | None = None
-            compact_exc: Exception | None = None
-            fs_failed_by_rich_media = False
 
+        for attempt in range(1, max(1, max_attempts) + 1):
+            is_rich_media_fail = False
+
+            # 尝试1: fromFileSystem
             try:
                 await event.send(event.chain_result([Image.fromFileSystem(str(p))]))
+                logger.debug("[send_image] fromFileSystem OK (attempt=%s)", attempt)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=False)
             except Exception as e:
-                fs_exc = e
                 last_exc = e
-                if self._is_rich_media_transfer_failed(e):
-                    fs_failed_by_rich_media = True
-                logger.debug(
-                    "[send_image] fromFileSystem failed (attempt=%s/%s): %s",
-                    attempt,
-                    attempts,
-                    e,
-                )
+                is_rich_media_fail = self._is_rich_media_transfer_failed(e)
+                logger.debug("[send_image] fromFileSystem failed (attempt=%s): %s", attempt, e)
 
+            # 尝试2: fromBytes（字节流）
             try:
                 data = await asyncio.to_thread(p.read_bytes)
                 await event.send(event.chain_result([Image.fromBytes(data)]))
-                if fs_exc is not None:
-                    logger.info(
-                        "[send_image] fromBytes fallback succeeded (attempt=%s/%s).",
-                        attempt,
-                        attempts,
-                    )
+                logger.info("[send_image] fromBytes OK (attempt=%s)", attempt)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=True)
             except Exception as e:
-                bytes_exc = e
                 last_exc = e
-                # 若 fromFileSystem 和 fromBytes 都抛了相同类型的异常，
-                # 可能是"发出但报错"，不再继续 fallback
-                if fs_exc is not None and not fs_failed_by_rich_media:
-                    if type(e) is type(fs_exc) or str(e) == str(fs_exc):
-                        logger.warning(
-                            "[send_image] 两次发送异常相同，可能已发出但平台报错，停止重试: %s",
-                            e,
-                        )
-                        return SendImageResult(ok=True, cached_path=p, used_fallback=True)
-                logger.debug(
-                    "[send_image] fromBytes failed (attempt=%s/%s): %s",
-                    attempt,
-                    attempts,
-                    e,
-                )
+                if self._is_rich_media_transfer_failed(e):
+                    is_rich_media_fail = True
+                logger.debug("[send_image] fromBytes failed (attempt=%s): %s", attempt, e)
 
-            # If rich-media channel is failing, immediately try original-file sending.
-            if self._is_rich_media_transfer_failed(
-                fs_exc
-            ) or self._is_rich_media_transfer_failed(bytes_exc):
-                if await try_send_as_file("rich_media_transfer_failed"):
-                    return SendImageResult(ok=True, cached_path=p, used_fallback=True)
-
-            # Extra fallback for repeated rich-media failures: compress and retry by bytes.
-            if self._is_rich_media_transfer_failed(
-                fs_exc
-            ) or self._is_rich_media_transfer_failed(bytes_exc):
-                if not compact_prepared:
-                    compact_prepared = True
-                    compact_bytes = await asyncio.to_thread(
-                        self._build_compact_image_bytes, p
-                    )
-                    if compact_bytes:
-                        logger.info(
-                            "[send_image] prepared compact fallback image: %s -> %s bytes",
-                            p,
-                            len(compact_bytes),
-                        )
-                if compact_bytes:
+            # rich_media 失败时的额外兜底（只做一次）
+            if is_rich_media_fail and attempt == 1:
+                # 尝试3: 压缩图
+                compact = await asyncio.to_thread(self._build_compact_image_bytes, p)
+                if compact:
                     try:
-                        await event.send(
-                            event.chain_result([Image.fromBytes(compact_bytes)])
-                        )
-                        logger.info(
-                            "[send_image] compact fromBytes fallback succeeded (attempt=%s/%s).",
-                            attempt,
-                            attempts,
-                        )
-                        return SendImageResult(
-                            ok=True, cached_path=p, used_fallback=True
-                        )
+                        await event.send(event.chain_result([Image.fromBytes(compact)]))
+                        logger.info("[send_image] compact fromBytes OK")
+                        return SendImageResult(ok=True, cached_path=p, used_fallback=True)
                     except Exception as e:
-                        compact_exc = e
                         last_exc = e
-                        logger.debug(
-                            "[send_image] compact fromBytes failed (attempt=%s/%s): %s",
-                            attempt,
-                            attempts,
-                            e,
-                        )
+                        logger.debug("[send_image] compact fromBytes failed: %s", e)
 
-            attempt_has_rich_media = (
-                self._is_rich_media_transfer_failed(fs_exc)
-                or self._is_rich_media_transfer_failed(bytes_exc)
-                or self._is_rich_media_transfer_failed(compact_exc)
-            )
-            if attempt_has_rich_media:
-                rich_media_failures += 1
+                # 尝试4: 文件发送
+                try:
+                    await event.send(event.chain_result([File(name=p.name, file=str(p))]))
+                    logger.info("[send_image] file fallback OK (rich_media)")
+                    return SendImageResult(ok=True, cached_path=p, used_fallback=True)
+                except Exception as e:
+                    last_exc = e
+                    logger.warning("[send_image] file fallback failed: %s", e)
+                break  # rich_media 失败走了所有兜底，不再重试
 
-            if fs_exc is not None and bytes_exc is not None and compact_exc is not None:
-                logger.debug(
-                    "[send_image] attempt=%s/%s failed on all channels.",
-                    attempt,
-                    attempts,
-                )
-            elif fs_exc is not None and bytes_exc is not None:
-                logger.debug(
-                    "[send_image] attempt=%s/%s failed on both channels.",
-                    attempt,
-                    attempts,
-                )
-            elif fs_exc is not None and fs_failed_by_rich_media:
-                logger.debug(
-                    "[send_image] attempt=%s/%s failed by rich media transfer.",
-                    attempt,
-                    attempts,
-                )
-            else:
-                logger.debug(
-                    "[send_image] attempt=%s/%s failed to send image.",
-                    attempt,
-                    attempts,
-                )
+            if attempt < max_attempts:
+                await _async_pause(1.5)
 
-            if rich_media_failures >= 2:
-                logger.info(
-                    "[send_image] detected repeated rich media transfer failures, stop retrying early."
-                )
-                break
-
-            if attempt < attempts:
-                await _async_pause(delay)
-                delay = min(delay * 1.8, 8.0)
 
         reason = (
             "rich_media_transfer_failed"
