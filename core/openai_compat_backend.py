@@ -368,7 +368,7 @@ class OpenAICompatBackend:
                 "base_url": self.base_url,
                 "api_key": key,
                 "timeout": self.timeout,
-                "max_retries": self.max_retries,
+                "max_retries": 0,  # 禁用SDK内部重试，由外层wait_for+循环控制
             }
             if self.proxy_url and self._supports_http_client_param():
                 http_client = self._get_http_client()
@@ -389,7 +389,7 @@ class OpenAICompatBackend:
             "base_url": self.base_url,
             "api_key": key,
             "timeout": self.timeout,
-            "max_retries": self.max_retries,
+            "max_retries": 0,  # 禁用SDK内部重试
         }
         if self.proxy_url and self._supports_http_client_param():
             http_client = self._get_http_client()
@@ -479,44 +479,54 @@ class OpenAICompatBackend:
             kwargs["extra_body"] = eb
 
         t0 = time.time()
-        try:
-            if self._is_generate_temporarily_disabled():
-                raise RuntimeError(
-                    "该后端 images.generate 暂时不可用（此前返回 404，已进入冷却期）"
+        last_exc: Exception | None = None
+
+        # 外层重试循环：每次尝试独立 wait_for(self.timeout)，共 max_retries+1 次
+        for attempt in range(self.max_retries + 1):
+            if attempt > 0:
+                logger.info(
+                    "[OpenAICompat][generate] 第 %s/%s 次重试（上次: %s）",
+                    attempt, self.max_retries, last_exc,
                 )
-            resp: ImagesResponse = await asyncio.wait_for(
-                client.images.generate(**kwargs), timeout=float(self.timeout)
-            )
-        except asyncio.TimeoutError as e:
-            raise RuntimeError(f"images.generate 超时（{self.timeout}s）") from e
-        except Exception as e:
-            if _is_client_closed_error(e):
-                logger.warning(
-                    "[OpenAICompat][generate] client 已关闭，重建 client 后重试一次"
-                )
-                client = await self._recreate_client(key)
-                resp = await asyncio.wait_for(
-                    client.images.generate(**kwargs), timeout=float(self.timeout)
-                )
-            elif final_size == "4096x4096" and self._is_invalid_size_error(e):
-                logger.warning(
-                    f"[OpenAICompat][generate] 4096x4096 可能不受该后端支持，尝试降级到 2048x2048: {e}"
-                )
-                kwargs["size"] = "2048x2048"
-                resp = await asyncio.wait_for(
-                    client.images.generate(**kwargs), timeout=float(self.timeout)
-                )
-            else:
-                if "404" in str(e):
-                    self._disable_generate_temporarily()
-                    logger.error(
-                        "[OpenAICompat][generate] 404 通常表示 base_url 填错或该服务不支持 Images API；"
-                        "请确认 base_url 指向包含 /v1/images 的 OpenAI 兼容入口。"
+            try:
+                if self._is_generate_temporarily_disabled():
+                    raise RuntimeError(
+                        "该后端 images.generate 暂时不可用（此前返回 404，已进入冷却期）"
                     )
-                logger.error(
-                    f"[OpenAICompat][generate] API 调用失败，base_url={self.base_url}，耗时: {time.time() - t0:.2f}s: {e}"
+                resp: ImagesResponse = await asyncio.wait_for(
+                    client.images.generate(**kwargs), timeout=float(self.timeout)
                 )
-                raise
+                break  # 成功，退出重试循环
+            except asyncio.TimeoutError as e:
+                last_exc = RuntimeError(f"images.generate 超时（{self.timeout}s）")
+                logger.warning("[OpenAICompat][generate] 超时（attempt=%s/%s）", attempt + 1, self.max_retries + 1)
+                # 超时后重建 client，避免连接池损坏影响下次重试
+                client = await self._recreate_client(key)
+            except Exception as e:
+                if _is_client_closed_error(e):
+                    logger.warning("[OpenAICompat][generate] client 已关闭，重建后重试")
+                    client = await self._recreate_client(key)
+                    last_exc = e
+                elif final_size == "4096x4096" and self._is_invalid_size_error(e):
+                    logger.warning("[OpenAICompat][generate] 4096x4096 不支持，降级到 2048x2048")
+                    kwargs["size"] = "2048x2048"
+                    final_size = "2048x2048"
+                    last_exc = e
+                else:
+                    if "404" in str(e):
+                        self._disable_generate_temporarily()
+                        logger.error(
+                            "[OpenAICompat][generate] 404 通常表示 base_url 填错或该服务不支持 Images API；"
+                            "请确认 base_url 指向包含 /v1/images 的 OpenAI 兼容入口。"
+                        )
+                    logger.error(
+                        "[OpenAICompat][generate] API 调用失败（attempt=%s/%s），base_url=%s，耗时: %.2fs: %s",
+                        attempt + 1, self.max_retries + 1, self.base_url, time.time() - t0, e,
+                    )
+                    raise  # 非重试类错误直接抛出
+        else:
+            # 循环结束仍未成功
+            raise last_exc or RuntimeError("images.generate 失败")
 
         logger.info(f"[OpenAICompat][generate] API 响应耗时: {time.time() - t0:.2f}s")
         out_path = await self._save_images_response(resp)
@@ -598,42 +608,51 @@ class OpenAICompatBackend:
             kwargs["extra_body"] = eb
 
         t0 = time.time()
-        try:
-            if self._is_edit_temporarily_disabled():
-                raise RuntimeError(
-                    "该后端 images.edit 暂时不可用（此前返回 404，已进入冷却期）"
+        last_exc: Exception | None = None
+
+        for attempt in range(self.max_retries + 1):
+            if attempt > 0:
+                logger.info(
+                    "[OpenAICompat][edit] 第 %s/%s 次重试（上次: %s）",
+                    attempt, self.max_retries, last_exc,
                 )
-            resp: ImagesResponse = await asyncio.wait_for(
-                client.images.edit(**kwargs), timeout=float(self.timeout)
-            )
-        except asyncio.TimeoutError as e:
-            raise RuntimeError(f"images.edit 超时（{self.timeout}s）") from e
-        except Exception as e:
-            if _is_client_closed_error(e):
-                logger.warning(
-                    "[OpenAICompat][edit] client 已关闭，重建 client 后重试一次"
-                )
-                client = await self._recreate_client(key)
-                resp = await asyncio.wait_for(
+            try:
+                if self._is_edit_temporarily_disabled():
+                    raise RuntimeError(
+                        "该后端 images.edit 暂时不可用（此前返回 404，已进入冷却期）"
+                    )
+                resp: ImagesResponse = await asyncio.wait_for(
                     client.images.edit(**kwargs), timeout=float(self.timeout)
                 )
-            elif final_size == "4096x4096" and self._is_invalid_size_error(e):
-                logger.warning(
-                    f"[OpenAICompat][edit] 4096x4096 可能不受该后端支持，尝试降级到 2048x2048: {e}"
-                )
-                kwargs["size"] = "2048x2048"
-                resp = await client.images.edit(**kwargs)
-            else:
-                if "404" in str(e):
-                    self._disable_edit_temporarily()
+                break  # 成功，退出重试循环
+            except asyncio.TimeoutError as e:
+                last_exc = RuntimeError(f"images.edit 超时（{self.timeout}s）")
+                logger.warning("[OpenAICompat][edit] 超时（attempt=%s/%s）", attempt + 1, self.max_retries + 1)
+                client = await self._recreate_client(key)
+            except Exception as e:
+                if _is_client_closed_error(e):
+                    logger.warning("[OpenAICompat][edit] client 已关闭，重建后重试")
+                    client = await self._recreate_client(key)
+                    last_exc = e
+                elif final_size == "4096x4096" and self._is_invalid_size_error(e):
+                    logger.warning("[OpenAICompat][edit] 4096x4096 不支持，降级到 2048x2048")
+                    kwargs["size"] = "2048x2048"
+                    final_size = "2048x2048"
+                    last_exc = e
+                else:
+                    if "404" in str(e):
+                        self._disable_edit_temporarily()
+                        logger.error(
+                            "[OpenAICompat][edit] 404 通常表示 base_url 填错或该服务不支持 images.edit；"
+                            "请确认 base_url 指向包含 /v1/images 的 OpenAI 兼容入口，并且该服务支持改图。"
+                        )
                     logger.error(
-                        "[OpenAICompat][edit] 404 通常表示 base_url 填错或该服务不支持 images.edit；"
-                        "请确认 base_url 指向包含 /v1/images 的 OpenAI 兼容入口，并且该服务支持改图。"
+                        "[OpenAICompat][edit] API 调用失败（attempt=%s/%s），base_url=%s，耗时: %.2fs: %s",
+                        attempt + 1, self.max_retries + 1, self.base_url, time.time() - t0, e,
                     )
-                logger.error(
-                    f"[OpenAICompat][edit] API 调用失败，base_url={self.base_url}，耗时: {time.time() - t0:.2f}s: {e}"
-                )
-                raise
+                    raise
+        else:
+            raise last_exc or RuntimeError("images.edit 失败")
 
         logger.info(f"[OpenAICompat][edit] API 响应耗时: {time.time() - t0:.2f}s")
         out_path = await self._save_images_response(resp)
