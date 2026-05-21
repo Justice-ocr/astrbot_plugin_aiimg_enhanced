@@ -825,7 +825,7 @@ class GiteeAIImagePlugin(Star):
         return "自拍参考图模式已关闭（features.selfie.enabled=false）"
 
     async def _send_image_with_fallback(
-        self, event: AstrMessageEvent, image_path: Path, *, max_attempts: int = 5
+        self, event: AstrMessageEvent, image_path: Path, *, max_attempts: int = 2
     ) -> SendImageResult:
         """Send image with retries and fallback to base64 bytes.
 
@@ -901,25 +901,33 @@ class GiteeAIImagePlugin(Star):
                     e,
                 )
 
-            try:
-                data = await asyncio.to_thread(p.read_bytes)
-                await event.send(event.chain_result([Image.fromBytes(data)]))
-                if fs_exc is not None:
-                    logger.info(
-                        "[send_image] fromBytes fallback succeeded (attempt=%s/%s).",
+            # 只有明确是 rich_media 失败才走 fromBytes fallback
+            # 普通异常可能是"发出但报错"，跳过 fromBytes 避免重复发送
+            if fs_exc is not None and not fs_failed_by_rich_media:
+                logger.debug(
+                    "[send_image] fromFileSystem non-rich-media error, skip fromBytes to avoid dup send: %s",
+                    fs_exc,
+                )
+            else:
+                try:
+                    data = await asyncio.to_thread(p.read_bytes)
+                    await event.send(event.chain_result([Image.fromBytes(data)]))
+                    if fs_exc is not None:
+                        logger.info(
+                            "[send_image] fromBytes fallback succeeded (attempt=%s/%s).",
+                            attempt,
+                            attempts,
+                        )
+                    return SendImageResult(ok=True, cached_path=p, used_fallback=True)
+                except Exception as e:
+                    bytes_exc = e
+                    last_exc = e
+                    logger.debug(
+                        "[send_image] fromBytes failed (attempt=%s/%s): %s",
                         attempt,
                         attempts,
+                        e,
                     )
-                return SendImageResult(ok=True, cached_path=p, used_fallback=True)
-            except Exception as e:
-                bytes_exc = e
-                last_exc = e
-                logger.debug(
-                    "[send_image] fromBytes failed (attempt=%s/%s): %s",
-                    attempt,
-                    attempts,
-                    e,
-                )
 
             # If rich-media channel is failing, immediately try original-file sending.
             if self._is_rich_media_transfer_failed(
