@@ -123,14 +123,33 @@ class GiteeAIImagePlugin(Star):
             pathlib.Path(self.data_dir) / "aiimg_persist_config.json"
         )
 
-        # Pages Web API — 在 __init__ 同步注册（对齐 omnidraw，保证一定生效）
+        self._register_pages_web_api()
+
+    def _register_pages_web_api(self) -> None:
+        register_web_api = getattr(self.context, "register_web_api", None)
+        if not callable(register_web_api):
+            logger.warning(
+                "[GiteeAIImagePlugin] context.register_web_api unavailable; "
+                "settings page APIs are not registered"
+            )
+            return
+
         _pid = "astrbot_plugin_aiimg_enhanced"
-        self.context.register_web_api(f"/{_pid}/get_config",      self._pages_get_config,       ["GET"],  "获取 AI绘图站 插件配置")
-        self.context.register_web_api(f"/{_pid}/save_config",     self._pages_save_config,      ["POST"], "保存 AI绘图站 插件配置")
-        self.context.register_web_api(f"/{_pid}/get_persona",     self._pages_get_persona,      ["GET"],  "获取人设信息")
-        self.context.register_web_api(f"/{_pid}/switch_persona",  self._pages_switch_persona,   ["POST"], "切换人设")
-        self.context.register_web_api(f"/{_pid}/get_image",       self._pages_get_image,        ["GET"],  "获取本地参考图预览")
-        self.context.register_web_api(f"/{_pid}/upload_ref_image",self._pages_upload_ref_image, ["POST"], "上传人设参考图")
+        routes = [
+            ("get_config", self._pages_get_config, ["GET"], "获取 AI绘图站 插件配置"),
+            ("save_config", self._pages_save_config, ["POST"], "保存 AI绘图站 插件配置"),
+            ("get_persona", self._pages_get_persona, ["GET"], "获取人设信息"),
+            ("switch_persona", self._pages_switch_persona, ["POST"], "切换人设"),
+            ("get_image", self._pages_get_image, ["GET"], "获取本地参考图预览"),
+            (
+                "upload_ref_image",
+                self._pages_upload_ref_image,
+                ["POST"],
+                "上传人设参考图",
+            ),
+        ]
+        for name, handler, methods, desc in routes:
+            register_web_api(f"/{_pid}/{name}", handler, methods, desc)
 
     async def _call_native_poke(self, event: AstrMessageEvent, target_id: str) -> bool:
         bot = getattr(event, "bot", None)
