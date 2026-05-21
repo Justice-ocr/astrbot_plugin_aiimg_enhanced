@@ -2021,23 +2021,36 @@ class GiteeAIImagePlugin(Star):
         backend: str = "auto",
         output: str = "",
     ):
-        """统一图片生成/改图/自拍（参考照）工具。
+        """根据用户意图生成或编辑图片。
 
-        使用建议（给 LLM 的决策规则）：
-        - 用户发送/引用了图片，并要求"改图/换背景/换风格/修图/换衣服"等：用 mode=edit（或 mode=auto）
-        - 用户要求"bot 自拍/来一张你自己的自拍"，且已设置自拍参考照：用 mode=selfie_ref（或 mode=auto）
-        - 纯文生图（用户没有给图片）：用 mode=text（或 mode=auto）
+        【mode 选择规则】（必须严格遵守）：
+        1. mode=edit：用户想修改/编辑某张已有图片时使用。
+           触发条件（满足任意一条即可）：
+           - 当前消息或引用中有图片，且用户要求修改它（换颜色、换背景、换风格、换衣服、换细节等）
+           - 用户说"把XX换成YY"、"把这张图改成..."、"帮我修一下..."等明显针对某张图的请求
+           - 即使当前消息没有图片，只要用户的语义是在修改上一张图，也用 mode=edit
+           工具会自动从消息引用或上下文中获取图片。
 
-        当前 LLM tool 行为：
-        - 成功后优先直接把图片发送给用户
-        - tool result 返回文本摘要，写明本次任务的 mode、effective_prompt 和 follow-up 提示
-        - 不再把 ImageContent 回传给 LLM 上下文，避免额外多模态识图耗时
+        2. mode=selfie_ref：用户要求 bot 发自拍、来一张自己的照片时使用。
+           触发条件：用户说"自拍一张"、"来张你的照片"等，且已设置自拍参考照。
+
+        3. mode=text：纯文字生图，用户没有提供参考图且不是要求修改已有图片时使用。
+
+        4. mode=auto：不确定时使用，工具会自动判断。
+
+        【常见场景示例】：
+        - "把白丝换成黑丝" → mode=edit，prompt="把白色丝袜换成黑色"
+        - "换个背景" → mode=edit
+        - "把她的衣服改成红色" → mode=edit
+        - "画一只猫" → mode=text
+        - "来张自拍" → mode=selfie_ref
+        - "帮我生成一张..." → mode=text
 
         Args:
-            prompt(string): 提示词
-            mode(string): auto=自动判断, text=文生图, edit=改图, selfie_ref=参考照自拍
-            backend(string): auto=自动选择；也可填 provider_id（你在 WebUI providers 里配置的 id）
-            output(string): 输出尺寸/分辨率。例: 2048x2048 或 4K（不同后端支持能力不同，留空用默认）
+            prompt(string): 提示词，改图时描述希望如何修改，文生图时描述生成内容
+            mode(string): edit=改图, text=文生图, selfie_ref=参考照自拍, auto=自动判断
+            backend(string): auto=自动选择；也可填服务商ID（如 ccode、jojocode）
+            output(string): 输出尺寸，例如 2048x2048 或 4K，留空用默认
         """
         prompt = (prompt or "").strip()
         m = (mode or "auto").strip().lower()
