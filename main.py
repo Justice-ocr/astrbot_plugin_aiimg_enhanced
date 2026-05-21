@@ -2992,7 +2992,7 @@ class GiteeAIImagePlugin(Star):
             image_bytes: bytes | None = None
             for i, seg in enumerate(image_segs):
                 try:
-                    b64 = await seg.convert_to_base64()
+                    b64 = await asyncio.wait_for(seg.convert_to_base64(), timeout=30.0)
                     image_bytes = decode_base64_image_payload(b64)
                     break
                 except Exception as e:
@@ -3114,7 +3114,7 @@ class GiteeAIImagePlugin(Star):
         for i, seg in enumerate(image_segs):
             try:
                 logger.debug(f"[改图] 转换图片 {i + 1}/{len(image_segs)}...")
-                b64 = await seg.convert_to_base64()
+                b64 = await asyncio.wait_for(seg.convert_to_base64(), timeout=30.0)
                 bytes_images.append(decode_base64_image_payload(b64))
                 logger.debug(
                     f"[改图] 图片 {i + 1} 转换成功, 大小={len(bytes_images[-1])} bytes"
@@ -3218,15 +3218,7 @@ class GiteeAIImagePlugin(Star):
             await mark_failed(event)
             return
 
-        bytes_images: list[bytes] = []
-        for seg in image_segs:
-            try:
-                b64 = await asyncio.wait_for(seg.convert_to_base64(), timeout=30.0)
-                bytes_images.append(decode_base64_image_payload(b64))
-            except asyncio.TimeoutError:
-                logger.warning("[改图] 图片获取超时，可能URL已过期，跳过")
-            except Exception as e:
-                logger.warning(f"[改图] 图片转换失败，跳过: {e}")
+        bytes_images = await self._image_segs_to_bytes(image_segs)
 
         if not bytes_images:
             await mark_failed(event)
