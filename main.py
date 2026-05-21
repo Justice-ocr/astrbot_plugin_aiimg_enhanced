@@ -1278,7 +1278,14 @@ class GiteeAIImagePlugin(Star):
             return
 
         try:
-            await mark_processing(event)
+            # 发送等待提示文案，同时贴处理中表情
+            await asyncio.gather(
+                event.send(event.plain_result(
+                    self._pending_msg_draw(str(spec.effective_prompt or ""))
+                )),
+                mark_processing(event),
+                return_exceptions=True,
+            )
             executed = await self._execute_image_task_spec(event, spec)
             self._remember_last_image(event, executed.image_path)
             sent = await self._send_image_with_fallback(event, executed.image_path)
@@ -1289,6 +1296,10 @@ class GiteeAIImagePlugin(Star):
             await mark_success(event)
         except Exception as exc:
             logger.error("[文生图预设] 失败: %s", exc, exc_info=True)
+            try:
+                await event.send(event.plain_result(self._error_msg_draw(exc)))
+            except Exception:
+                pass
             await mark_failed(event)
         finally:
             await self._end_user_job(user_id, kind="image")
@@ -1403,7 +1414,14 @@ class GiteeAIImagePlugin(Star):
             return
 
         try:
-            await mark_processing(event)
+            # 发送等待提示文案
+            await asyncio.gather(
+                event.send(event.plain_result(
+                    self._pending_msg_draw(str(parsed.spec.effective_prompt or ""))
+                )),
+                mark_processing(event),
+                return_exceptions=True,
+            )
             specs = [parsed.spec for _ in range(parsed.batch_count)]
             results = await self._run_batch_specs(event, specs)
             title = f"{self._batch_mode_label(parsed.spec)} x{parsed.batch_count}"
