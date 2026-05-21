@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import io
 import re
@@ -202,8 +203,8 @@ class OpenAICompatBackend:
         self.imgr = imgr
         self.base_url = normalize_openai_compat_base_url(base_url)
         self.api_keys = [str(k).strip() for k in (api_keys or []) if str(k).strip()]
-        self.timeout = int(timeout or 120)
-        self.max_retries = int(max_retries or 2)
+        self.timeout = int(timeout) if timeout is not None else 120
+        self.max_retries = int(max_retries) if max_retries is not None else 2
         self.default_model = str(default_model or "").strip()
         self.default_size = normalize_size_text(
             str(default_size or "4096x4096").strip()
@@ -483,20 +484,28 @@ class OpenAICompatBackend:
                 raise RuntimeError(
                     "该后端 images.generate 暂时不可用（此前返回 404，已进入冷却期）"
                 )
-            resp: ImagesResponse = await client.images.generate(**kwargs)
+            resp: ImagesResponse = await asyncio.wait_for(
+                client.images.generate(**kwargs), timeout=float(self.timeout)
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(f"images.generate 超时（{self.timeout}s）") from e
         except Exception as e:
             if _is_client_closed_error(e):
                 logger.warning(
                     "[OpenAICompat][generate] client 已关闭，重建 client 后重试一次"
                 )
                 client = await self._recreate_client(key)
-                resp = await client.images.generate(**kwargs)
+                resp = await asyncio.wait_for(
+                    client.images.generate(**kwargs), timeout=float(self.timeout)
+                )
             elif final_size == "4096x4096" and self._is_invalid_size_error(e):
                 logger.warning(
                     f"[OpenAICompat][generate] 4096x4096 可能不受该后端支持，尝试降级到 2048x2048: {e}"
                 )
                 kwargs["size"] = "2048x2048"
-                resp = await client.images.generate(**kwargs)
+                resp = await asyncio.wait_for(
+                    client.images.generate(**kwargs), timeout=float(self.timeout)
+                )
             else:
                 if "404" in str(e):
                     self._disable_generate_temporarily()
@@ -594,14 +603,20 @@ class OpenAICompatBackend:
                 raise RuntimeError(
                     "该后端 images.edit 暂时不可用（此前返回 404，已进入冷却期）"
                 )
-            resp: ImagesResponse = await client.images.edit(**kwargs)
+            resp: ImagesResponse = await asyncio.wait_for(
+                client.images.edit(**kwargs), timeout=float(self.timeout)
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(f"images.edit 超时（{self.timeout}s）") from e
         except Exception as e:
             if _is_client_closed_error(e):
                 logger.warning(
                     "[OpenAICompat][edit] client 已关闭，重建 client 后重试一次"
                 )
                 client = await self._recreate_client(key)
-                resp = await client.images.edit(**kwargs)
+                resp = await asyncio.wait_for(
+                    client.images.edit(**kwargs), timeout=float(self.timeout)
+                )
             elif final_size == "4096x4096" and self._is_invalid_size_error(e):
                 logger.warning(
                     f"[OpenAICompat][edit] 4096x4096 可能不受该后端支持，尝试降级到 2048x2048: {e}"
