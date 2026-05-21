@@ -2012,41 +2012,6 @@ class GiteeAIImagePlugin(Star):
 
     # ==================== LLM 工具 ====================
 
-    @filter.llm_tool(name="gitee_draw_image")
-    async def gitee_draw_image(self, event: AstrMessageEvent, prompt: str):
-        """（兼容旧版本）根据提示词生成图片。
-
-        Args:
-            prompt(string): 图片提示词，需要包含主体、场景、风格等描述
-        """
-        return await self.aiimg_generate(
-            event, prompt=prompt, mode="text", backend="auto"
-        )
-
-    @filter.llm_tool(name="gitee_edit_image")
-    async def gitee_edit_image(
-        self,
-        event: AstrMessageEvent,
-        prompt: str,
-        use_message_images: bool = True,
-        backend: str = "auto",
-    ):
-        """（兼容旧版本）编辑用户发送的图片或引用的图片。
-
-        Args:
-            prompt(string): 图片编辑提示词
-            use_message_images(boolean): 是否自动获取用户消息中的图片（目前仅支持 true）
-            backend(string): auto=自动选择；也可填 provider_id（你在 WebUI providers 里配置的 id）
-        """
-        if not use_message_images:
-            await self._signal_llm_tool_failure(event)
-            return self._llm_tool_text_result(
-                "This image editing request is invalid because message images were disabled. Use the images already attached to the current message."
-            )
-        return await self.aiimg_generate(
-            event, prompt=prompt, mode="edit", backend=backend
-        )
-
     @filter.llm_tool(name="aiimg_generate")
     async def aiimg_generate(
         self,
