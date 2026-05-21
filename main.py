@@ -2223,6 +2223,12 @@ class GiteeAIImagePlugin(Star):
                         "Image editing could not continue because no usable input image was found in the current message. This request has ended."
                     )
 
+                logger.info(
+                    "[aiimg_generate][edit] 准备调用edit: images=%d张, sizes=%s, backend=%s",
+                    len(bytes_images),
+                    [f"{len(b)//1024}KB" for b in bytes_images],
+                    target_backend or "auto",
+                )
                 image_path = await self.edit.edit(
                     prompt=prompt,
                     images=bytes_images,
@@ -3196,8 +3202,10 @@ class GiteeAIImagePlugin(Star):
         bytes_images: list[bytes] = []
         for seg in image_segs:
             try:
-                b64 = await seg.convert_to_base64()
+                b64 = await asyncio.wait_for(seg.convert_to_base64(), timeout=30.0)
                 bytes_images.append(decode_base64_image_payload(b64))
+            except asyncio.TimeoutError:
+                logger.warning("[改图] 图片获取超时，可能URL已过期，跳过")
             except Exception as e:
                 logger.warning(f"[改图] 图片转换失败，跳过: {e}")
 
@@ -3734,13 +3742,15 @@ class GiteeAIImagePlugin(Star):
                 continue
         return out
 
-    async def _image_segs_to_bytes(self, image_segs: list) -> list[bytes]:
-        """将 Image 组件列表转换为 bytes。"""
+    async def _image_segs_to_bytes(self, image_segs: list, timeout: float = 30.0) -> list[bytes]:
+        """将 Image 组件列表转换为 bytes。每张图片最多等待 timeout 秒（防止 QQ 图片 URL 过期导致挂起）。"""
         out: list[bytes] = []
         for seg in image_segs:
             try:
-                b64 = await seg.convert_to_base64()
+                b64 = await asyncio.wait_for(seg.convert_to_base64(), timeout=timeout)
                 out.append(decode_base64_image_payload(b64))
+            except asyncio.TimeoutError:
+                logger.warning(f"[图片] 获取超时（{timeout}s），可能是图片URL已过期，跳过")
             except Exception as e:
                 logger.warning(f"[图片] 转换失败，跳过: {e}")
         return out
