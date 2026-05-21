@@ -1277,6 +1277,9 @@ class GiteeAIImagePlugin(Star):
             await mark_failed(event)
             return
 
+        # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
+        self.debouncer.hit(self._debounce_key(event, "aiimg", user_id))
+
         try:
             # 发送等待提示文案，同时贴处理中表情
             await asyncio.gather(
@@ -1347,6 +1350,9 @@ class GiteeAIImagePlugin(Star):
         if not await self._begin_user_job(user_id, kind="image"):
             await mark_failed(event)
             return
+
+        # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
+        self.debouncer.hit(self._debounce_key(event, "aiimg", user_id))
 
         try:
             # 发送等待提示文案，同时贴"处理中"表情（两者并行）
@@ -3218,6 +3224,9 @@ class GiteeAIImagePlugin(Star):
         if not await self._begin_user_job(user_id, kind="image"):
             await mark_failed(event)
             return
+
+        # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
+        self.debouncer.hit(self._debounce_key(event, "aiimg", user_id))
 
         try:
             # 发送等待提示，同时贴处理中表情
