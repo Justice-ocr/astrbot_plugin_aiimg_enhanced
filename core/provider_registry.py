@@ -179,7 +179,10 @@ class ProviderRegistry:
             return "gitee_images"
         base_url = str(item.get("base_url") or item.get("api_url") or "")
         if "x.ai" in base_url:
-            return "grok_chat" if ("use_proxy" in item and "supports_edit" not in item) else "grok_images"
+            # 有 use_proxy 且无 supports_edit 且无 api_keys 才认为是 grok_chat
+            # 否则默认 grok_images（专用图片接口，更可靠）
+            is_chat = ("use_proxy" in item and "supports_edit" not in item and not item.get("api_keys"))
+            return "grok_chat" if is_chat else "grok_images"
         if "gitee.com" in base_url:
             return "gitee_images"
         if "generativelanguage.googleapis.com" in base_url:
