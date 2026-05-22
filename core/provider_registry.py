@@ -164,6 +164,8 @@ class ProviderRegistry:
             return "vertex_ai_anonymous"
         if pid in {"grok_video"}:
             return "grok_video"
+        if pid in {"grok2api_video"}:
+            return "grok2api_video"
         if pid in {"flow2api_video"}:
             return "flow2api_video"
         if pid in {"custom_video"}:
@@ -182,6 +184,12 @@ class ProviderRegistry:
             return "gitee_images"
         base_url = str(item.get("base_url") or item.get("api_url") or "")
         if "x.ai" in base_url:
+            # grok2api_video: x.ai + api_keys + 无 use_proxy + 无 generate_path(custom_video)
+            if (item.get("api_keys") and "use_proxy" not in item
+                    and "generate_path" not in item
+                    and "num_inference_steps" not in item
+                    and "server_url" not in item):
+                return "grok2api_video"
             # 有 use_proxy 且无 supports_edit 且无 api_keys 才认为是 grok_chat
             # 否则默认 grok_images（专用图片接口，更可靠）
             is_chat = ("use_proxy" in item and "supports_edit" not in item and not item.get("api_keys"))
@@ -384,6 +392,12 @@ class ProviderRegistry:
                     errors.append(f"provider '{provider_id}' missing server_url")
                 if not str(item.get("api_key") or "").strip():
                     errors.append(f"provider '{provider_id}' missing api_key")
+            if template_key == "grok2api_video":
+                if not str(item.get("base_url") or "").strip():
+                    errors.append(f"provider '{provider_id}' missing base_url")
+                keys = item.get("api_keys") or []
+                if not keys or not any(str(k).strip() for k in keys):
+                    errors.append(f"provider '{provider_id}' missing api_keys")
             if template_key == "flow2api_video":
                 if not str(item.get("api_url") or "").strip():
                     errors.append(f"provider '{provider_id}' missing api_url")
