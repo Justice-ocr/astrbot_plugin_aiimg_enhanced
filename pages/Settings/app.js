@@ -11,7 +11,7 @@ function inferProviderType(p) {
   if ('num_inference_steps' in p && 'negative_prompt' in p) return 'gitee_images';
   const bu = String(p.base_url || p.api_url || '');
   if (bu.includes('generativelanguage.googleapis.com')) return 'gemini_native';
-  if (bu.includes('x.ai')) return ('use_proxy' in p || !('supports_edit' in p)) ? 'grok_chat' : 'grok_images';
+  if (bu.includes('x.ai')) return ('use_proxy' in p && !('supports_edit' in p) && !(p.api_keys && p.api_keys.length)) ? 'grok_chat' : 'grok_images';
   if (bu.includes('gitee.com')) return 'gitee_images';
   const m = String(p.model || '');
   if (m.startsWith('gemini')) return 'gemini_openai_images';
@@ -463,7 +463,11 @@ function buildProviderForm(p) {
   rows.push('<div class="pform-grid">');
   if(hasField('timeout'))        rows.push(fld('timeout','超时(秒)','number',p.timeout??120));
   if(hasField('timeout_seconds'))rows.push(fld('timeout_seconds','超时(秒)','number',p.timeout_seconds??180));
-  if(hasField('max_retries'))    rows.push(fld('max_retries','最大重试次数','number',p.max_retries??2));
+  if(hasField('max_retries')) {
+    const isGrok = type==='grok_images';
+    const hint = isGrok ? '总请求次数（grok_images专用语义，2=最多2次）' : '额外重试次数（0=不重试共1次，2=最多3次）';
+    rows.push(fld('max_retries','最大重试次数','number',p.max_retries??2,hint));
+  }
   if(hasField('default_size'))   rows.push(fld('default_size','默认输出尺寸','text',p.default_size||'4096x4096'));
   if(hasField('default_resolution'))rows.push(fldSel('default_resolution','默认分辨率',['1K','2K','4K'],p.default_resolution||'4K'));
   if(hasField('generate_request_mode'))rows.push(fldSel('generate_request_mode','文生图请求模式',modes,p.generate_request_mode||'auto'));
@@ -484,6 +488,17 @@ function buildProviderForm(p) {
   if(hasField('proxy_url'))      rows.push(fldTA('proxy_url','代理地址（可选）',p.proxy_url||'').replace('rows="3"','rows="1"'));
   if(hasField('negative_prompt'))rows.push(fldTA('negative_prompt','负面提示词',p.negative_prompt||''));
   if(hasField('system_prompt'))  rows.push(fldTA('system_prompt','系统提示词（可选）',p.system_prompt||''));
+  // custom_video 专有字段
+  if(hasField('generate_path'))   rows.push(fld('generate_path','生成接口路径','text',p.generate_path||'/v1/chat/completions'));
+  if(hasField('poll_path'))       rows.push(fld('poll_path','轮询路径（为空不轮询）','text',p.poll_path||'','如 /v1/tasks/{task_id}'));
+  if(hasField('response_url_path')) rows.push(fld('response_url_path','视频URL路径','text',p.response_url_path||'','如 data.0.url'));
+  if(hasField('task_id_path'))    rows.push(fld('task_id_path','task_id路径','text',p.task_id_path||'','如 id'));
+  if(hasField('status_path'))     rows.push(fld('status_path','状态字段路径','text',p.status_path||'','如 status'));
+  if(hasField('done_statuses'))   rows.push(fld('done_statuses','完成状态值（逗号分隔）','text',p.done_statuses||'succeeded,completed,done,finished,success'));
+  if(hasField('fail_statuses'))   rows.push(fld('fail_statuses','失败状态值（逗号分隔）','text',p.fail_statuses||'failed,error,cancelled'));
+  if(hasField('image_field'))     rows.push(fld('image_field','图片字段名','text',p.image_field||'image'));
+  if(hasField('request_mode'))    rows.push(fldSel('request_mode','请求模式',['auto','json','multipart'],p.request_mode||'auto'));
+  if(hasField('extra_body'))      rows.push(fldTA('extra_body','额外请求体（JSON，可选）',p.extra_body||''));
   return rows.join('');
 }
 function readProviderForm() {
@@ -529,6 +544,17 @@ function readProviderForm() {
   if (has('system_prompt'))     result.system_prompt     = g('system_prompt');
   if (has('empty_response_retry')) result.empty_response_retry = gNum('empty_response_retry', 2);
   if (has('retry_delay'))       result.retry_delay       = gNum('retry_delay', 2);
+  // custom_video 专有字段
+  if (has('generate_path'))     result.generate_path     = g('generate_path');
+  if (has('poll_path'))         result.poll_path         = g('poll_path');
+  if (has('response_url_path')) result.response_url_path = g('response_url_path');
+  if (has('task_id_path'))      result.task_id_path      = g('task_id_path');
+  if (has('status_path'))       result.status_path       = g('status_path');
+  if (has('done_statuses'))     result.done_statuses     = g('done_statuses');
+  if (has('fail_statuses'))     result.fail_statuses     = g('fail_statuses');
+  if (has('image_field'))       result.image_field       = g('image_field');
+  if (has('request_mode'))      result.request_mode      = g('request_mode');
+  if (has('extra_body'))        result.extra_body        = g('extra_body');
 
   return result;
 }
@@ -617,6 +643,10 @@ function delPersona(idx){
   renderPersonas();updateStats();markDirty();
 }
 let _personaIdx=-1;
+// 统一管理弹窗内的参考图列表（含本地路径、URL）
+// base64 在上传时立即通过 upload_ref_image 转为服务器路径，不在内存存储
+let _modalRefs = [];
+
 function openPersonaModal(idx){
   _personaIdx=idx;
   const isNew=idx<0;
@@ -624,11 +654,10 @@ function openPersonaModal(idx){
   const p=isNew?{id:'',persona_name:'',persona_base_prompt:'',persona_ref_image:[]}:S.persona_config.profiles[idx];
   $('modal-id').value=p.id||''; $('modal-name').value=p.persona_name||'';
   $('modal-prompt').value=p.persona_base_prompt||'';
-  // 文本框只显示路径和URL，base64不直接展示（太长）
-  const refsForTextarea = (p.persona_ref_image||[]).filter(r=>!String(r).startsWith('data:image'));
-  $('modal-refs').value = refsForTextarea.join('\n');
-  // 预览区展示所有（包括base64）
-  renderRefPreviews(p.persona_ref_image||[]);
+  // 初始化 _modalRefs（过滤掉残留 base64，只保留路径/URL）
+  _modalRefs = (p.persona_ref_image||[]).filter(r=>!String(r).startsWith('data:image'));
+  $('modal-refs').value = _modalRefs.join('\n');
+  renderRefPreviews(_modalRefs);
   $('persona-modal').style.display='flex'; $('modal-name').focus();
 }
 
@@ -657,16 +686,16 @@ function renderRefPreviews(refs) {
   }).join('');
   el.querySelectorAll('.ref-thumb-del').forEach(btn => {
     btn.addEventListener('click', () => {
-      const cur = $('modal-refs').value.split('\n').map(s=>s.trim()).filter(Boolean);
-      cur.splice(parseInt(btn.dataset.idx), 1);
-      $('modal-refs').value = cur.join('\n');
-      renderRefPreviews(cur);
+      _modalRefs.splice(parseInt(btn.dataset.idx), 1);
+      $('modal-refs').value = _modalRefs.join('\n');
+      renderRefPreviews(_modalRefs);
+      markDirty();
     });
   });
 }
 
-function uploadRefImages(files) {
-  // 支持多文件批量上传
+async function uploadRefImages(files) {
+  // 通过后端 upload_ref_image 接口上传，避免大 base64 撑爆 save_config payload
   const btn = $('modal-upload-btn');
   const status = $('modal-upload-status');
   if (!files || !files.length) return;
@@ -674,59 +703,51 @@ function uploadRefImages(files) {
   const fileArr = Array.from(files);
   const oversized = fileArr.filter(f => f.size > 20 * 1024 * 1024);
   if (oversized.length) {
-    status.textContent = `✗ ${oversized.map(f=>f.name).join(', ')} 超过 20MB`; 
+    status.textContent = `✗ ${oversized.map(f=>f.name).join(', ')} 超过 20MB`;
     status.className = 'upload-status err';
     return;
   }
 
   btn.disabled = true;
-  status.textContent = `读取中 (0/${fileArr.length})...`; 
+  status.textContent = `上传中 (0/${fileArr.length})...`;
   status.className = 'upload-status uploading';
 
   let done = 0;
-  const results = new Array(fileArr.length);
+  let failed = 0;
 
-  fileArr.forEach((file, idx) => {
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      results[idx] = evt.target.result; // base64 data URL
-      done++;
-      status.textContent = `读取中 (${done}/${fileArr.length})...`;
-      if (done === fileArr.length) {
-        // 全部读完，追加到文本框
-        const cur = $('modal-refs').value.trim();
-        const appended = results.filter(Boolean).join('\n');
-        $('modal-refs').value = cur ? cur + '\n' + appended : appended;
-        const refs = $('modal-refs').value.split('\n').map(s=>s.trim()).filter(Boolean);
-        renderRefPreviews(refs);
-        status.textContent = `✓ 已添加 ${fileArr.length} 张图片`; 
-        status.className = 'upload-status ok';
-        setTimeout(() => { status.textContent=''; status.className='upload-status'; btn.disabled=false; }, 2000);
+  for (const file of fileArr) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const resp = await fetch('/astrbot_plugin_aiimg_enhanced/upload_ref_image', { method:'POST', body: fd });
+      const json = await resp.json();
+      if (json.success && json.path) {
+        _modalRefs.push(json.path);
+      } else {
+        failed++;
+        console.warn('[upload] failed:', json.error);
       }
-    };
-    reader.onerror = () => {
-      done++;
-      status.textContent = `✗ ${file.name} 读取失败`; 
-      status.className = 'upload-status err';
-      if (done === fileArr.length) btn.disabled = false;
-    };
-    reader.readAsDataURL(file);
-  });
+    } catch(e) {
+      failed++;
+      console.warn('[upload] error:', e);
+    }
+    done++;
+    status.textContent = `上传中 (${done}/${fileArr.length})...`;
+  }
+
+  $('modal-refs').value = _modalRefs.join('\n');
+  renderRefPreviews(_modalRefs);
+  const ok = done - failed;
+  status.textContent = failed ? `✓ ${ok} 张成功，✗ ${failed} 张失败` : `✓ 已上传 ${ok} 张图片`;
+  status.className = failed ? 'upload-status err' : 'upload-status ok';
+  setTimeout(() => { status.textContent=''; status.className='upload-status'; btn.disabled=false; }, 2500);
 }
 function savePersonaModal(){
   const id=$('modal-id').value.trim().replace(/[^a-zA-Z0-9_\-]/g,'_')||`persona_${Date.now()}`;
   const persona_name=$('modal-name').value.trim()||id;
   const persona_base_prompt=$('modal-prompt').value.trim();
-  // 文本框里是路径/URL；预览区里可能有base64（内存中），合并两者
-  const textRefs = $('modal-refs').value.trim().split('\n').map(s=>s.trim()).filter(Boolean);
-  // 从当前预览列表中提取base64（文本框没有显示的部分）
-  const previewEls = ($('modal-ref-previews')||{querySelectorAll:()=>[]}).querySelectorAll('.ref-thumb');
-  const base64Refs = [];
-  previewEls.forEach(el => {
-    const img = el.querySelector('img');
-    if (img && img.src && img.src.startsWith('data:image')) base64Refs.push(img.src);
-  });
-  const persona_ref_image = [...base64Refs, ...textRefs.filter(r=>!r.startsWith('data:image'))];
+  // 直接从 _modalRefs 取，已由 upload 接口转换为服务器路径，不含 base64
+  const persona_ref_image = _modalRefs.filter(r => r && !r.startsWith('data:image'));
   const obj={id,persona_name,persona_base_prompt,persona_ref_image};
   if(_personaIdx<0){
     S.persona_config.profiles.push(obj);
@@ -801,8 +822,8 @@ async function init(){
   const modalRefs = $('modal-refs');
   if (modalRefs) {
     modalRefs.addEventListener('input', () => {
-      const refs = modalRefs.value.split('\n').map(s=>s.trim()).filter(Boolean);
-      renderRefPreviews(refs);
+      _modalRefs = modalRefs.value.split('\n').map(s=>s.trim()).filter(Boolean);
+      renderRefPreviews(_modalRefs);
     });
   }
   const addPreset=(arr,key,cid)=>{arr.push({name:'',prompt:''});renderPresets(cid,arr,key);updateStats();markDirty();};
