@@ -407,7 +407,7 @@ class GrokImagesBackend:
                     if current_size:
                         form.add_field("size", current_size)
                     form.add_field(
-                        "image", packed, filename=f"image.{ext}", content_type=mime
+                        "image[]", packed, filename=f"image.{ext}", content_type=mime
                     )
 
                     for source in (self.extra_body, extra_body):
@@ -421,6 +421,7 @@ class GrokImagesBackend:
                                 "size",
                                 "response_format",
                                 "image",
+                                "image[]",
                             }:
                                 continue
                             form.add_field(str(key), self._coerce_form_value(value))
