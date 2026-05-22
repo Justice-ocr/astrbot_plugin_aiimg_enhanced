@@ -16,6 +16,19 @@ function inferProviderType(p) {
   const m = String(p.model || '');
   if (m.startsWith('gemini')) return 'gemini_openai_images';
   if ('supports_edit' in p) return 'openai_images';
+  // flow2api_video/grok2api_video 也有 api_url/base_url，必须先排除视频类型
+  // flow2api_video: 有 api_url 且无 base_url 且无 server_url 且无 generate_path
+  // grok2api_video: 有 base_url + api_keys 且无 server_url 且 x.ai 域名，但无 supports_edit/use_proxy
+  if ('server_url' in p && 'api_key' in p) return 'grok_video';
+  if ('server_url' in p) return 'grok_video';
+  // grok2api_video: base_url含x.ai + api_keys + 无 generate_path(custom_video) + 无 use_proxy(grok_chat)
+  if (String(p.base_url||'').includes('x.ai') && 'api_keys' in p && !('use_proxy' in p) && !('generate_path' in p)) return 'grok2api_video';
+  // flow2api_video: api_url + api_keys/api_key + 无 base_url + 无 generate_path
+  if ('api_url' in p && !('base_url' in p) && !('generate_path' in p) && !('num_inference_steps' in p) && !('cookie_list' in p)) {
+    // 视频：有 model 但无 generate_request_mode
+    if ('model' in p && !('generate_request_mode' in p) && !('edit_request_mode' in p)) return 'flow2api_video';
+    return 'flow2api';
+  }
   if ('api_url' in p) return 'flow2api';
   return 'openai_images';
 }
@@ -80,7 +93,8 @@ const P_TEMPLATES = {
   gitee_images:           { label:'Gitee Images', base_url:'https://ai.gitee.com/v1', api_keys:[], model:'z-image-turbo', timeout:300, max_retries:2, default_size:'1024x1024', num_inference_steps:9, negative_prompt:'', generate_request_mode:'auto', edit_request_mode:'auto' },
   gitee_async:            { label:'Gitee 异步改图', base_url:'https://ai.gitee.com/v1', api_keys:[], model:'Qwen-Image-Edit-2511', num_inference_steps:4, guidance_scale:1.0, poll_interval:5, poll_timeout:300, generate_request_mode:'auto', edit_request_mode:'auto' },
   jimeng:                 { label:'即梦', api_url:'', apikey:'', cookie_list:[], default_style:'真实', default_ratio:'1:1', default_model:'Seedream 4.0', timeout:120 },
-  grok_video:             { label:'Grok 视频', server_url:'https://api.x.ai', api_key:'', model:'grok-imagine-0.9', timeout_seconds:180, max_retries:2, empty_response_retry:2, retry_delay:2 },
+  grok_video:             { label:'Grok 视频', server_url:'https://api.x.ai', api_key:'', model:'grok-imagine-0.9', timeout_seconds:180, max_retries:2, empty_response_retry:2, retry_delay:2, presets:[] },
+  grok2api_video:         { label:'Grok2API 视频', base_url:'https://api.x.ai', api_keys:[], model:'grok-imagine-1.0-video', timeout:300, max_retries:2 },
   flow2api_video:         { label:'Flow2API 视频', api_url:'', api_keys:[], model:'', timeout:300, use_proxy:false, proxy_url:'' },
   custom_video:           { label:'自定义视频', base_url:'', generate_path:'/v1/chat/completions', poll_path:'', api_keys:[], model:'', timeout:300, max_retries:0, poll_interval:5, poll_timeout:300, response_url_path:'', task_id_path:'', status_path:'', done_statuses:'succeeded,completed,done,finished,success', fail_statuses:'failed,error,cancelled', extra_body:'', request_mode:'auto', image_field:'image', proxy_url:'' },
   modelscope_openai_images:{ label:'魔搭 Images', base_url:'', api_keys:[], model:'', timeout:120, proxy_url:'', default_size:'1024x1024', supports_edit:false, generate_request_mode:'auto', edit_request_mode:'auto' },
@@ -91,7 +105,7 @@ const P_NAMES = {
   flow2api:'Flow2API', vertex_ai_anonymous:'Vertex AI 匿名', grok_images:'Grok Images',
   grok_chat:'Grok Chat图', grok2api_images:'Grok2API Images', gemini_openai_images:'Gemini Images',
   gemini_openai_chat:'Gemini Chat图', gitee_images:'Gitee Images', gitee_async:'Gitee 异步改图',
-  jimeng:'即梦', grok_video:'Grok 视频', flow2api_video:'Flow2API 视频', custom_video:'自定义视频',
+  jimeng:'即梦', grok_video:'Grok 视频', grok2api_video:'Grok2API 视频', flow2api_video:'Flow2API 视频', custom_video:'自定义视频',
   modelscope_openai_images:'魔搭 Images', openai_full_url_images:'OpenAI ImagesURL',
 };
 
@@ -135,7 +149,7 @@ function initTabs() {
 
 // ── 链路选择器 ───────────────────────────────────────────────────────────────
 // 视频服务商类型集合
-const VIDEO_PROVIDER_TYPES = new Set(['grok_video', 'flow2api_video', 'custom_video']);
+const VIDEO_PROVIDER_TYPES = new Set(['grok_video', 'grok2api_video', 'flow2api_video', 'custom_video']);
 
 // chain是 [{provider_id, output?}] 的数组，第一个是主用，后续是备用
 function renderChain(containerId, chainKey, hasOutput=true) {
@@ -488,6 +502,9 @@ function buildProviderForm(p) {
   if(hasField('proxy_url'))      rows.push(fldTA('proxy_url','代理地址（可选）',p.proxy_url||'').replace('rows="3"','rows="1"'));
   if(hasField('negative_prompt'))rows.push(fldTA('negative_prompt','负面提示词',p.negative_prompt||''));
   if(hasField('system_prompt'))  rows.push(fldTA('system_prompt','系统提示词（可选）',p.system_prompt||''));
+  // grok_video 专有字段
+  if(hasField('presets'))        rows.push(fldTA('presets','预设提示词（每行格式: 名称:英文提示词）',p.presets||[],'如 电影感:cinematic lighting, epic'));
+  // grok2api_video 专有字段（base_url+api_keys+model，复用已有通用字段，无需额外渲染）
   // custom_video 专有字段
   if(hasField('generate_path'))   rows.push(fld('generate_path','生成接口路径','text',p.generate_path||'/v1/chat/completions'));
   if(hasField('poll_path'))       rows.push(fld('poll_path','轮询路径（为空不轮询）','text',p.poll_path||'','如 /v1/tasks/{task_id}'));
@@ -544,6 +561,8 @@ function readProviderForm() {
   if (has('system_prompt'))     result.system_prompt     = g('system_prompt');
   if (has('empty_response_retry')) result.empty_response_retry = gNum('empty_response_retry', 2);
   if (has('retry_delay'))       result.retry_delay       = gNum('retry_delay', 2);
+  // grok_video 专有字段
+  if (has('presets'))           result.presets = g('presets').split('\n').map(s=>s.trim()).filter(Boolean);
   // custom_video 专有字段
   if (has('generate_path'))     result.generate_path     = g('generate_path');
   if (has('poll_path'))         result.poll_path         = g('poll_path');
