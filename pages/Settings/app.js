@@ -632,22 +632,25 @@ function openPersonaModal(idx){
   $('persona-modal').style.display='flex'; $('modal-name').focus();
 }
 
+function refPreviewSrc(r) {
+  if (r.startsWith('data:image')) return r;
+  if (r.startsWith('http://') || r.startsWith('https://')) return r;
+  // 本地绝对路径 → 通过后端 get_image 接口代理返回图片
+  return `/astrbot_plugin_aiimg_enhanced/get_image?path=${encodeURIComponent(r)}`;
+}
+
 function renderRefPreviews(refs) {
   const el = $('modal-ref-previews');
   if (!el) return;
   if (!refs.length) { el.innerHTML = ''; return; }
   el.innerHTML = refs.map((r, i) => {
     const isBase64 = r.startsWith('data:image');
-    const isHttp   = r.startsWith('http://') || r.startsWith('https://');
-    // base64 和 HTTP URL 可直接预览；本地路径只显示图标（浏览器无法访问服务器文件系统）
-    const canPreview = isBase64 || isHttp;
-    const shortName  = isBase64 ? `图片 ${i+1}` : r.split(/[\/]/).pop().slice(0, 22) || r.slice(0, 22);
+    const shortName = isBase64 ? `图片 ${i+1}` : r.split(/[\/\\]/).pop().slice(0, 22) || r.slice(0, 22);
+    const src = refPreviewSrc(r);
     return `<div class="ref-thumb" title="${esc(r)}">
-      ${canPreview
-        ? `<img src="${isBase64 ? r : esc(r)}" loading="lazy"
-               onerror="this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'"/>`
-        : ''}
-      <div class="ref-thumb-err" style="${canPreview?'display:none':'display:flex'}">📷</div>
+      <img src="${isBase64 ? r : esc(src)}" loading="lazy"
+           onerror="this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'"/>
+      <div class="ref-thumb-err" style="display:none">📷</div>
       <div class="ref-thumb-name">${esc(shortName)}</div>
       <button class="ref-thumb-del" data-idx="${i}" title="移除">✕</button>
     </div>`;
