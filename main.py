@@ -609,6 +609,9 @@ class GiteeAIImagePlugin(Star):
         for err in self.registry.validate():
             logger.warning("[GiteeAIImagePlugin][config] %s", err)
 
+        # 把实际服务商列表注入到 LLM 工具描述（方案 A+D）
+        self._update_llm_tool_descriptions()
+
         self.draw = ImageDrawService(
             self.config, self.imgr, self.data_dir, registry=self.registry
         )
@@ -845,6 +848,93 @@ class GiteeAIImagePlugin(Star):
 
     def _is_feature_llm_enabled(self, feat: str, *, default: bool = True) -> bool:
         return self._as_bool(self._get_feature(feat).get("llm_tool_enabled", default), default=default)
+
+    def _get_primary_provider(self, feature: str) -> str:
+        """返回某功能链路的主服务商 ID，找不到则返回 'auto'。"""
+        try:
+            if feature == "draw":
+                ids = self.draw._candidate_ids()
+            elif feature in {"edit", "selfie"}:
+                from .core.provider_chain import candidates_from_chain
+                from .core.utils import as_list
+                chain = as_list(self.edit._feature_conf().get("chain"))
+                ids = [pid for pid, _ in candidates_from_chain(chain)]
+            elif feature == "video":
+                from .core.provider_chain import candidates_from_chain
+                from .core.utils import as_list
+                vconf = self._get_feature("video")
+                chain = as_list(vconf.get("chain"))
+                ids = [pid for pid, _ in candidates_from_chain(chain)]
+            else:
+                ids = []
+            return ids[0] if ids else "auto"
+        except Exception:
+            return "auto"
+
+    def _update_llm_tool_descriptions(self) -> None:
+        """initialize() 完成后调用，把实际服务商列表和当前链路注入到工具描述里。
+
+        AstrBot 的 llm_tool 装饰器在类加载时固化了 description，
+        通过直接修改 func_list 里 FunctionTool 对象的字段实现运行时更新。
+        """
+        try:
+            from astrbot.core.provider.register import llm_tools
+        except Exception as e:
+            logger.warning("[aiimg] 无法获取 llm_tools，跳过工具描述更新: %s", e)
+            return
+
+        # 生图/改图服务商（非视频）
+        draw_ids  = [pid for pid in self.registry.provider_ids()
+                     if self.registry.get(pid).get("__template_key", "") not in
+                     {"grok_video", "flow2api_video", "custom_video"}]
+        video_ids = [pid for pid in self.registry.provider_ids()
+                     if self.registry.get(pid).get("__template_key", "") in
+                     {"grok_video", "flow2api_video", "custom_video"}]
+
+        draw_primary  = self._get_primary_provider("draw")
+        edit_primary  = self._get_primary_provider("edit")
+        video_primary = self._get_primary_provider("video")
+
+        draw_list  = ", ".join(draw_ids)  or "（未配置）"
+        video_list = ", ".join(video_ids) or "（未配置）"
+
+        # ── 更新 aiimg_generate ──
+        for tool in llm_tools.func_list:
+            if tool.name == "aiimg_generate":
+                tool.description = (
+                    "根据用户意图生成或编辑图片。"
+                    f"当前 draw 主链路: {draw_primary}，edit 主链路: {edit_primary}。"
+                )
+                backend_prop = tool.parameters.get("properties", {}).get("backend")
+                if backend_prop is not None:
+                    backend_prop["description"] = (
+                        f"auto=自动选择；可指定服务商ID（生图/改图可选: {draw_list}）。"
+                        "用户明确要求某服务商时才填，否则填 auto。"
+                    )
+                logger.debug("[aiimg] aiimg_generate 工具描述已更新")
+                break
+
+        # ── 更新 aiimg_batch_generate ──
+        for tool in llm_tools.func_list:
+            if tool.name == "aiimg_batch_generate":
+                backend_prop = tool.parameters.get("properties", {}).get("backend")
+                if backend_prop is not None:
+                    backend_prop["description"] = (
+                        f"auto=自动选择；可指定服务商ID（可选: {draw_list}）。"
+                    )
+                logger.debug("[aiimg] aiimg_batch_generate 工具描述已更新")
+                break
+
+        # ── 更新 grok_generate_video ──
+        for tool in llm_tools.func_list:
+            if tool.name == "grok_generate_video":
+                tool.description = (
+                    "生成视频。"
+                    f"当前视频主链路: {video_primary}。"
+                    f"可用视频服务商: {video_list}。"
+                )
+                logger.debug("[aiimg] grok_generate_video 工具描述已更新")
+                break
 
     def _is_selfie_enabled(self) -> bool:
         return self._is_feature_enabled("selfie")
@@ -2111,6 +2201,13 @@ class GiteeAIImagePlugin(Star):
             return self._llm_tool_text_result(
                 "An image request for this user is already in progress. Do not resubmit unless the user asks for a new request."
             )
+
+        # 方案 B：如果用户在对话里说"@ccode 画一只猫"，LLM 会把 "@ccode 画一只猫" 原样
+        # 作为 prompt 传进来，此处解析出 @provider_id 前缀并转为 backend 覆盖
+        provider_from_prompt, prompt = self._parse_provider_override_prefix(prompt)
+        if provider_from_prompt and (not backend or backend.lower() == "auto"):
+            backend = provider_from_prompt
+            logger.debug("[aiimg_generate] 从 prompt 解析出 backend=%s", backend)
 
         b_raw = (backend or "auto").strip()
         known_provider_ids = set(self.registry.provider_ids())
@@ -3432,6 +3529,8 @@ class GiteeAIImagePlugin(Star):
                 self.registry._load_providers()
                 logger.info("[AI绘图站] Registry 已热重载，providers=%s",
                             list(self.registry._providers.keys()))
+                # 服务商列表变了，同步更新工具描述
+                self._update_llm_tool_descriptions()
 
             # 对齐 omnidraw：先写 JSON 持久化，再同步到 native config
             self._safe_update_config()
