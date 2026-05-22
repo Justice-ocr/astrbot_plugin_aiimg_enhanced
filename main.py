@@ -2145,30 +2145,39 @@ class GiteeAIImagePlugin(Star):
     ):
         """根据用户意图生成或编辑图片。
 
-        【mode 选择（优先级从高到低）】：
+        【关键判断：图片是"要改的对象"还是"给bot参考的素材"？】
 
-        ⚠️ 重要：mode=selfie_ref 仅用于"bot自拍"，即用户要求bot本身发一张自己的照片。
-        如果用户发了图片要求修改，无论图片内容是什么（角色/人物/风景），一律用 mode=edit。
+        用户引用图片时，先判断意图主体：
+        - 主体是图片本身（改这张图）→ mode=edit
+        - 主体是bot/她/你（bot生成自己的照片，图片只是参考素材）→ mode=selfie_ref
 
-        1. mode=edit【最高优先级，有图就用】
-           触发条件：消息或引用中有图片，且用户要求修改/调整（换颜色、换背景、换风格、换衣服等）
-           示例：
-           - 引用图片+"把白丝换成黑丝" → mode=edit，prompt描述修改内容
-           - 引用图片+"换个背景" → mode=edit
-           - 引用图片+"风格改成水墨画" → mode=edit
+        【mode 选择规则】：
 
-        2. mode=selfie_ref【仅限bot自拍】
-           触发条件：用户明确要求bot发自己的自拍/照片，如"来张你的自拍"、"来张你的照片"
-           ❌ 错误用法：用户引用了某张图要求修改 → 不应用selfie_ref，应用edit
-           ❌ 错误用法：图片里有角色/人物 → 不应用selfie_ref，应用edit
+        1. mode=selfie_ref【bot出镜，用户提供的图是参考素材】
+           触发条件：用户要求bot/她/你出现在图里，图片（如有）是衣服/场景/风格参考
+           典型场景：
+           - "来张你的自拍" → selfie_ref
+           - "你穿这件衣服拍张照" + 引用衣服图 → selfie_ref，衣服图作为参考
+           - "换这个场景拍一张" + 引用场景图 → selfie_ref，场景图作为参考
+           - "你来一张" / "看看你" / "你本人照片" → selfie_ref
+           - "穿上这个给我看看" / "穿这个拍张照" + 引用图 → selfie_ref
+           ✅ 判断依据：句子主语是bot（你/她/人设名），图片是道具而非被改对象
 
-        3. mode=text：纯文字生图，没有图片且不是自拍请求
+        2. mode=edit【对用户提供的图本身进行修改】
+           触发条件：用户要改的是引用图片本身的内容
+           典型场景：
+           - 引用图+"把白丝换成黑丝" → edit（改图片里人物的衣服）
+           - 引用图+"换个背景" → edit（改图片背景）
+           - 引用图+"风格改成水墨画" → edit（改图片风格）
+           ✅ 判断依据：句子主语是图片里的内容，用户不要求bot出镜
 
-        4. mode=auto：以上都不确定时使用
+        3. mode=text：纯文字生图，没有图片且不涉及bot自拍
+
+        4. mode=auto：意图不明确时使用
 
         Args:
-            prompt(string): 改图时描述如何修改，文生图时描述生成内容
-            mode(string): edit=改图, text=文生图, selfie_ref=bot自拍, auto=自动判断
+            prompt(string): selfie_ref时描述想要的效果/服装/场景；edit时描述如何修改图片；text时描述生成内容
+            mode(string): selfie_ref=bot自拍（图片为参考素材）, edit=改图（图片为被改对象）, text=文生图, auto=自动判断
             backend(string): auto=自动选择；也可填服务商ID（如 ccode、jojocode）
             output(string): 输出尺寸，例如 2048x2048 或 4K，留空用默认
         """
@@ -3891,39 +3900,45 @@ class GiteeAIImagePlugin(Star):
         return bool(image_segs)
 
     def _is_auto_selfie_prompt(self, prompt: str) -> bool:
+        """判断 prompt 是否明确指向 bot 出镜（自拍/参考图穿搭等场景）。
+
+        核心逻辑：主语是 bot/你/她 + 动词是拍/穿/换/来一张 → selfie_ref
+        即使消息里带有引用图片，只要意图主体是 bot，也应走 selfie_ref。
+        """
         text = (prompt or "").strip()
         if not text:
             return False
         lowered = text.lower()
+
+        # 明确自拍词
         if "自拍" in text or "selfie" in lowered:
             return True
-        if any(
-            k in text
-            for k in (
-                "来一张你",
-                "来张你",
-                "你来一张",
-                "你来张",
-                "看看你",
-                "你自己",
-                "你本人",
-                "你的照片",
-                "你的自拍",
-                "你自己的照片",
-                "你自己的自拍",
-                "你长什么样",
-                "看看你本人",
-                "看看你自己",
-                "bot自拍",
-                "机器人自拍",
-            )
-        ):
+
+        # bot 主语 + 出镜意图
+        if any(k in text for k in (
+            "来一张你", "来张你", "你来一张", "你来张",
+            "看看你", "你自己", "你本人",
+            "你的照片", "你的自拍", "你自己的照片", "你自己的自拍",
+            "你长什么样", "看看你本人", "看看你自己",
+            "bot自拍", "机器人自拍",
+            # 新增：穿搭/场景参考类
+            "你穿", "你换", "你试试", "你来穿",
+            "穿给我看", "穿上给我", "穿着拍", "穿这个拍",
+            "穿上这个", "换上这个", "换上这件", "穿这件",
+            "给我看看你", "给我看看她", "让她穿", "让你穿",
+            "她穿上", "她换上", "她来一张", "她来张",
+            "帮她拍", "帮你拍", "拍一张你", "拍张你",
+        )):
             return True
-        if any(
-            k in lowered
-            for k in ("your selfie", "your photo", "your picture", "your face")
-        ):
+
+        # 英文
+        if any(k in lowered for k in (
+            "your selfie", "your photo", "your picture", "your face",
+            "wear this", "put this on", "try this on",
+            "photo of you", "picture of you", "show me you",
+        )):
             return True
+
         return False
 
     async def _should_auto_selfie_ref(
