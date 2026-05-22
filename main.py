@@ -855,13 +855,11 @@ class GiteeAIImagePlugin(Star):
             if feature == "draw":
                 ids = self.draw._candidate_ids()
             elif feature in {"edit", "selfie"}:
-                from .core.provider_chain import candidates_from_chain
-                from .core.utils import as_list
+                from .core.provider_chain import candidates_from_chain, as_list
                 chain = as_list(self.edit._feature_conf().get("chain"))
                 ids = [pid for pid, _ in candidates_from_chain(chain)]
             elif feature == "video":
-                from .core.provider_chain import candidates_from_chain
-                from .core.utils import as_list
+                from .core.provider_chain import candidates_from_chain, as_list
                 vconf = self._get_feature("video")
                 chain = as_list(vconf.get("chain"))
                 ids = [pid for pid, _ in candidates_from_chain(chain)]
@@ -884,12 +882,11 @@ class GiteeAIImagePlugin(Star):
             return
 
         # 生图/改图服务商（非视频）
+        _VIDEO_KEYS = {"grok_video", "grok2api_video", "flow2api_video", "custom_video"}
         draw_ids  = [pid for pid in self.registry.provider_ids()
-                     if self.registry.get(pid).get("__template_key", "") not in
-                     {"grok_video", "flow2api_video", "custom_video"}]
+                     if self.registry.get(pid).get("__template_key", "") not in _VIDEO_KEYS]
         video_ids = [pid for pid in self.registry.provider_ids()
-                     if self.registry.get(pid).get("__template_key", "") in
-                     {"grok_video", "grok2api_video", "flow2api_video", "custom_video"}]
+                     if self.registry.get(pid).get("__template_key", "") in _VIDEO_KEYS]
 
         draw_primary  = self._get_primary_provider("draw")
         edit_primary  = self._get_primary_provider("edit")
@@ -2158,7 +2155,7 @@ class GiteeAIImagePlugin(Star):
            典型场景：
            - "来张你的自拍" → selfie_ref
            - "你穿这件衣服拍张照" + 引用衣服图 → selfie_ref，衣服图作为参考
-           - "换这个场景拍一张" + 引用场景图 → selfie_ref，场景图作为参考
+           - "换这个场景来一张你的照片" + 引用场景图 → selfie_ref，场景图作为参考
            - "你来一张" / "看看你" / "你本人照片" → selfie_ref
            - "穿上这个给我看看" / "穿这个拍张照" + 引用图 → selfie_ref
            ✅ 判断依据：句子主语是bot（你/她/人设名），图片是道具而非被改对象
