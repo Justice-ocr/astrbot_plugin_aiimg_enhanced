@@ -61,7 +61,6 @@ const bridge = window.AstrBotPluginPage || {
   apiPost: async (name, payload) => {
     console.info('[mock]', name, payload);
     if (name === 'switch_persona') return { success:true, active:{id:payload.id,name:payload.id} };
-    if (name === 'upload_ref_image_b64') return { success:false, error:'mock环境不支持上传，请在AstrBot中使用' };
     return { success:true };
   },
 };
@@ -655,9 +654,9 @@ function openPersonaModal(idx){
   const p=isNew?{id:'',persona_name:'',persona_base_prompt:'',persona_ref_image:[]}:S.persona_config.profiles[idx];
   $('modal-id').value=p.id||''; $('modal-name').value=p.persona_name||'';
   $('modal-prompt').value=p.persona_base_prompt||'';
-  // 初始化 _modalRefs（过滤掉残留 base64，只保留路径/URL）
-  _modalRefs = (p.persona_ref_image||[]).filter(r=>!String(r).startsWith('data:image'));
-  $('modal-refs').value = _modalRefs.join('\n');
+  // _modalRefs 保留所有引用（路径/URL/base64），文本框只显示路径和URL（base64太长不展示）
+  _modalRefs = [...(p.persona_ref_image||[])];
+  $('modal-refs').value = _modalRefs.filter(r=>!String(r).startsWith('data:image')).join('\n');
   renderRefPreviews(_modalRefs);
   $('persona-modal').style.display='flex'; $('modal-name').focus();
 }
@@ -695,9 +694,9 @@ function renderRefPreviews(refs) {
   });
 }
 
-async function uploadRefImages(files) {
-  // Pages 在 iframe 内，fetch 无法直接访问插件路由，改用 FileReader 读 base64
-  // 再通过 bridge.apiPost 发送到后端 upload_ref_image_b64 接口转存为本地文件
+function uploadRefImages(files) {
+  // 与 omnidraw 保持一致：FileReader 读 base64 存入 _modalRefs，直接预览
+  // 保存人设时 base64 随 save_config payload 一起发给后端，后端 _save_base64_refs 转存为本地文件
   const btn = $('modal-upload-btn');
   const status = $('modal-upload-status');
   if (!files || !files.length) return;
@@ -711,49 +710,40 @@ async function uploadRefImages(files) {
   }
 
   btn.disabled = true;
-  status.textContent = `上传中 (0/${fileArr.length})...`;
+  status.textContent = `读取中 (0/${fileArr.length})...`;
   status.className = 'upload-status uploading';
 
-  // 先用 FileReader 把所有文件读成 base64
-  const b64List = await Promise.all(fileArr.map(file => new Promise((resolve, reject) => {
+  let done = 0;
+  fileArr.forEach(file => {
     const r = new FileReader();
-    r.onload  = () => resolve({ data: r.result, filename: file.name });
-    r.onerror = () => reject(new Error(`读取 ${file.name} 失败`));
-    r.readAsDataURL(file);
-  })));
-
-  let done = 0, failed = 0;
-
-  for (const { data, filename } of b64List) {
-    try {
-      const res = await bridge.apiPost('upload_ref_image_b64', { data, filename });
-      if (res && res.success && res.path) {
-        _modalRefs.push(res.path);
-      } else {
-        failed++;
-        console.warn('[upload] server error:', res?.error);
+    r.onload = evt => {
+      _modalRefs.push(evt.target.result);  // base64 data URL，可直接作为 img.src
+      done++;
+      status.textContent = `读取中 (${done}/${fileArr.length})...`;
+      if (done === fileArr.length) {
+        $('modal-refs').value = _modalRefs.filter(r => !r.startsWith('data:image')).join('\n');
+        renderRefPreviews(_modalRefs);
+        status.textContent = `✓ 已添加 ${fileArr.length} 张图片`;
+        status.className = 'upload-status ok';
+        setTimeout(() => { status.textContent=''; status.className='upload-status'; btn.disabled=false; }, 2000);
+        markDirty();
       }
-    } catch(e) {
-      failed++;
-      console.warn('[upload] error:', e);
-    }
-    done++;
-    status.textContent = `上传中 (${done}/${fileArr.length})...`;
-  }
-
-  $('modal-refs').value = _modalRefs.join('\n');
-  renderRefPreviews(_modalRefs);
-  const ok = done - failed;
-  status.textContent = failed ? `✓ ${ok} 张成功，✗ ${failed} 张失败` : `✓ 已上传 ${ok} 张图片`;
-  status.className = failed ? 'upload-status err' : 'upload-status ok';
-  setTimeout(() => { status.textContent=''; status.className='upload-status'; btn.disabled=false; }, 2500);
+    };
+    r.onerror = () => {
+      done++;
+      status.textContent = `✗ ${file.name} 读取失败`;
+      status.className = 'upload-status err';
+      if (done === fileArr.length) btn.disabled = false;
+    };
+    r.readAsDataURL(file);
+  });
 }
 function savePersonaModal(){
   const id=$('modal-id').value.trim().replace(/[^a-zA-Z0-9_\-]/g,'_')||`persona_${Date.now()}`;
   const persona_name=$('modal-name').value.trim()||id;
   const persona_base_prompt=$('modal-prompt').value.trim();
-  // 直接从 _modalRefs 取，已由 upload 接口转换为服务器路径，不含 base64
-  const persona_ref_image = _modalRefs.filter(r => r && !r.startsWith('data:image'));
+  // _modalRefs 包含本地路径/URL/base64，后端 _save_base64_refs 会把 base64 转存为本地文件
+  const persona_ref_image = _modalRefs.filter(r => Boolean(r));
   const obj={id,persona_name,persona_base_prompt,persona_ref_image};
   if(_personaIdx<0){
     S.persona_config.profiles.push(obj);
@@ -828,7 +818,10 @@ async function init(){
   const modalRefs = $('modal-refs');
   if (modalRefs) {
     modalRefs.addEventListener('input', () => {
-      _modalRefs = modalRefs.value.split('\n').map(s=>s.trim()).filter(Boolean);
+      // 文本框的路径/URL + 内存里的base64合并
+      const textPart = modalRefs.value.split('\n').map(s=>s.trim()).filter(Boolean);
+      const b64Part  = _modalRefs.filter(r=>String(r).startsWith('data:image'));
+      _modalRefs = [...b64Part, ...textPart];
       renderRefPreviews(_modalRefs);
     });
   }
