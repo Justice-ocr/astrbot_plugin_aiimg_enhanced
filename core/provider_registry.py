@@ -47,6 +47,7 @@ _TEMPLATE_KEY_ALIASES: dict[str, str] = {
     "grok": "grok_images",
     "grok2api": "grok2api_images",
     "grok2api_video": "grok2api_video",
+    "custom_video": "custom_video",
     "openai": "openai_images",
     "openai_compat": "openai_images",
     "openai_full_url": "openai_full_url_images",
@@ -165,6 +166,8 @@ class ProviderRegistry:
             return "grok_video"
         if pid in {"flow2api_video"}:
             return "flow2api_video"
+        if pid in {"custom_video"}:
+            return "custom_video"
 
         # 最终兜底：根据字段特征推断（处理任意自定义 id 的服务商）
         if "poll_interval" in item or "poll_timeout" in item:
@@ -381,7 +384,7 @@ class ProviderRegistry:
                     errors.append(f"provider '{provider_id}' missing server_url")
                 if not str(item.get("api_key") or "").strip():
                     errors.append(f"provider '{provider_id}' missing api_key")
-            if template_key in {"flow2api_video"}:
+            if template_key in {"flow2api_video", "custom_video"}:
                 if not str(item.get("api_url") or "").strip():
                     errors.append(f"provider '{provider_id}' missing api_url")
                 if not str(item.get("model") or "").strip():
@@ -676,6 +679,9 @@ class ProviderRegistry:
                 "proxy_url": p.get("proxy_url", ""),
             }
             backend = Flow2ApiVideoBackend(settings=settings)
+        elif template_key == "custom_video":
+            from .custom_video_backend import CustomVideoBackend
+            backend = CustomVideoBackend(settings=p)
         else:
             raise RuntimeError(f"Provider '{pid}' is not a video provider")
         self._video_backends[pid] = backend

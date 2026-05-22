@@ -82,6 +82,7 @@ const P_TEMPLATES = {
   jimeng:                 { label:'即梦', api_url:'', apikey:'', cookie_list:[], default_style:'真实', default_ratio:'1:1', default_model:'Seedream 4.0', timeout:120 },
   grok_video:             { label:'Grok 视频', server_url:'https://api.x.ai', api_key:'', model:'grok-imagine-0.9', timeout_seconds:180, max_retries:2, empty_response_retry:2, retry_delay:2 },
   flow2api_video:         { label:'Flow2API 视频', api_url:'', api_keys:[], model:'', timeout:300, use_proxy:false, proxy_url:'' },
+  custom_video:           { label:'自定义视频', base_url:'', generate_path:'/v1/chat/completions', poll_path:'', api_keys:[], model:'', timeout:300, max_retries:0, poll_interval:5, poll_timeout:300, response_url_path:'', task_id_path:'', status_path:'', done_statuses:'succeeded,completed,done,finished,success', fail_statuses:'failed,error,cancelled', extra_body:'', request_mode:'auto', image_field:'image', proxy_url:'' },
   modelscope_openai_images:{ label:'魔搭 Images', base_url:'', api_keys:[], model:'', timeout:120, proxy_url:'', default_size:'1024x1024', supports_edit:false, generate_request_mode:'auto', edit_request_mode:'auto' },
   openai_full_url_images: { label:'OpenAI ImagesURL', full_generate_url:'', full_edit_url:'', api_keys:[], model:'', timeout:120, default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
 };
@@ -90,7 +91,7 @@ const P_NAMES = {
   flow2api:'Flow2API', vertex_ai_anonymous:'Vertex AI 匿名', grok_images:'Grok Images',
   grok_chat:'Grok Chat图', grok2api_images:'Grok2API Images', gemini_openai_images:'Gemini Images',
   gemini_openai_chat:'Gemini Chat图', gitee_images:'Gitee Images', gitee_async:'Gitee 异步改图',
-  jimeng:'即梦', grok_video:'Grok 视频', flow2api_video:'Flow2API 视频',
+  jimeng:'即梦', grok_video:'Grok 视频', flow2api_video:'Flow2API 视频', custom_video:'自定义视频',
   modelscope_openai_images:'魔搭 Images', openai_full_url_images:'OpenAI ImagesURL',
 };
 
