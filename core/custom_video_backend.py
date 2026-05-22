@@ -151,11 +151,11 @@ class CustomVideoBackend:
     def __init__(self, *, settings: dict):
         s = settings if isinstance(settings, dict) else {}
 
-        base = str(s.get("base_url") or "").rstrip("/")
+        self.base_url = str(s.get("base_url") or "").rstrip("/")
         gen_path = str(s.get("generate_path") or "/v1/chat/completions").strip()
         if not gen_path.startswith("/"):
             gen_path = "/" + gen_path
-        self.generate_url = base + gen_path
+        self.generate_url = self.base_url + gen_path
 
         poll_path = str(s.get("poll_path") or "").strip()
         self.poll_path = poll_path  # 含 {task_id} 占位符
@@ -268,18 +268,19 @@ class CustomVideoBackend:
         except Exception:
             raise RuntimeError(f"响应 JSON 解析失败: {resp.text[:200]}")
 
-    async def _poll_for_url(self, task_id: str, client: httpx.AsyncClient) -> str:
+    async def _poll_for_url(self, task_id: str) -> str:
         if not self.poll_path:
             raise RuntimeError("未配置 poll_path，无法轮询任务状态")
 
-        poll_url = (
-            self.generate_url.rsplit("/", 1)[0].rstrip("/")
-            + "/"
-            + self.poll_path.lstrip("/").replace("{task_id}", task_id)
-        )
-        # 如果 poll_path 是绝对路径（含 http），直接用
-        if self.poll_path.startswith("http"):
+        # 用 base_url + poll_path 构建轮询URL
+        if self.poll_path.startswith(("http://", "https://")):
             poll_url = self.poll_path.replace("{task_id}", task_id)
+        else:
+            path = self.poll_path.lstrip("/").replace("{task_id}", task_id)
+            poll_url = f"{self.base_url}/{path}"
+
+        # 轮询用独立的短超时 client（30s），避免用视频生成的长超时
+        poll_timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=40.0)
 
         t0 = time.perf_counter()
         while True:
@@ -289,10 +290,12 @@ class CustomVideoBackend:
 
             await asyncio.sleep(self.poll_interval)
 
-            resp = await client.get(
-                poll_url,
-                headers=self._headers(),
-            )
+            async with httpx.AsyncClient(timeout=poll_timeout, follow_redirects=True,
+                                          proxies=self.proxy_url) as poll_client:
+                resp = await poll_client.get(
+                    poll_url,
+                    headers=self._headers(),
+                )
             if resp.status_code != 200:
                 logger.warning("[CustomVideo] 轮询失败 HTTP %s，继续等待", resp.status_code)
                 continue
@@ -354,7 +357,7 @@ class CustomVideoBackend:
                         task_id = _extract_task_id(data, self.task_id_path)
                         if task_id:
                             logger.info("[CustomVideo] 获取 task_id=%s，开始轮询", task_id)
-                            url = await self._poll_for_url(task_id, client)
+                            url = await self._poll_for_url(task_id)
                             logger.info("[CustomVideo] 轮询完成 URL，耗时=%.2fs", time.perf_counter() - t0)
                             return url
 
