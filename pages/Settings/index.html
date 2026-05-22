@@ -143,23 +143,28 @@
             </div>
             <div class="btn-group">
               <select class="sel" id="provider-template-sel">
-                <option value="openai_images">OpenAI Images</option>
-                <option value="openai_chat">OpenAI Chat图</option>
-                <option value="gemini_native">Gemini 原生</option>
-                <option value="flow2api">Flow2API（出图）</option>
-                <option value="vertex_ai_anonymous">Vertex AI 匿名</option>
-                <option value="grok_images">Grok Images</option>
-                <option value="grok_chat">Grok Chat图</option>
-                <option value="grok2api_images">Grok2API Images</option>
-                <option value="gemini_openai_images">Gemini Images</option>
-                <option value="gemini_openai_chat">Gemini Chat图</option>
-                <option value="gitee_images">Gitee Images</option>
-                <option value="gitee_async">Gitee 异步改图</option>
-                <option value="jimeng">即梦（豆包）</option>
-                <option value="grok_video">Grok 视频</option>
-                <option value="flow2api_video">Flow2API 视频</option>
-                <option value="modelscope_openai_images">魔搭 Images</option>
-                <option value="openai_full_url_images">OpenAI ImagesURL</option>
+                <optgroup label="── 生图服务商 ──">
+                  <option value="openai_images">OpenAI Images</option>
+                  <option value="openai_full_url_images">OpenAI ImagesURL</option>
+                  <option value="openai_chat">OpenAI Chat图</option>
+                  <option value="grok_images">Grok Images</option>
+                  <option value="grok_chat">Grok Chat图</option>
+                  <option value="grok2api_images">Grok2API Images</option>
+                  <option value="gemini_native">Gemini 原生</option>
+                  <option value="gemini_openai_images">Gemini Images</option>
+                  <option value="gemini_openai_chat">Gemini Chat图</option>
+                  <option value="gitee_images">Gitee Images</option>
+                  <option value="gitee_async">Gitee 异步改图</option>
+                  <option value="flow2api">Flow2API 生图</option>
+                  <option value="jimeng">即梦（豆包）</option>
+                  <option value="modelscope_openai_images">魔搭 Images</option>
+                  <option value="vertex_ai_anonymous">Vertex AI 匿名</option>
+                </optgroup>
+                <optgroup label="── 视频服务商 ──">
+                  <option value="grok_video">Grok 视频</option>
+                  <option value="flow2api_video">Flow2API 视频</option>
+                  <option value="custom_video">自定义视频</option>
+                </optgroup>
               </select>
               <button class="btn-primary" id="btn-add-provider">+ 添加服务商</button>
             </div>
