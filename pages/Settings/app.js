@@ -134,12 +134,18 @@ function initTabs() {
 }
 
 // ── 链路选择器 ───────────────────────────────────────────────────────────────
+// 视频服务商类型集合
+const VIDEO_PROVIDER_TYPES = new Set(['grok_video', 'flow2api_video', 'custom_video']);
+
 // chain是 [{provider_id, output?}] 的数组，第一个是主用，后续是备用
 function renderChain(containerId, chainKey, hasOutput=true) {
   const el = $(containerId);
   if (!el) return;
   const chain = S.chains[chainKey] || [];
-  const providerIds = S.providers.map(p => p.id).filter(Boolean);
+  const isVideo = chainKey === 'video';
+  const providerIds = S.providers
+    .filter(p => isVideo ? VIDEO_PROVIDER_TYPES.has(p.__type) : !VIDEO_PROVIDER_TYPES.has(p.__type))
+    .map(p => p.id).filter(Boolean);
 
   let html = '<div class="chain-list">';
 
