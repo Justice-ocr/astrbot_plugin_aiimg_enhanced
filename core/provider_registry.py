@@ -384,9 +384,14 @@ class ProviderRegistry:
                     errors.append(f"provider '{provider_id}' missing server_url")
                 if not str(item.get("api_key") or "").strip():
                     errors.append(f"provider '{provider_id}' missing api_key")
-            if template_key in {"flow2api_video", "custom_video"}:
+            if template_key == "flow2api_video":
                 if not str(item.get("api_url") or "").strip():
                     errors.append(f"provider '{provider_id}' missing api_url")
+                if not str(item.get("model") or "").strip():
+                    errors.append(f"provider '{provider_id}' missing model")
+            if template_key == "custom_video":
+                if not str(item.get("base_url") or "").strip():
+                    errors.append(f"provider '{provider_id}' missing base_url")
                 if not str(item.get("model") or "").strip():
                     errors.append(f"provider '{provider_id}' missing model")
             if template_key in {"vertex_ai_anonymous"}:
