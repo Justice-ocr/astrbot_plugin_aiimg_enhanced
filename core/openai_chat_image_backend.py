@@ -635,8 +635,8 @@ class OpenAIChatImageBackend:
         self.imgr = imgr
         self.base_url = normalize_openai_compat_base_url(base_url)
         self.api_keys = [str(k).strip() for k in (api_keys or []) if str(k).strip()]
-        self.timeout = int(timeout or 120)
-        self.max_retries = int(max_retries or 2)
+        self.timeout = int(timeout) if timeout is not None else 120
+        self.max_retries = int(max_retries) if max_retries is not None else 2
         self.default_model = str(default_model or "").strip()
         self.supports_edit = bool(supports_edit)
         self.extra_body = extra_body or {}

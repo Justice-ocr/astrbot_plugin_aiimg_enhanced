@@ -203,8 +203,8 @@ class GrokImagesBackend:
         self.imgr = imgr
         self.base_url = _normalize_base_url(base_url)
         self.api_key = _pick_first_api_key(api_keys)
-        self.timeout = max(1, min(int(timeout or 120), 3600))
-        self.max_retries = max(1, min(int(max_retries or 2), 10))
+        self.timeout = max(1, min(int(timeout) if timeout is not None else 120, 3600))
+        self.max_retries = max(0, min(int(max_retries) if max_retries is not None else 2, 10))
         self.default_model = str(default_model or "").strip()
         self.default_size = str(default_size or "4096x4096").strip()
         self.supports_edit = bool(supports_edit)
