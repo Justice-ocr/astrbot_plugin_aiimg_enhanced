@@ -16,9 +16,11 @@ import io
 import json
 import math
 import mimetypes
+import os
 import pathlib
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -70,6 +72,17 @@ from .core.provider_registry import ProviderRegistry
 from .core.ref_store import ReferenceStore
 from .core.utils import close_session, get_images_from_event
 from .core.video_manager import VideoManager
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """递归深度合并两个字典，override 的值覆盖 base，保留 base 中未被覆盖的字段。"""
+    result = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
 
 # ── 默认回复文案 ────────────────────────────────────────────────────────────
 _DEFAULT_DRAW_PENDING     = "🎨 收到灵感，正在绘制..."
@@ -568,23 +581,13 @@ class GiteeAIImagePlugin(Star):
 
     async def initialize(self):
         # 如果存在持久化的 JSON 文件，合并到 self.config（Pages保存的配置）
-        import json as _json
         persist_path = getattr(self, "_persist_config_path",
             str(pathlib.Path(self.data_dir) / "aiimg_persist_config.json"))
         if pathlib.Path(persist_path).is_file():
             try:
                 with open(persist_path, "r", encoding="utf-8") as _f:
-                    persisted = _json.load(_f)
+                    persisted = json.load(_f)
                 if isinstance(persisted, dict) and persisted:
-                    # 递归深度合并：persisted覆盖self.config，保留native config未触及的字段
-                    def _deep_merge(base: dict, override: dict) -> dict:
-                        result = dict(base)
-                        for k, v in override.items():
-                            if isinstance(v, dict) and isinstance(result.get(k), dict):
-                                result[k] = _deep_merge(result[k], v)
-                            else:
-                                result[k] = v
-                        return result
                     merged = _deep_merge(dict(self.config), persisted)
                     self.config.clear()
                     self.config.update(merged)
@@ -831,13 +834,17 @@ class GiteeAIImagePlugin(Star):
             return None
         return None
 
+    def _is_feature_enabled(self, feat: str, *, default: bool = True) -> bool:
+        return self._as_bool(self._get_feature(feat).get("enabled", default), default=default)
+
+    def _is_feature_llm_enabled(self, feat: str, *, default: bool = True) -> bool:
+        return self._as_bool(self._get_feature(feat).get("llm_tool_enabled", default), default=default)
+
     def _is_selfie_enabled(self) -> bool:
-        conf = self._get_feature("selfie")
-        return self._as_bool(conf.get("enabled", True), default=True)
+        return self._is_feature_enabled("selfie")
 
     def _is_selfie_llm_enabled(self) -> bool:
-        conf = self._get_feature("selfie")
-        return self._as_bool(conf.get("llm_tool_enabled", True), default=True)
+        return self._is_feature_llm_enabled("selfie")
 
     @staticmethod
     def _selfie_disabled_message() -> str:
@@ -2217,13 +2224,7 @@ class GiteeAIImagePlugin(Star):
                 m == "auto" and (has_msg_images or has_at_avatar_refs)
             ):
                 logger.info("[aiimg_generate] route=edit")
-                edit_conf = self._get_feature("edit")
-                if not bool(edit_conf.get("enabled", True)):
-                    await self._signal_llm_tool_failure(event)
-                    return self._llm_tool_text_result(
-                        "The requested image editing tool is disabled by plugin configuration."
-                    )
-                if not bool(edit_conf.get("llm_tool_enabled", True)):
+                if not self._is_feature_enabled("edit") or not self._is_feature_llm_enabled("edit"):
                     await self._signal_llm_tool_failure(event)
                     return self._llm_tool_text_result(
                         "The requested image editing tool is disabled by plugin configuration."
@@ -2267,13 +2268,7 @@ class GiteeAIImagePlugin(Star):
                 )
 
             # 默认：文生图
-            draw_conf = self._get_feature("draw")
-            if not bool(draw_conf.get("enabled", True)):
-                await self._signal_llm_tool_failure(event)
-                return self._llm_tool_text_result(
-                    "The requested image generation tool is disabled by plugin configuration."
-                )
-            if not bool(draw_conf.get("llm_tool_enabled", True)):
+            if not self._is_feature_enabled("draw") or not self._is_feature_llm_enabled("draw"):
                 await self._signal_llm_tool_failure(event)
                 return self._llm_tool_text_result(
                     "The requested image generation tool is disabled by plugin configuration."
@@ -2351,19 +2346,13 @@ class GiteeAIImagePlugin(Star):
         resolution = output if output and size is None else None
 
         if resolved_mode == "draw":
-            draw_conf = self._get_feature("draw")
-            if not bool(draw_conf.get("enabled", True)) or not bool(
-                draw_conf.get("llm_tool_enabled", True)
-            ):
+            if not self._is_feature_enabled("draw") or not self._is_feature_llm_enabled("draw"):
                 await self._signal_llm_tool_failure(event)
                 return self._llm_tool_text_result(
                     "The requested batch text-to-image tool is disabled by plugin configuration."
                 )
         elif resolved_mode == "edit":
-            edit_conf = self._get_feature("edit")
-            if not bool(edit_conf.get("enabled", True)) or not bool(
-                edit_conf.get("llm_tool_enabled", True)
-            ):
+            if not self._is_feature_enabled("edit") or not self._is_feature_llm_enabled("edit"):
                 await self._signal_llm_tool_failure(event)
                 return self._llm_tool_text_result(
                     "The requested batch image editing tool is disabled by plugin configuration."
@@ -2458,13 +2447,12 @@ class GiteeAIImagePlugin(Star):
         Args:
             prompt(string): 视频提示词。支持 "预设名 额外提示词"（与 `/视频 预设名 额外提示词` 一致）
         """
-        vconf = self._get_feature("video")
-        if not bool(vconf.get("enabled", False)):
+        if not self._is_feature_enabled("video", default=False):
             await self._signal_llm_tool_failure(event)
             return self._llm_tool_text_result(
                 "The requested video tool is disabled by plugin configuration."
             )
-        if not bool(vconf.get("llm_tool_enabled", True)):
+        if not self._is_feature_llm_enabled("video"):
             await self._signal_llm_tool_failure(event)
             return self._llm_tool_text_result(
                 "The requested video tool is disabled by plugin configuration."
@@ -3110,18 +3098,7 @@ class GiteeAIImagePlugin(Star):
             await mark_failed(event)
             return
 
-        bytes_images: list[bytes] = []
-        for i, seg in enumerate(image_segs):
-            try:
-                logger.debug(f"[改图] 转换图片 {i + 1}/{len(image_segs)}...")
-                b64 = await asyncio.wait_for(seg.convert_to_base64(), timeout=30.0)
-                bytes_images.append(decode_base64_image_payload(b64))
-                logger.debug(
-                    f"[改图] 图片 {i + 1} 转换成功, 大小={len(bytes_images[-1])} bytes"
-                )
-            except Exception as e:
-                logger.warning(f"[改图] 图片 {i + 1} 转换失败，跳过: {e}")
-
+        bytes_images = await self._image_segs_to_bytes(image_segs)
         if not bytes_images:
             await mark_failed(event)
             return
@@ -3278,17 +3255,14 @@ class GiteeAIImagePlugin(Star):
 
     def _safe_update_config(self) -> None:
         """持久化配置，完全对齐 omnidraw 的 _persist_config + _safe_update_context_config。"""
-        import json as _json, uuid as _uuid
-
         # Step 1: 写自管理 JSON 文件（omnidraw 的 _persist_config，最可靠）
         try:
             persist_path = self._persist_config_path
             pathlib.Path(persist_path).parent.mkdir(parents=True, exist_ok=True)
-            tmp = f"{persist_path}.{_uuid.uuid4().hex}.tmp"
+            tmp = f"{persist_path}.{uuid.uuid4().hex}.tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                _json.dump(dict(self.config), f, ensure_ascii=False, indent=4)
-            import os as _os
-            _os.replace(tmp, persist_path)
+                json.dump(dict(self.config), f, ensure_ascii=False, indent=4)
+            os.replace(tmp, persist_path)
             logger.debug("[AI绘图站] 配置已写入 %s", persist_path)
         except Exception as e:
             logger.warning("[AI绘图站] JSON 文件持久化失败: %s", e)
@@ -3529,7 +3503,6 @@ class GiteeAIImagePlugin(Star):
 
     async def _save_base64_refs(self, refs: list) -> list:
         """把 persona_ref_image 列表里的 base64 data URL 转存为本地文件，返回替换后的列表。"""
-        import base64 as _b64, re as _re
         ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
         ref_dir.mkdir(parents=True, exist_ok=True)
         result = []
@@ -3540,17 +3513,16 @@ class GiteeAIImagePlugin(Star):
             if ref.startswith("data:image"):
                 try:
                     # data:image/jpeg;base64,XXXX
-                    m = _re.match(r"data:(image/[^;]+);base64,(.+)", ref, _re.DOTALL)
+                    m = re.match(r"data:(image/[^;]+);base64,(.+)", ref, re.DOTALL)
                     if not m:
                         continue
                     mime, b64data = m.group(1), m.group(2)
-                    raw = _b64.b64decode(b64data)
+                    raw = base64.b64decode(b64data)
                     if len(raw) > 20 * 1024 * 1024:
                         logger.warning("[AI绘图站] base64参考图超过20MB，跳过")
                         continue
                     ext = mime.split("/")[-1].replace("jpeg", "jpg")
-                    import time as _t
-                    fname = f"{int(_t.time()*1000)}.{ext}"
+                    fname = f"{int(time.time()*1000)}.{ext}"
                     save_path = ref_dir / fname
                     await asyncio.to_thread(save_path.write_bytes, raw)
                     result.append(str(save_path))
@@ -3580,8 +3552,7 @@ class GiteeAIImagePlugin(Star):
             ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
             ref_dir.mkdir(parents=True, exist_ok=True)
 
-            import time as _time
-            safe_name = f"{int(_time.time() * 1000)}_{filename}"
+            safe_name = f"{int(time.time() * 1000)}_{filename}"
             save_path = ref_dir / safe_name
 
             data = file.read()
