@@ -61,6 +61,7 @@ const bridge = window.AstrBotPluginPage || {
   apiPost: async (name, payload) => {
     console.info('[mock]', name, payload);
     if (name === 'switch_persona') return { success:true, active:{id:payload.id,name:payload.id} };
+    if (name === 'upload_ref_image_b64') return { success:false, error:'mock环境不支持上传，请在AstrBot中使用' };
     return { success:true };
   },
 };
@@ -695,7 +696,8 @@ function renderRefPreviews(refs) {
 }
 
 async function uploadRefImages(files) {
-  // 通过后端 upload_ref_image 接口上传，避免大 base64 撑爆 save_config payload
+  // Pages 在 iframe 内，fetch 无法直接访问插件路由，改用 FileReader 读 base64
+  // 再通过 bridge.apiPost 发送到后端 upload_ref_image_b64 接口转存为本地文件
   const btn = $('modal-upload-btn');
   const status = $('modal-upload-status');
   if (!files || !files.length) return;
@@ -712,20 +714,24 @@ async function uploadRefImages(files) {
   status.textContent = `上传中 (0/${fileArr.length})...`;
   status.className = 'upload-status uploading';
 
-  let done = 0;
-  let failed = 0;
+  // 先用 FileReader 把所有文件读成 base64
+  const b64List = await Promise.all(fileArr.map(file => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload  = () => resolve({ data: r.result, filename: file.name });
+    r.onerror = () => reject(new Error(`读取 ${file.name} 失败`));
+    r.readAsDataURL(file);
+  })));
 
-  for (const file of fileArr) {
-    const fd = new FormData();
-    fd.append('file', file);
+  let done = 0, failed = 0;
+
+  for (const { data, filename } of b64List) {
     try {
-      const resp = await fetch('/astrbot_plugin_aiimg_enhanced/upload_ref_image', { method:'POST', body: fd });
-      const json = await resp.json();
-      if (json.success && json.path) {
-        _modalRefs.push(json.path);
+      const res = await bridge.apiPost('upload_ref_image_b64', { data, filename });
+      if (res && res.success && res.path) {
+        _modalRefs.push(res.path);
       } else {
         failed++;
-        console.warn('[upload] failed:', json.error);
+        console.warn('[upload] server error:', res?.error);
       }
     } catch(e) {
       failed++;
