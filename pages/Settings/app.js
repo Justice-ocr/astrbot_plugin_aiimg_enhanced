@@ -815,12 +815,10 @@ async function init(){
     renderProviders();renderAllChains();updateStats();markDirty();
     $('provider-modal').style.display='none';
   });
-  $('provider-modal').addEventListener('click',e=>{if(e.target===$('provider-modal'))$('provider-modal').style.display='none';});
   $('btn-add-persona').addEventListener('click',()=>openPersonaModal(-1));
   $('btn-modal-close').addEventListener('click',()=>$('persona-modal').style.display='none');
   $('btn-modal-cancel').addEventListener('click',()=>$('persona-modal').style.display='none');
   $('btn-modal-ok').addEventListener('click',savePersonaModal);
-  $('persona-modal').addEventListener('click',e=>{if(e.target===$('persona-modal'))$('persona-modal').style.display='none';});
   // 上传按钮
   const uploadBtn = $('modal-upload-btn');
   const fileInput = $('modal-file-input');
