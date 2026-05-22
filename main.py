@@ -889,7 +889,7 @@ class GiteeAIImagePlugin(Star):
                      {"grok_video", "flow2api_video", "custom_video"}]
         video_ids = [pid for pid in self.registry.provider_ids()
                      if self.registry.get(pid).get("__template_key", "") in
-                     {"grok_video", "flow2api_video", "custom_video"}]
+                     {"grok_video", "grok2api_video", "flow2api_video", "custom_video"}]
 
         draw_primary  = self._get_primary_provider("draw")
         edit_primary  = self._get_primary_provider("edit")
