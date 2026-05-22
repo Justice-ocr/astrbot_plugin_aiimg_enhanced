@@ -101,6 +101,47 @@ def _extract_ref_from_string(text: str) -> tuple[str | None, bytes | None]:
     return None, None
 
 
+def _parse_sse_or_json(raw: bytes) -> Any:
+    """自动检测并解析 SSE 或普通 JSON 响应。
+
+    SSE 格式（text/event-stream）：每行 "data: {...}"，取最后一个含图片的事件。
+    普通 JSON：直接解析。
+    """
+    text = raw.decode("utf-8", errors="replace").strip()
+
+    # 检测是否是 SSE（含 "data:" 前缀的行）
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    has_sse = any(l.startswith("data:") for l in lines)
+
+    if not has_sse:
+        return json.loads(text)
+
+    # SSE：收集所有 data: 事件
+    events = []
+    for line in lines:
+        if not line.startswith("data:"):
+            continue
+        data_str = line[5:].strip()
+        if data_str in ("[DONE]", ""):
+            continue
+        try:
+            events.append(json.loads(data_str))
+        except json.JSONDecodeError:
+            pass
+
+    if not events:
+        raise json.JSONDecodeError("SSE 无有效事件", text, 0)
+
+    # 优先返回含图片数据的事件（data[]、url、b64_json）
+    for evt in reversed(events):
+        if not isinstance(evt, dict):
+            continue
+        if evt.get("data") or evt.get("url") or evt.get("b64_json"):
+            return evt
+    # fallback：返回最后一个事件
+    return events[-1]
+
+
 def _parse_image_api_response(data: Any) -> list[tuple[str | None, bytes | None]]:
     results: list[tuple[str | None, bytes | None]] = []
     if isinstance(data, dict) and isinstance(data.get("data"), list):
@@ -325,7 +366,7 @@ class GrokImagesBackend:
                             await asyncio.sleep(self._retry_delay_seconds(attempt))
                             continue
                         raise RuntimeError(last_error)
-                    data = json.loads(raw_content.decode("utf-8"))
+                    data = _parse_sse_or_json(raw_content)
                     results = _parse_image_api_response(data)
                     if results:
                         logger.info(
@@ -342,7 +383,7 @@ class GrokImagesBackend:
                         await asyncio.sleep(self._retry_delay_seconds(attempt))
                         continue
                 except json.JSONDecodeError:
-                    last_error = "API 响应格式异常"
+                    last_error = "API 响应格式异常（非 JSON/SSE）"
                 except Exception as e:
                     last_error = str(e)
                     if attempt < self.max_retries - 1:
@@ -463,7 +504,7 @@ class GrokImagesBackend:
                                 await asyncio.sleep(self._retry_delay_seconds(attempt))
                                 continue
                             raise RuntimeError(last_error)
-                        data = json.loads(raw_content.decode("utf-8"))
+                        data = _parse_sse_or_json(raw_content)
                         results = _parse_image_api_response(data)
                         if results:
                             logger.info(
@@ -481,7 +522,7 @@ class GrokImagesBackend:
                             await asyncio.sleep(self._retry_delay_seconds(attempt))
                             continue
                     except json.JSONDecodeError:
-                        last_error = "API 响应格式异常"
+                        last_error = "API 响应格式异常（非 JSON/SSE）"
                     except Exception as e:
                         last_error = str(e)
                         if attempt < self.max_retries - 1:
