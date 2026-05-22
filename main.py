@@ -160,6 +160,12 @@ class GiteeAIImagePlugin(Star):
                 ["POST"],
                 "上传人设参考图",
             ),
+            (
+                "upload_ref_image_b64",
+                self._pages_upload_ref_image_b64,
+                ["POST"],
+                "上传人设参考图（base64 JSON）",
+            ),
         ]
         for name, handler, methods, desc in routes:
             register_web_api(f"/{_pid}/{name}", handler, methods, desc)
@@ -3569,6 +3575,49 @@ class GiteeAIImagePlugin(Star):
             })
         except Exception as e:
             logger.error("[Pages] upload_ref_image 失败: %s", e, exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    async def _pages_upload_ref_image_b64(self):
+        """POST /astrbot_plugin_aiimg_enhanced/upload_ref_image_b64
+        JSON: { "data": "data:image/jpeg;base64,...", "filename": "xxx.jpg" }
+        返回: { success, path }
+        Pages bridge 走 JSON，不支持 multipart，所以用此接口。
+        """
+        try:
+            body = await request.get_json(force=True) or {}
+            data_url = str(body.get("data") or "").strip()
+            filename  = str(body.get("filename") or "upload.jpg").strip()
+
+            if not data_url.startswith("data:image"):
+                return jsonify({"success": False, "error": "无效的 base64 图片数据"}), 400
+
+            import re as _re
+            m = _re.match(r"data:(image/[^;]+);base64,(.+)", data_url, _re.DOTALL)
+            if not m:
+                return jsonify({"success": False, "error": "base64 格式解析失败"}), 400
+
+            mime = m.group(1)
+            raw  = base64.b64decode(m.group(2))
+            if len(raw) > 20 * 1024 * 1024:
+                return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
+
+            ext = pathlib.Path(filename).suffix.lower()
+            if not ext:
+                ext = "." + mime.split("/")[-1].replace("jpeg", "jpg")
+            if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+                return jsonify({"success": False, "error": f"不支持的文件格式: {ext}"}), 400
+
+            ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+
+            safe_name = f"{int(time.time() * 1000)}_{pathlib.Path(filename).stem}{ext}"
+            save_path = ref_dir / safe_name
+            await asyncio.to_thread(save_path.write_bytes, raw)
+            logger.info("[AI绘图站] 参考图已上传(b64): %s", save_path)
+
+            return jsonify({"success": True, "path": str(save_path)})
+        except Exception as e:
+            logger.error("[Pages] upload_ref_image_b64 失败: %s", e, exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500
 
     async def _ensure_tool_image_cache_dir(self) -> None:
