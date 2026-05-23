@@ -1,5 +1,6 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+import time
 from ..core.emoji_feedback import mark_failed, mark_success
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api import logger
@@ -19,7 +20,8 @@ class MiscCommandsMixin:
             await mark_failed(event)
             event.stop_event()
             return
-        ok = await self._send_image_with_fallback(event, p)
+        _t0 = time.perf_counter()
+        ok = await self._send_image_with_fallback(event, p, elapsed=time.perf_counter() - _t0)
         if ok:
             await mark_success(event)
         else:
