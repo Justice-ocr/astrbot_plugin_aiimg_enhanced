@@ -1248,10 +1248,10 @@ class GiteeAIImagePlugin(
         4. mode=auto：意图不明确时使用
 
         Args:
-            prompt(string): selfie_ref时描述想要的效果/服装/场景；edit时描述如何修改图片；text时描述生成内容
-            mode(string): selfie_ref=bot自拍（图片为参考素材）, edit=改图（图片为被改对象）, text=文生图, auto=自动判断
-            backend(string): auto=自动选择；也可填服务商ID（如 ccode、jojocode）
-            output(string): 输出尺寸，例如 2048x2048 或 4K，留空用默认
+            prompt(string): 图片生成或修改的提示词
+            mode(string): 可选值 selfie_ref edit text auto
+            backend(string): 服务商ID，不指定填 auto
+            output(string): 输出尺寸如 1024x1024，不填用默认
         """
         prompt = (prompt or "").strip()
         m = (mode or "auto").strip().lower()
@@ -1528,11 +1528,11 @@ class GiteeAIImagePlugin(
         - 先规划多条不同 prompt，再批量执行，不要自己重复调用单图工具。
 
         Args:
-            prompt(string): 用户的总要求。应包含整组图片共同要满足的条件。
-            count(number): 目标数量。建议 2-8。
-            mode(string): auto=自动判断, text=文生图, edit=改图, selfie_ref=参考照自拍
-            backend(string): auto=自动选择；也可填 provider_id（你在 WebUI providers 里配置的 id）
-            output(string): 输出尺寸/分辨率。例: 2048x2048 或 4K（不同后端支持能力不同，留空用默认）
+            prompt(string): 整组图片共同要满足的要求
+            count(number): 目标数量，建议 2-8
+            mode(string): 可选值 auto text edit selfie_ref
+            backend(string): 服务商ID，不指定填 auto
+            output(string): 输出尺寸如 1024x1024，不填用默认
         """
         prompt = str(prompt or "").strip()
         if not prompt:
