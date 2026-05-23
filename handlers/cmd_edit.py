@@ -56,7 +56,6 @@ class EditCommandsMixin:
         用法: /aiedit <提示词>
         需要同时发送或引用图片
         """
-        event.should_call_llm(True)
         await self._do_edit(event, prompt, backend=None)
 
 
@@ -86,7 +85,6 @@ class EditCommandsMixin:
                     prompt = chain_prompt
                 break
         if matched:
-            event.should_call_llm(True)
             await self._do_edit(event, prompt, backend=None)
             event.stop_event()
 
@@ -136,7 +134,6 @@ class EditCommandsMixin:
     @filter.command("改图帮助")
     async def edit_help(self, event: AstrMessageEvent):
         """显示改图帮助"""
-        event.should_call_llm(True)
         msg = """🎨 改图功能帮助
 
 ━━ 基础命令 ━━
