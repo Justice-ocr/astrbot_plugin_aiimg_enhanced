@@ -13,12 +13,10 @@ class MiscCommandsMixin:
         user_id = str(event.get_sender_id() or "")
         p = self._last_image_by_user.get(user_id)
         if not p:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         if not Path(p).exists():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         _t0 = time.perf_counter()
         ok = await self._send_image_with_fallback(event, p, elapsed=time.perf_counter() - _t0)
