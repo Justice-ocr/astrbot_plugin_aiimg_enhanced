@@ -228,7 +228,7 @@ code{font-family:var(--mono);font-size:11px;background:var(--surface2);padding:1
   margin-bottom:8px; min-height:0;
 }
 .ref-thumb {
-  position:relative; width:72px; height:72px;
+  position:relative; width:96px; height:96px;
   border-radius:var(--radius-sm); overflow:hidden;
   border:1px solid var(--border2); background:var(--surface2);
   flex-shrink:0;
