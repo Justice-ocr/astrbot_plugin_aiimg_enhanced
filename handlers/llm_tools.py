@@ -1,5 +1,7 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+from astrbot.api.event import AstrMessageEvent
+from ..core.image_task_parser import ImageTaskSpec
 
 class LLMToolsMixin:
     @filter.llm_tool(name="aiimg_generate")
