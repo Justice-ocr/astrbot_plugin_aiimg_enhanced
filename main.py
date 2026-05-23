@@ -1760,16 +1760,19 @@ class GiteeAIImagePlugin(
 
     # ==================== 内部方法 ====================
 
-    @filter.regex(r"^[/!！.。．]\S", priority=100)
+    @filter.regex(r".", priority=100)
     async def _block_llm_for_commands(self, event: AstrMessageEvent):
-        """拦截所有以指令前缀（/!！.。．）开头的消息，阻止 LLM 介入。
+        """检查原始消息是否以指令前缀开头，若是则禁止 LLM 介入。
 
-        AstrBot 的 ProcessStage 判断是否走 LLM 的条件：
-          not _has_send_oper and is_at_or_wake_command and not call_llm
-        call_llm 默认 False，should_call_llm(True) 将其置为 True，
-        使 `not call_llm` 为 False，从根本上阻止 LLM 触发。
+        注意：AstrBot 在 WakingCheckStage 会把 wake_prefix（如 /）从
+        event.message_str 里裁掉，所以 RegexFilter 拿到的已经是裁剪后的文本。
+        这里改用 event.message_obj.message_str 获取原始消息文本来判断。
+        should_call_llm(True) 将 call_llm 置为 True，使 ProcessStage
+        的 `not call_llm` 条件为 False，从根本上阻止 LLM 触发。
         """
-        event.should_call_llm(True)
+        raw = (getattr(event.message_obj, "message_str", None) or "").strip()
+        if raw and raw[0] in "/!！.。．":
+            event.should_call_llm(True)
 
     async def terminate(self):
         self.debouncer.clear_all()
