@@ -246,6 +246,7 @@ class EditCommandsMixin:
         finally:
             await self._end_user_job(user_id, kind="image")
             event.stop_event()
+            event.should_call_llm(True)
 
 
     async def _do_edit(
@@ -344,5 +345,6 @@ class EditCommandsMixin:
         finally:
             await self._end_user_job(user_id, kind="image")
             event.stop_event()
+            event.should_call_llm(True)
 
     # ==================== 自拍参考照：内部实现 ====================
