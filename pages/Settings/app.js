@@ -289,6 +289,21 @@ function applyConfig(cfg) {
 
   // 高级
   const net=cfg.network||{}, stor=cfg.storage||{};
+  // 填充意图分类模型下拉框（从 get_config 返回的 astrbot_providers 列表）
+  const intentSel = $('adv-intent-provider');
+  if (intentSel && Array.isArray(cfg.astrbot_providers)) {
+    // 保留第一个「不启用」选项，追加 AstrBot providers
+    while (intentSel.options.length > 1) intentSel.remove(1);
+    cfg.astrbot_providers.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.id}${p.model ? ' (' + p.model + ')' : ''}`;
+      intentSel.appendChild(opt);
+    });
+  }
+  // 回显已保存的值
+  const savedIntent = (cfg.features?.intent_classifier?.provider_id) || '';
+  if (intentSel) intentSel.value = savedIntent;
   setVal('adv-debounce', cfg.debounce_interval??10);
   setVal('adv-concur-img', cfg.max_user_concurrency??2);
   setVal('adv-concur-vid', cfg.max_user_video_concurrency??1);
@@ -385,6 +400,7 @@ function buildPayload() {
         presets:S.video_presets.filter(p=>p.name).map(p=>`${p.name}:${p.prompt}`),
       },
       batch:{ max_count:getInt('feat-batch-max',8) },
+      intent_classifier:{ provider_id: ($('adv-intent-provider')?.value||'') },
     },
     storage:{ max_cached_images:getInt('adv-cache-img',50), max_cached_videos:getInt('adv-cache-vid',20) },
     debounce_interval:getInt('adv-debounce',10),
