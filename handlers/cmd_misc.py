@@ -24,6 +24,7 @@ class MiscCommandsMixin:
             await mark_success(event)
         else:
             await mark_failed(event)
+        event.stop_event()
 
 
     @filter.command("服务商")
