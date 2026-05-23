@@ -10,7 +10,6 @@ class DrawCommandsMixin:
     @filter.command("文生图")
     async def generate_image_with_presets(self, event: AstrMessageEvent):
         """支持文生图预设的图片生成命令。"""
-        event.should_call_llm(True)
         parsed = self._parse_structured_image_request(event.message_str)
         if parsed is None or parsed.spec.source_command != "文生图":
             await mark_failed(event)
@@ -69,7 +68,6 @@ class DrawCommandsMixin:
         示例: /aiimg 一个女孩 9:16
         支持比例: 1:1, 4:3, 3:4, 3:2, 2:3, 16:9, 9:16
         """
-        event.should_call_llm(True)
         # 解析参数
         arg = event.message_str.partition(" ")[2]
         if not arg:
@@ -150,7 +148,6 @@ class DrawCommandsMixin:
     @filter.regex(r"[/!！.。．]批量(?:\s*\d+|\d+)(?:\s|$)", priority=-10)
     async def batch_image_command(self, event: AstrMessageEvent):
         """批量图片任务入口。"""
-        event.should_call_llm(True)
         fragment = self._extract_batch_command_fragment(event.message_str)
         parsed = self._parse_structured_image_request(fragment)
         if parsed is None or parsed.batch_count <= 1:
@@ -203,7 +200,6 @@ class DrawCommandsMixin:
     @filter.command("文生图预设列表")
     async def list_draw_presets(self, event: AstrMessageEvent):
         """列出所有可用文生图预设"""
-        event.should_call_llm(True)
         presets = self._get_draw_presets()
         backends = self.draw._candidate_ids()
         draw_conf = self._get_feature("draw")
@@ -246,7 +242,6 @@ class DrawCommandsMixin:
     @filter.command("预设列表")
     async def list_presets(self, event: AstrMessageEvent):
         """列出所有可用预设"""
-        event.should_call_llm(True)
         presets = self.edit.get_preset_names()
         backends = self.edit.get_available_backends()
         edit_conf = self._get_feature("edit")
