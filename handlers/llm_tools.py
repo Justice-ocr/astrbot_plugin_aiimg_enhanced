@@ -1,5 +1,7 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+from ..core.utils import get_images_from_event
+from ..core.emoji_feedback import mark_processing, mark_success
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api import logger
 import asyncio
