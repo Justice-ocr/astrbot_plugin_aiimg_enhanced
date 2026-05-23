@@ -58,6 +58,7 @@ class DrawCommandsMixin:
             await mark_failed(event)
         finally:
             await self._end_user_job(user_id, kind="image")
+            event.stop_event()
 
 
     @filter.command("aiimg", alias={"生图", "画图", "绘图", "出图"})
@@ -143,6 +144,7 @@ class DrawCommandsMixin:
             await mark_failed(event)
         finally:
             await self._end_user_job(user_id, kind="image")
+            event.stop_event()
 
 
     @filter.regex(r"[/!！.。．]批量(?:\s*\d+|\d+)(?:\s|$)", priority=-10)
@@ -193,6 +195,7 @@ class DrawCommandsMixin:
             await mark_failed(event)
         finally:
             await self._end_user_job(user_id, kind="image")
+            event.stop_event()
 
     # ==================== 图生图/改图 ====================
 
