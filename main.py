@@ -1760,6 +1760,11 @@ class GiteeAIImagePlugin(
 
     # ==================== 内部方法 ====================
 
+    async def _fail_cmd(self, event: AstrMessageEvent) -> None:
+        """Command handler 通用失败退出：标记失败 + 禁止 LLM 介入。"""
+        await mark_failed(event)
+        event.should_call_llm(True)
+
     @filter.regex(r".", priority=100)
     async def _block_llm_for_commands(self, event: AstrMessageEvent):
         """检查原始消息是否以指令前缀开头，若是则禁止 LLM 介入。
@@ -2519,8 +2524,7 @@ class GiteeAIImagePlugin(
                 if raw.startswith("json"):
                     raw = raw[4:]
             raw = raw.strip()
-            import json as _json
-            parsed = _json.loads(raw)
+            parsed = json.loads(raw)
             mode = parsed.get("mode")
             backend = parsed.get("backend")
             if mode not in ("edit", "selfie_ref", None):
