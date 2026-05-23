@@ -700,27 +700,27 @@ function refPreviewSrc(r) {
   if (r.startsWith('data:image')) return r;
   if (r.startsWith('http://') || r.startsWith('https://')) return r;
   // 本地绝对路径 → 通过后端 get_image 接口代理返回图片
-  return `/astrbot_plugin_aiimg_enhanced/get_image?path=${encodeURIComponent(r)}`;
+  return `/api/plug/astrbot_plugin_aiimg_enhanced/get_image?path=${encodeURIComponent(r)}`;
 }
 
 function renderRefPreviews(refs) {
   const el = $('modal-ref-previews');
   if (!el) return;
   el.innerHTML = '';
-  if (!refs.length) return;
+  if (!refs || !refs.length) return;
 
   refs.forEach((r, i) => {
     const isBase64 = String(r).startsWith('data:image');
     const isHttp   = String(r).startsWith('http://') || String(r).startsWith('https://');
-    const shortName = isBase64 ? ('图片 ' + (i+1)) : (r.split(/[\/\\]/).pop() || r).slice(0, 22);
+    const shortName = isBase64 ? ('图片 ' + (i+1)) : (r.split(/[\/\\]/).pop() || r).slice(0, 24);
 
     const wrap = document.createElement('div');
     wrap.className = 'ref-thumb';
-    wrap.title = r;
+    wrap.title = isBase64 ? shortName : r;
 
     const img = document.createElement('img');
-    img.loading = 'lazy';
     img.alt = shortName;
+    img.loading = 'lazy';
 
     const errDiv = document.createElement('div');
     errDiv.className = 'ref-thumb-err';
@@ -737,19 +737,17 @@ function renderRefPreviews(refs) {
     delBtn.textContent = '✕';
     delBtn.addEventListener('click', () => {
       _modalRefs.splice(i, 1);
-      $('modal-refs').value = _modalRefs.filter(x=>!String(x).startsWith('data:image')).join('\n');
+      $('modal-refs').value = _modalRefs.filter(x => !String(x).startsWith('data:image')).join('\n');
       renderRefPreviews(_modalRefs);
       markDirty();
     });
 
     if (isBase64 || isHttp) {
-      // base64 和 HTTP URL 直接显示
       img.src = r;
-      img.onerror = () => { errDiv.style.display = 'flex'; img.style.display = 'none'; };
     } else {
-      // 本地路径：通过 bridge.apiGet 获取 base64
-      errDiv.style.display = 'flex'; // 先显示占位符
+      // 本地路径：get_config 时后端应已内联 base64，这里作为兜底
       img.style.display = 'none';
+      errDiv.style.display = 'flex';
       bridge.apiGet('get_image_b64?path=' + encodeURIComponent(r))
         .then(d => {
           if (d && d.success && d.data) {
@@ -760,6 +758,7 @@ function renderRefPreviews(refs) {
         })
         .catch(() => {});
     }
+    img.onerror = () => { img.style.display = 'none'; errDiv.style.display = 'flex'; };
 
     wrap.append(img, errDiv, nameDiv, delBtn);
     el.appendChild(wrap);
