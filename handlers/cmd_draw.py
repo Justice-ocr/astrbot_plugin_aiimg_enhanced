@@ -60,6 +60,7 @@ class DrawCommandsMixin:
         finally:
             await self._end_user_job(user_id, kind="image")
             event.stop_event()
+            event.should_call_llm(True)
 
 
     @filter.command("aiimg", alias={"生图", "画图", "绘图", "出图"})
@@ -147,6 +148,7 @@ class DrawCommandsMixin:
         finally:
             await self._end_user_job(user_id, kind="image")
             event.stop_event()
+            event.should_call_llm(True)
 
 
     @filter.regex(r"[/!！.。．]批量(?:\s*\d+|\d+)(?:\s|$)", priority=-10)
@@ -198,6 +200,7 @@ class DrawCommandsMixin:
         finally:
             await self._end_user_job(user_id, kind="image")
             event.stop_event()
+            event.should_call_llm(True)
 
     # ==================== 图生图/改图 ====================
 
