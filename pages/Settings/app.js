@@ -11,18 +11,18 @@ function inferProviderType(p) {
   if ('num_inference_steps' in p && 'negative_prompt' in p) return 'gitee_images';
   const bu = String(p.base_url || p.api_url || '');
   if (bu.includes('generativelanguage.googleapis.com')) return 'gemini_native';
+  // grok_video: server_url 字段是独有标志
+  if ('server_url' in p && 'api_key' in p) return 'grok_video';
+  if ('server_url' in p) return 'grok_video';
+  // grok2api_video 必须在 x.ai 通用判断之前：base_url含x.ai + api_keys + 无use_proxy + 无generate_path
+  if (bu.includes('x.ai') && 'api_keys' in p && !('use_proxy' in p) && !('generate_path' in p)) return 'grok2api_video';
+  // grok_chat/grok_images
   if (bu.includes('x.ai')) return ('use_proxy' in p && !('supports_edit' in p) && !(p.api_keys && p.api_keys.length)) ? 'grok_chat' : 'grok_images';
   if (bu.includes('gitee.com')) return 'gitee_images';
   const m = String(p.model || '');
   if (m.startsWith('gemini')) return 'gemini_openai_images';
   if ('supports_edit' in p) return 'openai_images';
-  // flow2api_video/grok2api_video 也有 api_url/base_url，必须先排除视频类型
-  // flow2api_video: 有 api_url 且无 base_url 且无 server_url 且无 generate_path
-  // grok2api_video: 有 base_url + api_keys 且无 server_url 且 x.ai 域名，但无 supports_edit/use_proxy
-  if ('server_url' in p && 'api_key' in p) return 'grok_video';
-  if ('server_url' in p) return 'grok_video';
-  // grok2api_video: base_url含x.ai + api_keys + 无 generate_path(custom_video) + 无 use_proxy(grok_chat)
-  if (String(p.base_url||'').includes('x.ai') && 'api_keys' in p && !('use_proxy' in p) && !('generate_path' in p)) return 'grok2api_video';
+  // flow2api_video: api_url + 无base_url + 无generate_path + 有model
   // flow2api_video: api_url + api_keys/api_key + 无 base_url + 无 generate_path
   if ('api_url' in p && !('base_url' in p) && !('generate_path' in p) && !('num_inference_steps' in p) && !('cookie_list' in p)) {
     // 视频：有 model 但无 generate_request_mode
