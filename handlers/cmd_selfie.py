@@ -198,6 +198,8 @@ class SelfieCommandsMixin:
             await mark_failed(event)
         finally:
             await self._end_user_job(user_id, kind="image")
+            event.stop_event()
+            event.should_call_llm(True)
 
 
     async def _set_selfie_reference(self, event: AstrMessageEvent):
