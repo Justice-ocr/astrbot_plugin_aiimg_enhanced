@@ -187,6 +187,7 @@ class SelfieCommandsMixin:
             sent = await self._send_image_with_fallback(event, image_path, elapsed=time.perf_counter() - _t0)
             if not sent:
                 await mark_failed(event)
+                event.stop_event()
                 logger.warning(
                     "[自拍] 结果发送失败，已仅使用表情标注: reason=%s",
                     sent.reason,
