@@ -140,7 +140,6 @@ class PagesAPIMixin:
 
             return jsonify({
                 "success": True,
-                "message": "配置已保存，热重载生效。",
                 "active_persona": {
                     "id": self.persona_mgr.active.id,
                     "name": self.persona_mgr.active.name,
@@ -148,7 +147,7 @@ class PagesAPIMixin:
             })
         except Exception as e:
             logger.error("[Pages] save_config 失败: %s", e, exc_info=True)
-            return jsonify({"success": False, "error": str(e), "message": str(e)})
+            return jsonify({"success": False, "error": str(e)})
 
 
     async def _pages_get_persona(self):
@@ -197,19 +196,19 @@ class PagesAPIMixin:
         try:
             path = str(request.args.get("path") or "").strip()
             if not path:
-                return jsonify({"error": "缺少 path 参数"}), 400
+                return jsonify({"success": False, "error": "缺少 path 参数"}), 400
             p = pathlib.Path(path)
             # 安全检查：只允许 data_dir 下的文件
             try:
                 p.resolve().relative_to(pathlib.Path(self.data_dir).resolve())
             except ValueError:
-                return jsonify({"error": "禁止访问"}), 403
+                return jsonify({"success": False, "error": "禁止访问"}), 403
             if not p.is_file():
-                return jsonify({"error": "文件不存在"}), 404
+                return jsonify({"success": False, "error": "文件不存在"}), 404
             mime = mimetypes.guess_type(str(p))[0] or "image/png"
             return await send_file(str(p), mimetype=mime)
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"success": False, "error": str(e)}), 500
 
 
     async def _save_base64_refs(self, refs: list) -> list:
