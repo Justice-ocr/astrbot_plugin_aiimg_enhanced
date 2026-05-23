@@ -1764,11 +1764,12 @@ class GiteeAIImagePlugin(
     async def _block_llm_for_commands(self, event: AstrMessageEvent):
         """拦截所有以指令前缀（/!！.。．）开头的消息，阻止 LLM 介入。
 
-        AstrBot 在 command handler 执行完后，若 _has_send_oper=False 且未 stop，
-        会继续把消息交给 LLM 处理。此 handler 以高优先级提前 stop_event，
-        确保指令消息永远不会走 LLM 流程。
+        AstrBot 的 ProcessStage 判断是否走 LLM 的条件：
+          not _has_send_oper and is_at_or_wake_command and not call_llm
+        call_llm 默认 False，should_call_llm(True) 将其置为 True，
+        使 `not call_llm` 为 False，从根本上阻止 LLM 触发。
         """
-        event.stop_event()
+        event.should_call_llm(True)
 
     async def terminate(self):
         self.debouncer.clear_all()
