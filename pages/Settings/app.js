@@ -706,28 +706,63 @@ function refPreviewSrc(r) {
 function renderRefPreviews(refs) {
   const el = $('modal-ref-previews');
   if (!el) return;
-  if (!refs.length) { el.innerHTML = ''; return; }
-  el.innerHTML = refs.map((r, i) => {
-    const isBase64 = r.startsWith('data:image');
-    const shortName = isBase64 ? `图片 ${i+1}` : r.split(/[\/\\]/).pop().slice(0, 22) || r.slice(0, 22);
-    const src = refPreviewSrc(r);
-    // data-path 用于 onerror 时通过 bridge 重试
-    const dataPath = (!isBase64 && !r.startsWith('http')) ? esc(r) : '';
-    return `<div class="ref-thumb" title="${esc(r)}">
-      <img src="${isBase64 ? r : esc(src)}" loading="lazy" data-path="${dataPath}"
-           onerror="if(this.dataset.path&&!this._retried){this._retried=true;bridge.apiGet('get_image_b64?path='+encodeURIComponent(this.dataset.path)).then(d=>{if(d&&d.data){this.src=d.data;this.style.display=''}else{this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'}}).catch(()=>{this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'})}else{this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'}"/>
-      <div class="ref-thumb-err" style="display:none">📷</div>
-      <div class="ref-thumb-name">${esc(shortName)}</div>
-      <button class="ref-thumb-del" data-idx="${i}" title="移除">✕</button>
-    </div>`;
-  }).join('');
-  el.querySelectorAll('.ref-thumb-del').forEach(btn => {
-    btn.addEventListener('click', () => {
-      _modalRefs.splice(parseInt(btn.dataset.idx), 1);
-      $('modal-refs').value = _modalRefs.filter(r=>!String(r).startsWith('data:image')).join('\n');
+  el.innerHTML = '';
+  if (!refs.length) return;
+
+  refs.forEach((r, i) => {
+    const isBase64 = String(r).startsWith('data:image');
+    const isHttp   = String(r).startsWith('http://') || String(r).startsWith('https://');
+    const shortName = isBase64 ? ('图片 ' + (i+1)) : (r.split(/[\/\\]/).pop() || r).slice(0, 22);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'ref-thumb';
+    wrap.title = r;
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.alt = shortName;
+
+    const errDiv = document.createElement('div');
+    errDiv.className = 'ref-thumb-err';
+    errDiv.style.display = 'none';
+    errDiv.textContent = '📷';
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'ref-thumb-name';
+    nameDiv.textContent = shortName;
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'ref-thumb-del';
+    delBtn.title = '移除';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', () => {
+      _modalRefs.splice(i, 1);
+      $('modal-refs').value = _modalRefs.filter(x=>!String(x).startsWith('data:image')).join('\n');
       renderRefPreviews(_modalRefs);
       markDirty();
     });
+
+    if (isBase64 || isHttp) {
+      // base64 和 HTTP URL 直接显示
+      img.src = r;
+      img.onerror = () => { errDiv.style.display = 'flex'; img.style.display = 'none'; };
+    } else {
+      // 本地路径：通过 bridge.apiGet 获取 base64
+      errDiv.style.display = 'flex'; // 先显示占位符
+      img.style.display = 'none';
+      bridge.apiGet('get_image_b64?path=' + encodeURIComponent(r))
+        .then(d => {
+          if (d && d.success && d.data) {
+            img.src = d.data;
+            img.style.display = 'block';
+            errDiv.style.display = 'none';
+          }
+        })
+        .catch(() => {});
+    }
+
+    wrap.append(img, errDiv, nameDiv, delBtn);
+    el.appendChild(wrap);
   });
 }
 
