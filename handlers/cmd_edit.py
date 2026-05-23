@@ -244,6 +244,7 @@ class EditCommandsMixin:
             await mark_failed(event)
         finally:
             await self._end_user_job(user_id, kind="image")
+            event.stop_event()
 
 
     async def _do_edit(
@@ -340,5 +341,6 @@ class EditCommandsMixin:
             await mark_failed(event)
         finally:
             await self._end_user_job(user_id, kind="image")
+            event.stop_event()
 
     # ==================== 自拍参考照：内部实现 ====================
