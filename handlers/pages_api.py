@@ -45,6 +45,15 @@ class PagesAPIMixin:
         try:
             payload = dict(self.config) if isinstance(self.config, dict) else {}
             payload["persona_config"] = self.persona_mgr.to_config_dict()
+            # 把 AstrBot 已配置的 Chat 类型 provider 列表一起返回，供前端意图分类下拉框使用
+            try:
+                astrbot_providers = [
+                    {"id": p.meta().id, "model": p.meta().model or ""}
+                    for p in (self.context.get_all_providers() or [])
+                ]
+            except Exception:
+                astrbot_providers = []
+            payload["astrbot_providers"] = astrbot_providers
             return jsonify({"success": True, "config": payload})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)})
