@@ -1,5 +1,10 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+import base64
+import mimetypes
+import pathlib
+import re
+from quart import jsonify, request, send_file
 from astrbot.api import logger
 import asyncio
 import time
