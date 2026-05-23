@@ -1,5 +1,6 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+from ..core.persona_manager import PersonaManager
 
 class PagesAPIMixin:
     def _register_pages_web_api(self) -> None:
