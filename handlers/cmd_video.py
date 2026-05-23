@@ -89,15 +89,18 @@ class VideoCommandsMixin:
         """
         if not bool(self._get_feature("video").get("enabled", False)):
             await mark_failed(event)
+            event.stop_event()
             return
         arg = self._extract_extra_prompt(event, "视频")
         if not arg:
             await mark_failed(event)
+            event.stop_event()
             return
 
         provider_override, arg = self._parse_provider_override_prefix(arg)
         if not arg:
             await mark_failed(event)
+            event.stop_event()
             return
 
         preset, prompt = self._parse_video_args(arg)
@@ -111,10 +114,12 @@ class VideoCommandsMixin:
 
         if self.debouncer.hit(request_id):
             await mark_failed(event)
+            event.stop_event()
             return
 
         if not await self._video_begin(user_id):
             await mark_failed(event)
+            event.stop_event()
             return
 
         try:
@@ -126,6 +131,7 @@ class VideoCommandsMixin:
         except Exception:
             await self._video_end(user_id)
             await mark_failed(event)
+            event.stop_event()
             return
 
         try:
@@ -137,6 +143,7 @@ class VideoCommandsMixin:
         except Exception:
             await self._video_end(user_id)
             await mark_failed(event)
+            event.stop_event()
             return
 
         self._video_tasks.add(task)
