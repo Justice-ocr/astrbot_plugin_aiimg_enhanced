@@ -711,9 +711,11 @@ function renderRefPreviews(refs) {
     const isBase64 = r.startsWith('data:image');
     const shortName = isBase64 ? `图片 ${i+1}` : r.split(/[\/\\]/).pop().slice(0, 22) || r.slice(0, 22);
     const src = refPreviewSrc(r);
+    // data-path 用于 onerror 时通过 bridge 重试
+    const dataPath = (!isBase64 && !r.startsWith('http')) ? esc(r) : '';
     return `<div class="ref-thumb" title="${esc(r)}">
-      <img src="${isBase64 ? r : esc(src)}" loading="lazy"
-           onerror="this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'"/>
+      <img src="${isBase64 ? r : esc(src)}" loading="lazy" data-path="${dataPath}"
+           onerror="if(this.dataset.path&&!this._retried){this._retried=true;bridge.apiGet('get_image_b64?path='+encodeURIComponent(this.dataset.path)).then(d=>{if(d&&d.data){this.src=d.data;this.style.display=''}else{this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'}}).catch(()=>{this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'})}else{this.parentNode.querySelector('.ref-thumb-err').style.display='flex';this.style.display='none'}"/>
       <div class="ref-thumb-err" style="display:none">📷</div>
       <div class="ref-thumb-name">${esc(shortName)}</div>
       <button class="ref-thumb-del" data-idx="${i}" title="移除">✕</button>
@@ -722,7 +724,7 @@ function renderRefPreviews(refs) {
   el.querySelectorAll('.ref-thumb-del').forEach(btn => {
     btn.addEventListener('click', () => {
       _modalRefs.splice(parseInt(btn.dataset.idx), 1);
-      $('modal-refs').value = _modalRefs.join('\n');
+      $('modal-refs').value = _modalRefs.filter(r=>!String(r).startsWith('data:image')).join('\n');
       renderRefPreviews(_modalRefs);
       markDirty();
     });
