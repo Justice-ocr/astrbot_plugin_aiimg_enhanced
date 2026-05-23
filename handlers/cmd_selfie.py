@@ -178,11 +178,12 @@ class SelfieCommandsMixin:
                 return_exceptions=True,
             )
 
+            _t0 = time.perf_counter()
             image_path, task_meta = await self._generate_selfie_image_with_meta(
                 event, prompt, backend
             )
             self._remember_last_image(event, image_path)
-            sent = await self._send_image_with_fallback(event, image_path)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=time.perf_counter() - _t0)
             if not sent:
                 await mark_failed(event)
                 logger.warning(
