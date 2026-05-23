@@ -176,8 +176,7 @@ class EditCommandsMixin:
 
         # 防抖
         if self.debouncer.hit(request_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         p = (prompt or "").strip()
@@ -194,19 +193,16 @@ class EditCommandsMixin:
         )
         logger.debug(f"[改图] 获取到 {len(image_segs)} 个图片段")
         if not image_segs:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         bytes_images = await self._image_segs_to_bytes(image_segs)
         if not bytes_images:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         if not await self._begin_user_job(user_id, kind="image"):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
@@ -271,8 +267,7 @@ class EditCommandsMixin:
 
         # 防抖
         if self.debouncer.hit(request_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         # Optional provider override: "/aiedit @provider_id <prompt>"
@@ -298,20 +293,17 @@ class EditCommandsMixin:
             include_sender_avatar_fallback=False,
         )
         if not image_segs:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         bytes_images = await self._image_segs_to_bytes(image_segs)
 
         if not bytes_images:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         if not await self._begin_user_job(user_id, kind="image"):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         try:
