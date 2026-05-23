@@ -46,7 +46,9 @@ class PagesAPIMixin:
         try:
             payload = dict(self.config) if isinstance(self.config, dict) else {}
             payload["persona_config"] = self.persona_mgr.to_config_dict()
-            # 把 AstrBot 已配置的 Chat 类型 provider 列表一起返回，供前端意图分类下拉框使用
+            # 把本地路径的参考图转成 base64，前端可直接用 img.src（照万象画卷方案）
+            await asyncio.to_thread(self._inline_persona_ref_images, payload)
+            # AstrBot Chat provider 列表，供前端意图分类下拉框使用
             try:
                 astrbot_providers = [
                     {"id": p.meta().id, "model": p.meta().model or ""}
@@ -58,6 +60,51 @@ class PagesAPIMixin:
             return jsonify({"success": True, "config": payload})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)})
+
+    def _inline_persona_ref_images(self, payload: dict) -> None:
+        """把 persona_config 里所有本地路径的参考图转成 base64 data URL。
+        文件不存在或读取失败则保留原路径（前端会显示占位符）。
+        """
+        PAGE_MAX_INLINE = 2 * 1024 * 1024  # 2MB 以内直接内联 base64，超出保留路径
+        persona_cfg = payload.get("persona_config")
+        if not isinstance(persona_cfg, dict):
+            return
+
+        def inline_refs(refs: list) -> list:
+            result = []
+            for ref in refs:
+                ref = str(ref or "").strip()
+                if not ref:
+                    continue
+                if ref.startswith(("data:image", "http://", "https://")):
+                    result.append(ref)
+                    continue
+                try:
+                    p = pathlib.Path(ref)
+                    if not p.is_file():
+                        result.append(ref)
+                        continue
+                    if p.stat().st_size > PAGE_MAX_INLINE:
+                        result.append(ref)  # 太大，保留路径（前端 bridge fallback 处理）
+                        continue
+                    mime = mimetypes.guess_type(str(p))[0] or "image/png"
+                    b64 = base64.b64encode(p.read_bytes()).decode()
+                    result.append(f"data:{mime};base64,{b64}")
+                except Exception:
+                    result.append(ref)
+            return result
+
+        # 处理各人设的 persona_ref_image
+        for profile in persona_cfg.get("profiles") or []:
+            if isinstance(profile, dict):
+                profile["persona_ref_image"] = inline_refs(
+                    profile.get("persona_ref_image") or []
+                )
+        # 处理全局 persona_ref_image
+        if "persona_ref_image" in persona_cfg:
+            persona_cfg["persona_ref_image"] = inline_refs(
+                persona_cfg.get("persona_ref_image") or []
+            )
 
 
     async def _pages_save_config(self):
