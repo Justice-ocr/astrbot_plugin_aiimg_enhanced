@@ -19,7 +19,6 @@ class SelfieCommandsMixin:
         if not self._is_selfie_enabled():
             await mark_failed(event)
             return
-        event.should_call_llm(True)
         prompt = self._extract_extra_prompt(event, "自拍")
         await self._do_selfie(event, prompt, backend=None)
 
@@ -50,7 +49,6 @@ class SelfieCommandsMixin:
         - /自拍参考 查看
         - /自拍参考 删除
         """
-        event.should_call_llm(True)
         if not self._is_selfie_enabled():
             await mark_failed(event)
             return
