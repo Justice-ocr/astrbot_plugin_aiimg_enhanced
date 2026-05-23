@@ -338,3 +338,4 @@ class VideoCommandsMixin:
                 await mark_failed(event)
         finally:
             await self._video_end(user_id)
+            event.stop_event()
