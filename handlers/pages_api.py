@@ -28,6 +28,7 @@ class PagesAPIMixin:
             ("get_persona", self._pages_get_persona, ["GET"], "获取人设信息"),
             ("switch_persona", self._pages_switch_persona, ["POST"], "切换人设"),
             ("get_image", self._pages_get_image, ["GET"], "获取本地参考图预览"),
+            ("get_image_b64", self._pages_get_image_b64, ["GET"], "获取本地参考图base64（bridge用）"),
             (
                 "upload_ref_image",
                 self._pages_upload_ref_image,
@@ -210,6 +211,28 @@ class PagesAPIMixin:
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
 
+
+    async def _pages_get_image_b64(self):
+        """GET /astrbot_plugin_aiimg_enhanced/get_image_b64?path=<abs_path>
+        通过 bridge.apiGet 调用，返回 {success, data: "data:image/...;base64,..."} 用于 Pages 预览。
+        """
+        try:
+            path = str(request.args.get("path") or "").strip()
+            if not path:
+                return jsonify({"success": False, "error": "缺少 path 参数"}), 400
+            p = pathlib.Path(path)
+            try:
+                p.resolve().relative_to(pathlib.Path(self.data_dir).resolve())
+            except ValueError:
+                return jsonify({"success": False, "error": "禁止访问"}), 403
+            if not p.is_file():
+                return jsonify({"success": False, "error": "文件不存在"}), 404
+            mime = mimetypes.guess_type(str(p))[0] or "image/png"
+            raw = await asyncio.to_thread(p.read_bytes)
+            b64 = base64.b64encode(raw).decode()
+            return jsonify({"success": True, "data": f"data:{mime};base64,{b64}"})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
 
     async def _save_base64_refs(self, refs: list) -> list:
         """把 persona_ref_image 列表里的 base64 data URL 转存为本地文件，返回替换后的列表。"""
