@@ -923,9 +923,17 @@ class GiteeAIImagePlugin(
         return "自拍参考图模式已关闭（features.selfie.enabled=false）"
 
     async def _send_image_with_fallback(
-        self, event: AstrMessageEvent, image_path: Path, *, max_attempts: int = 3
+        self,
+        event: AstrMessageEvent,
+        image_path: Path,
+        *,
+        max_attempts: int = 3,
+        elapsed: float | None = None,
     ) -> SendImageResult:
         """发送图片，按顺序尝试不同方式，每次只发一次，成功立即返回。
+
+        Args:
+            elapsed: 生图耗时（秒），非 None 时在发图后追发耗时提示。
 
         发送顺序：
         1. 大图（>阈值）优先以文件形式发送
@@ -957,6 +965,11 @@ class GiteeAIImagePlugin(
                     await event.send(event.plain_result("（图片较大，以文件形式发送）"))
                 except Exception:
                     pass
+                if elapsed is not None:
+                    try:
+                        await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
+                    except Exception:
+                        pass
                 return SendImageResult(ok=True, cached_path=p, used_fallback=True)
             except Exception as e:
                 logger.warning("[send_image] large image file send failed: %s", e)
@@ -970,6 +983,11 @@ class GiteeAIImagePlugin(
             try:
                 await event.send(event.chain_result([Image.fromFileSystem(str(p))]))
                 logger.debug("[send_image] fromFileSystem OK (attempt=%s)", attempt)
+                if elapsed is not None:
+                    try:
+                        await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
+                    except Exception:
+                        pass
                 return SendImageResult(ok=True, cached_path=p, used_fallback=False)
             except Exception as e:
                 last_exc = e
@@ -981,6 +999,11 @@ class GiteeAIImagePlugin(
                 data = await asyncio.to_thread(p.read_bytes)
                 await event.send(event.chain_result([Image.fromBytes(data)]))
                 logger.info("[send_image] fromBytes OK (attempt=%s)", attempt)
+                if elapsed is not None:
+                    try:
+                        await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
+                    except Exception:
+                        pass
                 return SendImageResult(ok=True, cached_path=p, used_fallback=True)
             except Exception as e:
                 last_exc = e
@@ -996,6 +1019,11 @@ class GiteeAIImagePlugin(
                     try:
                         await event.send(event.chain_result([Image.fromBytes(compact)]))
                         logger.info("[send_image] compact fromBytes OK")
+                        if elapsed is not None:
+                            try:
+                                await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
+                            except Exception:
+                                pass
                         return SendImageResult(ok=True, cached_path=p, used_fallback=True)
                     except Exception as e:
                         last_exc = e
@@ -1009,6 +1037,11 @@ class GiteeAIImagePlugin(
                         await event.send(event.plain_result("（图片发送遇到问题，已改用文件形式）"))
                     except Exception:
                         pass
+                    if elapsed is not None:
+                            try:
+                                await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
+                            except Exception:
+                                pass
                     return SendImageResult(ok=True, cached_path=p, used_fallback=True)
                 except Exception as e:
                     last_exc = e
@@ -1355,7 +1388,8 @@ class GiteeAIImagePlugin(
                     resolution=resolution,
                 )
                 return await self._finalize_llm_tool_image(
-                    event, image_path, task_meta=task_meta
+                    event, image_path, task_meta=task_meta,
+                    elapsed=time.perf_counter() - _t_start,
                 )
 
             # 自动模式：优先识别"自拍"语义 + 已配置参考照
@@ -1385,7 +1419,8 @@ class GiteeAIImagePlugin(
                         )
                     else:
                         return await self._finalize_llm_tool_image(
-                            event, image_path, task_meta=task_meta
+                            event, image_path, task_meta=task_meta,
+                    elapsed=time.perf_counter() - _t_start,
                         )
 
             if m == "auto":
@@ -1408,7 +1443,8 @@ class GiteeAIImagePlugin(
                         )
                     else:
                         return await self._finalize_llm_tool_image(
-                            event, image_path, task_meta=task_meta
+                            event, image_path, task_meta=task_meta,
+                    elapsed=time.perf_counter() - _t_start,
                         )
 
             # 改图：用户消息中有图片（不含头像兜底）或显式指定
@@ -1467,7 +1503,8 @@ class GiteeAIImagePlugin(
                     backend=target_backend,
                 )
                 return await self._finalize_llm_tool_image(
-                    event, image_path, task_meta=task_meta
+                    event, image_path, task_meta=task_meta,
+                    elapsed=time.perf_counter() - _t_start,
                 )
 
             # 默认：文生图
@@ -1494,7 +1531,8 @@ class GiteeAIImagePlugin(
                 backend=target_backend,
             )
             return await self._finalize_llm_tool_image(
-                event, image_path, task_meta=task_meta
+                event, image_path, task_meta=task_meta,
+                    elapsed=time.perf_counter() - _t_start,
             )
 
         except Exception as e:
@@ -2285,10 +2323,11 @@ class GiteeAIImagePlugin(
         image_path: Path,
         *,
         task_meta: dict[str, Any],
+        elapsed: float | None = None,
     ) -> mcp.types.CallToolResult:
         self._remember_last_image(event, image_path)
 
-        sent = await self._send_image_with_fallback(event, image_path)
+        sent = await self._send_image_with_fallback(event, image_path, elapsed=elapsed)
         if not sent:
             await self._signal_llm_tool_failure(event)
             logger.warning(
