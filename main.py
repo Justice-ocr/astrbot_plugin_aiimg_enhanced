@@ -2538,7 +2538,13 @@ class GiteeAIImagePlugin(
             if llm_result.get("mode") == "edit":
                 logger.debug("[aiimg_generate] auto-selfie skipped: LLM classified as edit")
                 return False
-            # mode=selfie_ref 或 null → 继续检查参考图
+            elif llm_result.get("mode") == "selfie_ref":
+                pass  # LLM 明确判断为自拍，继续检查参考图
+            else:
+                # mode=null（LLM 无法判断）→ 回退关键词检查
+                if not self._is_auto_selfie_prompt(prompt):
+                    logger.debug("[aiimg_generate] auto-selfie skipped: LLM null + no selfie keyword")
+                    return False
         elif not self._is_auto_selfie_prompt(prompt):
             logger.debug("[aiimg_generate] auto-selfie skipped: prompt not selfie")
             return False  # LLM 未启用，回退关键词
