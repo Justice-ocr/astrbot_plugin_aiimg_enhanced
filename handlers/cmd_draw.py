@@ -137,6 +137,7 @@ class DrawCommandsMixin:
                 logger.warning(
                     "[文生图] 图片发送失败，已仅使用表情标注: reason=%s", sent.reason
                 )
+                event.stop_event()
                 return
 
             # 标记成功
