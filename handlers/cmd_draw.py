@@ -1,5 +1,6 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+from astrbot.api.event import AstrMessageEvent
 
 class DrawCommandsMixin:
     @filter.command("文生图")
