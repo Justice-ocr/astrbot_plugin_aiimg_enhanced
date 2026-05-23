@@ -1899,6 +1899,74 @@ class GiteeAIImagePlugin(
         image_segs = await get_images_from_event(event, include_avatar=False)
         return bool(image_segs)
 
+    async def _classify_intent_with_llm(
+        self, prompt: str, has_image: bool
+    ) -> dict | None:
+        """用 AstrBot 配置的 LLM 一次性判断意图和服务商。
+
+        返回 {mode: edit|selfie_ref|None, backend: provider_id|None}
+        未配置 intent_classifier.provider_id 时返回 None。
+        """
+        try:
+            provider_id = (
+                self._get_feature("intent_classifier")
+                .get("provider_id", "") or ""
+            ).strip()
+            if not provider_id:
+                return None
+
+            video_keys = {"grok_video", "grok2api_video", "flow2api_video", "custom_video"}
+            draw_provider_ids = [
+                pid for pid in self.registry.provider_ids()
+                if self.registry.get(pid).get("__template_key", "") not in video_keys
+            ]
+            providers_hint = (
+                "可用服务商ID列表: " + ", ".join(draw_provider_ids)
+                if draw_provider_ids else "(无可用服务商)"
+            )
+            image_hint = "(消息中包含图片)" if has_image else ""
+
+            classify_prompt = chr(10).join([
+                "用户消息" + image_hint + ": [" + prompt + "]",
+                "",
+                providers_hint,
+                "",
+                "请判断以下两项，用JSON格式回答，不要解释：",
+                "1. mode: edit=改图本身 selfie_ref=Bot出镜 null=无法判断",
+                "2. backend: 用户明确指定的服务商ID，未指定填null",
+                "",
+                '{"mode": "edit", "backend": null}',
+            ])
+            response = await self.context.llm_generate(
+                chat_provider_id=provider_id,
+                system_prompt=(
+                    "你是意图分类器，只输出JSON对象，含mode和backend两个字段。"
+                ),
+                prompt=classify_prompt,
+            )
+            raw = (response.completion_text or "").strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            raw = raw.strip()
+            import json as _json
+            parsed = _json.loads(raw)
+            mode = parsed.get("mode")
+            backend = parsed.get("backend")
+            if mode not in ("edit", "selfie_ref", None):
+                mode = None
+            if backend and backend not in draw_provider_ids:
+                backend = None
+            logger.debug(
+                "[aiimg] LLM分类: %r -> mode=%s backend=%s",
+                prompt[:40], mode, backend,
+            )
+            return {"mode": mode, "backend": backend}
+        except Exception as e:
+            logger.warning("[aiimg] LLM分类失败，回退关键词: %s", e)
+            return None
+
     def _is_auto_selfie_prompt(self, prompt: str) -> bool:
         """判断 prompt 是否明确指向 bot 出镜（自拍/参考图穿搭等场景）。
 
@@ -1951,11 +2019,11 @@ class GiteeAIImagePlugin(
         # 优先用 LLM 分类（用户配置了意图分类模型时）
         has_image = bool(await get_images_from_event(event, include_avatar=False))
         llm_result = await self._classify_intent_with_llm(prompt, has_image=has_image)
-        if llm_result == "selfie_ref":
-            pass  # 继续检查参考图是否存在
-        elif llm_result == "edit":
-            logger.debug("[aiimg_generate] auto-selfie skipped: LLM classified as edit")
-            return False
+        if llm_result is not None:
+            if llm_result.get("mode") == "edit":
+                logger.debug("[aiimg_generate] auto-selfie skipped: LLM classified as edit")
+                return False
+            # mode=selfie_ref 或 null → 继续检查参考图
         elif not self._is_auto_selfie_prompt(prompt):
             logger.debug("[aiimg_generate] auto-selfie skipped: prompt not selfie")
             return False  # LLM 未启用，回退关键词
