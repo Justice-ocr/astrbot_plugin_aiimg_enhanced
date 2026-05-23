@@ -243,6 +243,16 @@
             <div class="field-row"><label>图片最大缓存数</label><input type="number" class="inp sm" id="adv-cache-img" min="10" max="500"/></div>
             <div class="field-row"><label>视频最大缓存数</label><input type="number" class="inp sm" id="adv-cache-vid" min="0" max="500"/></div>
           </div>
+          <div class="card wide">
+            <div class="card-title">意图分类模型 <span class="hint">（可选）自拍/改图自动判断</span></div>
+            <div class="card-desc">有图片的消息中，用 LLM 判断用户是想改图还是让 Bot 自拍。留空使用关键词匹配（默认）。</div>
+            <div class="field-row">
+              <label>AstrBot 模型提供商</label>
+              <select class="inp" id="adv-intent-provider">
+                <option value="">— 不启用，使用关键词匹配 —</option>
+              </select>
+            </div>
+          </div>
           <div class="card">
             <div class="card-title">网络安全</div>
             <div class="field-row"><label>允许从私有地址下载 <span class="hint warn">⚠ 高风险</span></label><input type="checkbox" class="toggle" id="adv-net-private"/></div>
