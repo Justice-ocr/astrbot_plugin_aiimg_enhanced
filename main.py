@@ -1759,6 +1759,16 @@ class GiteeAIImagePlugin(
 
     # ==================== 内部方法 ====================
 
+    @filter.regex(r"^[/!！.。．]\S", priority=100)
+    async def _block_llm_for_commands(self, event: AstrMessageEvent):
+        """拦截所有以指令前缀（/!！.。．）开头的消息，阻止 LLM 介入。
+
+        AstrBot 在 command handler 执行完后，若 _has_send_oper=False 且未 stop，
+        会继续把消息交给 LLM 处理。此 handler 以高优先级提前 stop_event，
+        确保指令消息永远不会走 LLM 流程。
+        """
+        event.stop_event()
+
     async def terminate(self):
         self.debouncer.clear_all()
         try:
