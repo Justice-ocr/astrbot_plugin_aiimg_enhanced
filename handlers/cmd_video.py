@@ -332,3 +332,4 @@ class VideoCommandsMixin:
         finally:
             await self._video_end(user_id)
             event.stop_event()
+            event.should_call_llm(True)
