@@ -12,25 +12,21 @@ class DrawCommandsMixin:
         """支持文生图预设的图片生成命令。"""
         parsed = self._parse_structured_image_request(event.message_str)
         if parsed is None or parsed.spec.source_command != "文生图":
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         spec = parsed.spec
         if not str(spec.effective_prompt or "").strip():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         user_id = str(event.get_sender_id() or "")
         request_id = self._debounce_key(event, "draw_preset", user_id)
         if self.debouncer.hit(request_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         if not await self._begin_user_job(user_id, kind="image"):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
@@ -50,7 +46,7 @@ class DrawCommandsMixin:
             self._remember_last_image(event, executed.image_path)
             sent = await self._send_image_with_fallback(event, executed.image_path, elapsed=time.perf_counter() - _t0)
             if not sent:
-                await mark_failed(event)
+                await self._fail_cmd(event)
                 return
             await self._save_last_image_task_meta(event, executed.task_meta)
             await mark_success(event)
@@ -77,14 +73,12 @@ class DrawCommandsMixin:
         # 解析参数
         arg = event.message_str.partition(" ")[2]
         if not arg:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         provider_override: str | None = None
         provider_override, arg = self._parse_provider_override_prefix(arg)
         if not arg:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         prompt = arg.strip()
@@ -96,8 +90,7 @@ class DrawCommandsMixin:
             size = self._resolve_ratio_size(ratio)
 
         if not prompt:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         user_id = str(event.get_sender_id() or "")
@@ -105,13 +98,11 @@ class DrawCommandsMixin:
 
         # 防抖检查
         if self.debouncer.hit(request_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         if not await self._begin_user_job(user_id, kind="image"):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
@@ -164,8 +155,7 @@ class DrawCommandsMixin:
         fragment = self._extract_batch_command_fragment(event.message_str)
         parsed = self._parse_structured_image_request(fragment)
         if parsed is None or parsed.batch_count <= 1:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         if parsed.batch_count > self._get_batch_max_count():
             await event.send(
@@ -173,19 +163,16 @@ class DrawCommandsMixin:
                     f"批量数量过大，当前上限为 {self._get_batch_max_count()}。"
                 )
             )
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         user_id = str(event.get_sender_id() or "")
         request_id = self._debounce_key(event, "batch_image", user_id)
         if self.debouncer.hit(request_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         if not await self._begin_user_job(user_id, kind="image"):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         try:
