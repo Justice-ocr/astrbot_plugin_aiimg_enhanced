@@ -1948,9 +1948,17 @@ class GiteeAIImagePlugin(
     async def _should_auto_selfie_ref(
         self, event: AstrMessageEvent, prompt: str
     ) -> bool:
-        if not self._is_auto_selfie_prompt(prompt):
-            logger.debug("[aiimg_generate] auto-selfie skipped: prompt not selfie")
+        # 优先用 LLM 分类（用户配置了意图分类模型时）
+        has_image = bool(await get_images_from_event(event, include_avatar=False))
+        llm_result = await self._classify_intent_with_llm(prompt, has_image=has_image)
+        if llm_result == "selfie_ref":
+            pass  # 继续检查参考图是否存在
+        elif llm_result == "edit":
+            logger.debug("[aiimg_generate] auto-selfie skipped: LLM classified as edit")
             return False
+        elif not self._is_auto_selfie_prompt(prompt):
+            logger.debug("[aiimg_generate] auto-selfie skipped: prompt not selfie")
+            return False  # LLM 未启用，回退关键词
         paths, source = await self._get_selfie_reference_paths(event)
         if not paths:
             logger.info("[aiimg_generate] auto-selfie skipped: no reference images")
