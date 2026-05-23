@@ -18,8 +18,7 @@ class SelfieCommandsMixin:
         - 可附带多张参考图（衣服/姿势/场景）作为额外参考
         """
         if not self._is_selfie_enabled():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         prompt = self._extract_extra_prompt(event, "自拍")
         await self._do_selfie(event, prompt, backend=None)
@@ -35,8 +34,7 @@ class SelfieCommandsMixin:
         prompt = self._extract_command_arg_anywhere(msg, "自拍")
         if prompt or "/自拍" in msg or "自拍" in msg:
             if not self._is_selfie_enabled():
-                await mark_failed(event)
-                event.stop_event()
+                await self._fail_cmd(event)
                 return
             await self._do_selfie(event, prompt, backend=None)
             event.stop_event()
@@ -52,8 +50,7 @@ class SelfieCommandsMixin:
         - /自拍参考 删除
         """
         if not self._is_selfie_enabled():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         arg = self._extract_extra_prompt(event, "自拍参考")
         action, _, _rest = (arg or "").strip().partition(" ")
@@ -87,6 +84,7 @@ class SelfieCommandsMixin:
             return
 
         await mark_failed(event)
+        event.stop_event()
 
 
     @filter.regex(r"[/!！.。．]自拍参考(\s|$)", priority=-10)
@@ -96,8 +94,7 @@ class SelfieCommandsMixin:
         if self._is_direct_command_message(event, ("自拍参考",)):
             return
         if not self._is_selfie_enabled():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         arg = self._extract_command_arg_anywhere(msg, "自拍参考")
         action, _, _rest = (arg or "").strip().partition(" ")
@@ -147,21 +144,18 @@ class SelfieCommandsMixin:
     ):
         """指令 /自拍 执行入口。"""
         if not self._is_selfie_enabled():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         user_id = str(event.get_sender_id() or "")
         request_id = self._debounce_key(event, "selfie", user_id)
 
         if self.debouncer.hit(request_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         if not await self._begin_user_job(user_id, kind="image"):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         p = (prompt or "").strip()
@@ -208,20 +202,17 @@ class SelfieCommandsMixin:
 
     async def _set_selfie_reference(self, event: AstrMessageEvent):
         if not self._is_selfie_enabled():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         image_segs = await get_images_from_event(event, include_avatar=False)
         if not image_segs:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         bytes_images = await self._image_segs_to_bytes(image_segs)
         if not bytes_images:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         # 限制数量，避免一次塞太多
@@ -232,8 +223,7 @@ class SelfieCommandsMixin:
         try:
             await self.refs.set(store_key, bytes_images)
         except Exception:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         await mark_success(event)
@@ -241,14 +231,12 @@ class SelfieCommandsMixin:
 
     async def _show_selfie_reference(self, event: AstrMessageEvent):
         if not self._is_selfie_enabled():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         paths, source = await self._get_selfie_reference_paths(event)
         if not paths:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         # 最多回显 5 张，避免刷屏
@@ -270,8 +258,7 @@ class SelfieCommandsMixin:
 
     async def _delete_selfie_reference(self, event: AstrMessageEvent):
         if not self._is_selfie_enabled():
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         store_key = self._get_selfie_ref_store_key(event)
@@ -287,3 +274,4 @@ class SelfieCommandsMixin:
             await mark_success(event)
         else:
             await mark_failed(event)
+            event.stop_event()
