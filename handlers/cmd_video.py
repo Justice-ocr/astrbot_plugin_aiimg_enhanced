@@ -1,5 +1,7 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+from astrbot.api.event import AstrMessageEvent
+from astrbot.api.message_components import Video
 
 class VideoCommandsMixin:
     async def _video_begin(self, user_id: str) -> bool:
