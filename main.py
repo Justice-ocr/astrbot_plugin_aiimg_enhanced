@@ -1288,6 +1288,7 @@ class GiteeAIImagePlugin(
         """
         prompt = (prompt or "").strip()
         m = (mode or "auto").strip().lower()
+        _t_start = time.perf_counter()  # 生图开始计时
 
         # === TTL 去重检查（防止 ToolLoop 重复调用）===
         message_id = (
