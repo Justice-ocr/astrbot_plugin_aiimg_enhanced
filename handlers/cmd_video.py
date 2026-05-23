@@ -87,7 +87,6 @@ class VideoCommandsMixin:
         - /视频 [@provider_id] <提示词>
         - /视频 [@provider_id] <预设名> [额外提示词]
         """
-        event.should_call_llm(True)
         if not bool(self._get_feature("video").get("enabled", False)):
             await mark_failed(event)
             return
@@ -155,8 +154,6 @@ class VideoCommandsMixin:
         arg = self._extract_command_arg_anywhere(msg, "视频")
         if not arg and "/视频" not in msg:
             return
-
-        event.should_call_llm(True)
         if not bool(self._get_feature("video").get("enabled", False)):
             await mark_failed(event)
             event.stop_event()
@@ -224,7 +221,6 @@ class VideoCommandsMixin:
     @filter.command("视频预设列表")
     async def list_video_presets(self, event: AstrMessageEvent):
         """列出所有可用视频预设"""
-        event.should_call_llm(True)
         presets = self._get_video_presets()
         names = list(presets.keys())
         if not names:
