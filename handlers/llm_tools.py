@@ -85,12 +85,11 @@ class LLMToolsMixin:
                 "An image request for this user is already in progress. Do not resubmit unless the user asks for a new request."
             )
 
-        # 方案 B：如果用户在对话里说"@ccode 画一只猫"，LLM 会把 "@ccode 画一只猫" 原样
-        # 作为 prompt 传进来，此处解析出 @provider_id 前缀并转为 backend 覆盖
+        # 方案 B：@provider_id 前缀解析
         provider_from_prompt, prompt = self._parse_provider_override_prefix(prompt)
         if provider_from_prompt and (not backend or backend.lower() == "auto"):
             backend = provider_from_prompt
-            logger.debug("[aiimg_generate] 从 prompt 解析出 backend=%s", backend)
+            logger.debug("[aiimg_generate] 从 @前缀 解析出 backend=%s", backend)
 
         b_raw = (backend or "auto").strip()
         known_provider_ids = set(self.registry.provider_ids())
@@ -104,6 +103,26 @@ class LLMToolsMixin:
                 b_raw,
             )
             target_backend = None
+
+        # 方案 C：LLM 意图分类（若用户配置了 intent_classifier）
+        # auto 模式下才做，避免与已明确指定的 backend 冲突
+        if target_backend is None:
+            has_image = bool(
+                await get_images_from_event(event, include_avatar=False)
+            )
+            llm_cls = await self._classify_intent_with_llm(prompt, has_image=has_image)
+            if llm_cls:
+                # backend 判断
+                llm_backend = llm_cls.get("backend")
+                if llm_backend and llm_backend in known_provider_ids:
+                    target_backend = llm_backend
+                    logger.debug(
+                        "[aiimg_generate] LLM识别服务商: %s", target_backend
+                    )
+                # mode 判断（仅 auto 时覆盖）
+                if m == "auto" and llm_cls.get("mode") in ("edit", "selfie_ref"):
+                    m = llm_cls["mode"]
+                    logger.debug("[aiimg_generate] LLM识别mode: %s", m)
 
         output = (output or "").strip()
         size = output if output and "x" in output else None
