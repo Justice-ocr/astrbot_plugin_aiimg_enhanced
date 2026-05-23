@@ -232,6 +232,7 @@ class EditCommandsMixin:
             sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
             if not sent:
                 await mark_failed(event)
+                event.stop_event()
                 logger.warning(
                     "[改图] 结果发送失败，已仅使用表情标注: reason=%s",
                     sent.reason,
@@ -333,6 +334,7 @@ class EditCommandsMixin:
             sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
             if not sent:
                 await mark_failed(event)
+                event.stop_event()
                 logger.warning(
                     "[改图] 结果发送失败，已仅使用表情标注: reason=%s",
                     sent.reason,
