@@ -1,5 +1,9 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+from astrbot.api import logger
+import asyncio
+import time
+from pathlib import Path
 from ..core.persona_manager import PersonaManager
 
 class PagesAPIMixin:
