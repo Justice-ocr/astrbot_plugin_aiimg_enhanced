@@ -229,7 +229,7 @@ class EditCommandsMixin:
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
-            sent = await self._send_image_with_fallback(event, image_path)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
             if not sent:
                 await mark_failed(event)
                 logger.warning(
@@ -330,7 +330,7 @@ class EditCommandsMixin:
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
-            sent = await self._send_image_with_fallback(event, image_path)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
             if not sent:
                 await mark_failed(event)
                 logger.warning(
