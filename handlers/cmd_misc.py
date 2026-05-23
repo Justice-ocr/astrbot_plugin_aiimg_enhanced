@@ -1,5 +1,7 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
+from astrbot.api.event import AstrMessageEvent
+from pathlib import Path
 
 class MiscCommandsMixin:
     @filter.command("重发图片")
