@@ -1769,15 +1769,40 @@ class GiteeAIImagePlugin(
     async def _block_llm_for_commands(self, event: AstrMessageEvent):
         """检查原始消息是否以指令前缀开头，若是则禁止 LLM 介入。
 
-        注意：AstrBot 在 WakingCheckStage 会把 wake_prefix（如 /）从
-        event.message_str 里裁掉，所以 RegexFilter 拿到的已经是裁剪后的文本。
-        这里改用 event.message_obj.message_str 获取原始消息文本来判断。
-        should_call_llm(True) 将 call_llm 置为 True，使 ProcessStage
-        的 `not call_llm` 条件为 False，从根本上阻止 LLM 触发。
+        wake_prefix 裁剪前的原始文本有多个来源，按优先级尝试：
+        1. event.message_obj.message_str（平台层构建的原始纯文本）
+        2. event.message_obj.message 消息链里第一个 Plain 段
+        3. event.message_str（已被裁剪，但私聊时 wake_prefix 可能为空）
         """
+        CMD_PREFIXES = "/!！.。．"
+        # 方案1：message_obj.message_str
         raw = (getattr(event.message_obj, "message_str", None) or "").strip()
-        if raw and raw[0] in "/!！.。．":
+        if not raw:
+            # 方案2：消息链第一个文本段
+            try:
+                from astrbot.core.message.components import Plain
+                for seg in (event.message_obj.message or []):
+                    if isinstance(seg, Plain):
+                        raw = (seg.text or "").strip()
+                        break
+            except Exception:
+                pass
+        if not raw:
+            # 方案3：event.message_str（已裁剪，但仍有参考价值）
+            raw = (event.message_str or "").strip()
+        if raw and raw[0] in CMD_PREFIXES:
             event.should_call_llm(True)
+            return
+        # 兜底：检查 wake_prefix 配置里是否有 / 前缀被裁掉
+        # 如果 event.is_at_or_wake_command 且 event.message_str 不以指令前缀开头
+        # 说明原始消息的指令前缀已被裁掉（wake_prefix 就是指令前缀）
+        # 此时检查裁剪前后长度差，如果 message_str 比 raw 短，说明有前缀被去掉
+        if event.is_at_or_wake_command and raw:
+            # 裁剪后的 message_str 如果不以这些前缀开头，但原始触发了 wake
+            # 说明 wake_prefix 本身就是指令前缀，阻止 LLM
+            cur = (event.message_str or "").strip()
+            if cur != raw:  # 说明 wake_prefix 被裁掉了
+                event.should_call_llm(True)
 
     async def terminate(self):
         self.debouncer.clear_all()
