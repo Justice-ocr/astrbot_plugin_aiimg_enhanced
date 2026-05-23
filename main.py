@@ -1766,6 +1766,1379 @@ class GiteeAIImagePlugin(
         event.stop_event()
         event.should_call_llm(True)
 
+    @filter.command("文生图")
+    async def generate_image_with_presets(self, event: AstrMessageEvent):
+        """支持文生图预设的图片生成命令。"""
+        parsed = self._parse_structured_image_request(event.message_str)
+        if parsed is None or parsed.spec.source_command != "文生图":
+            await self._fail_cmd(event)
+            return
+
+        spec = parsed.spec
+        if not str(spec.effective_prompt or "").strip():
+            await self._fail_cmd(event)
+            return
+
+        user_id = str(event.get_sender_id() or "")
+        request_id = self._debounce_key(event, "draw_preset", user_id)
+        if self.debouncer.hit(request_id):
+            await self._fail_cmd(event)
+            return
+        if not await self._begin_user_job(user_id, kind="image"):
+            await self._fail_cmd(event)
+            return
+
+        # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
+        self.debouncer.hit(self._debounce_key(event, "aiimg", user_id))
+
+        try:
+            # 发送等待提示文案，同时贴处理中表情
+            await asyncio.gather(
+                event.send(event.plain_result(
+                    self._pending_msg_draw(str(spec.effective_prompt or ""))
+                )),
+                mark_processing(event),
+                return_exceptions=True,
+            )
+            _t0 = time.perf_counter()
+            executed = await self._execute_image_task_spec(event, spec)
+            self._remember_last_image(event, executed.image_path)
+            sent = await self._send_image_with_fallback(event, executed.image_path, elapsed=time.perf_counter() - _t0)
+            if not sent:
+                await self._fail_cmd(event)
+                return
+            await self._save_last_image_task_meta(event, executed.task_meta)
+            await mark_success(event)
+        except Exception as exc:
+            logger.error("[文生图预设] 失败: %s", exc, exc_info=True)
+            try:
+                await event.send(event.plain_result(self._error_msg_draw(exc)))
+            except Exception:
+                pass
+            await mark_failed(event)
+        finally:
+            await self._end_user_job(user_id, kind="image")
+            event.stop_event()
+            event.should_call_llm(True)
+
+    @filter.command("aiimg", alias={"生图", "画图", "绘图", "出图"})
+    async def generate_image_command(self, event: AstrMessageEvent, prompt: str):
+        """生成图片指令
+
+        用法: /aiimg [@provider_id] <提示词> [比例]
+        示例: /aiimg 一个女孩 9:16
+        支持比例: 1:1, 4:3, 3:4, 3:2, 2:3, 16:9, 9:16
+        """
+        # 解析参数
+        arg = event.message_str.partition(" ")[2]
+        if not arg:
+            await self._fail_cmd(event)
+            return
+        provider_override: str | None = None
+        provider_override, arg = self._parse_provider_override_prefix(arg)
+        if not arg:
+            await self._fail_cmd(event)
+            return
+
+        prompt = arg.strip()
+        size: str | None = None
+        parts = arg.split()
+        if parts and parts[-1] in self.SUPPORTED_RATIOS:
+            ratio = parts[-1]
+            prompt = " ".join(parts[:-1]).strip()
+            size = self._resolve_ratio_size(ratio)
+
+        if not prompt:
+            await self._fail_cmd(event)
+            return
+
+        user_id = str(event.get_sender_id() or "")
+        request_id = self._debounce_key(event, "generate", user_id)
+
+        # 防抖检查
+        if self.debouncer.hit(request_id):
+            await self._fail_cmd(event)
+            return
+
+        if not await self._begin_user_job(user_id, kind="image"):
+            await self._fail_cmd(event)
+            return
+
+        # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
+        self.debouncer.hit(self._debounce_key(event, "aiimg", user_id))
+
+        try:
+            # 发送等待提示文案，同时贴"处理中"表情（两者并行）
+            await asyncio.gather(
+                event.send(event.plain_result(self._pending_msg_draw(prompt))),
+                mark_processing(event),
+                return_exceptions=True,
+            )
+            t_start = time.perf_counter()
+            image_path = await self.draw.generate(
+                prompt, size=size, provider_id=provider_override
+            )
+            t_end = time.perf_counter()
+
+            self._remember_last_image(event, image_path)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
+            if not sent:
+                await mark_failed(event)
+                logger.warning(
+                    "[文生图] 图片发送失败，已仅使用表情标注: reason=%s", sent.reason
+                )
+                event.stop_event()
+                return
+
+            # 标记成功
+            await mark_success(event)
+            logger.info(
+                f"[文生图] 完成: {prompt[:30] if prompt else '文生图'}..., 耗时={t_end - t_start:.2f}s"
+            )
+
+        except Exception as e:
+            logger.error(f"[文生图] 失败: {e}")
+            try:
+                await event.send(event.plain_result(self._error_msg_draw(e)))
+            except Exception:
+                pass
+            await mark_failed(event)
+        finally:
+            await self._end_user_job(user_id, kind="image")
+            event.stop_event()
+            event.should_call_llm(True)
+
+    @filter.regex(r"[/!！.。．]批量(?:\s*\d+|\d+)(?:\s|$)", priority=-10)
+    async def batch_image_command(self, event: AstrMessageEvent):
+        """批量图片任务入口。"""
+        fragment = self._extract_batch_command_fragment(event.message_str)
+        parsed = self._parse_structured_image_request(fragment)
+        if parsed is None or parsed.batch_count <= 1:
+            await self._fail_cmd(event)
+            return
+        if parsed.batch_count > self._get_batch_max_count():
+            await event.send(
+                event.plain_result(
+                    f"批量数量过大，当前上限为 {self._get_batch_max_count()}。"
+                )
+            )
+            await self._fail_cmd(event)
+            return
+
+        user_id = str(event.get_sender_id() or "")
+        request_id = self._debounce_key(event, "batch_image", user_id)
+        if self.debouncer.hit(request_id):
+            await self._fail_cmd(event)
+            return
+        if not await self._begin_user_job(user_id, kind="image"):
+            await self._fail_cmd(event)
+            return
+
+        try:
+            # 发送等待提示文案
+            await asyncio.gather(
+                event.send(event.plain_result(
+                    self._pending_msg_draw(str(parsed.spec.effective_prompt or ""))
+                )),
+                mark_processing(event),
+                return_exceptions=True,
+            )
+            specs = [parsed.spec for _ in range(parsed.batch_count)]
+            results = await self._run_batch_specs(event, specs, stream_send=True)
+            title = f"{self._batch_mode_label(parsed.spec)} x{parsed.batch_count}"
+            if any(result.success and result.value for result in results):
+                await self._remember_batch_success(event, results)
+                await mark_success(event)
+            else:
+                await mark_failed(event)
+        except Exception as exc:
+            logger.error("[批量图片] 失败: %s", exc, exc_info=True)
+            await mark_failed(event)
+        finally:
+            await self._end_user_job(user_id, kind="image")
+            event.stop_event()
+            event.should_call_llm(True)
+
+    # ==================== 图生图/改图 ====================
+
+    @filter.command("文生图预设列表")
+    async def list_draw_presets(self, event: AstrMessageEvent):
+        """列出所有可用文生图预设"""
+        presets = self._get_draw_presets()
+        backends = self.draw._candidate_ids()
+        draw_conf = self._get_feature("draw")
+        chain = []
+        for it in (
+            draw_conf.get("chain", [])
+            if isinstance(draw_conf.get("chain", []), list)
+            else []
+        ):
+            pid = self._extract_chain_provider_id(it)
+            if pid and pid not in chain:
+                chain.append(pid)
+
+        if not presets:
+            msg = "📋 文生图预设列表\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += f"🔧 可用后端: {', '.join(backends)}\n"
+            if chain:
+                msg += f"⭐ 当前链路: {', '.join(chain)}\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += "📌 暂无预设\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += "💡 在配置 features.draw.presets 中添加:\n"
+            msg += '  格式: "预设名:英文提示词"'
+        else:
+            msg = "📋 文生图预设列表\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += f"🔧 可用后端: {', '.join(backends)}\n"
+            if chain:
+                msg += f"⭐ 当前链路: {', '.join(chain)}\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += "📌 预设:\n"
+            for name in presets:
+                msg += f"  • {name}\n"
+        msg += "━━━━━━━━━━━━━━\n"
+        msg += "💡 用法: /文生图 [@provider_id] <预设名> [补充提示词]"
+        yield event.plain_result(msg)
+
+    @filter.command("预设列表")
+    async def list_presets(self, event: AstrMessageEvent):
+        """列出所有可用预设"""
+        presets = self.edit.get_preset_names()
+        backends = self.edit.get_available_backends()
+        edit_conf = self._get_feature("edit")
+        chain = []
+        for it in (
+            edit_conf.get("chain", [])
+            if isinstance(edit_conf.get("chain", []), list)
+            else []
+        ):
+            pid = self._extract_chain_provider_id(it)
+            if pid and pid not in chain:
+                chain.append(pid)
+
+        if not presets:
+            msg = "📋 改图预设列表\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += f"🔧 可用后端: {', '.join(backends)}\n"
+            if chain:
+                msg += f"⭐ 当前链路: {', '.join(chain)}\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += "📌 暂无预设\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += "💡 在配置 features.edit.presets 中添加:\n"
+            msg += '  格式: "触发词:英文提示词"'
+        else:
+            msg = "📋 改图预设列表\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += f"🔧 可用后端: {', '.join(backends)}\n"
+            if chain:
+                msg += f"⭐ 当前链路: {', '.join(chain)}\n"
+            msg += "━━━━━━━━━━━━━━\n"
+            msg += "📌 预设:\n"
+            for name in presets:
+                msg += f"  • {name}\n"
+        msg += "━━━━━━━━━━━━━━\n"
+        msg += "💡 用法: /aiedit [@provider_id] <提示词> [图片]"
+
+        yield event.plain_result(msg)
+
+    def _register_preset_commands(self):
+        """动态注册预设命令
+
+        为每个预设创建对应的命令，如 /手办化, /Q版化 等
+        """
+        preset_names = self.edit.get_preset_names()
+        if not preset_names:
+            return
+
+        for preset_name in preset_names:
+            # 创建闭包捕获 preset_name
+            self._create_and_register_preset_handler(preset_name)
+
+        logger.info(f"[GiteeAIImagePlugin] 已注册 {len(preset_names)} 个预设命令")
+
+    def _create_and_register_preset_handler(self, preset_name: str):
+        """为单个预设创建并注册命令处理器
+
+        支持: /手办化 [额外提示词]
+        例如: /手办化 加点金色元素
+        """
+
+        # 默认后端命令: /手办化
+        async def preset_handler(event: AstrMessageEvent):
+            # 提取命令后的额外提示词
+            extra_prompt = self._extract_extra_prompt(event, preset_name)
+            await self._do_edit_direct(event, extra_prompt, preset=preset_name)
+
+        preset_handler.__name__ = f"preset_{preset_name}"
+        preset_handler.__doc__ = f"预设改图: {preset_name} [额外提示词]"
+
+        self.context.register_commands(
+            star_name="astrbot_plugin_aiimg_enhanced",
+            command_name=preset_name,
+            desc=f"预设改图: {preset_name}",
+            priority=5,
+            awaitable=preset_handler,
+        )
+
+    @filter.command("aiedit", alias={"图生图", "改图", "修图"})
+    async def edit_image_default(self, event: AstrMessageEvent, prompt: str):
+        """使用默认后端改图
+
+        用法: /aiedit <提示词>
+        需要同时发送或引用图片
+        """
+        await self._do_edit(event, prompt, backend=None)
+
+    @filter.regex(r"(?:[/!！.。．])?(改图|图生图|修图|aiedit)", priority=-10)
+    async def edit_image_regex_fallback(self, event: AstrMessageEvent):
+        """兼容“图片在前、文字在后”的消息：确保 /改图 能触发。"""
+        msg = (event.message_str or "").strip()
+        command_names = ("改图", "图生图", "修图", "aiedit")
+        if self._is_framework_direct_command_text(msg, command_names, allow_bare=False):
+            return
+        try:
+            if not await self._has_message_images(event):
+                return
+        except Exception:
+            return
+
+        prompt = ""
+        matched = False
+        for name in command_names:
+            prompt = self._extract_command_arg_anywhere(msg, name)
+            found_in_chain, chain_prompt = self._extract_command_arg_from_chain(
+                event, name
+            )
+            if prompt or found_in_chain:
+                matched = True
+                if not prompt:
+                    prompt = chain_prompt
+                break
+        if matched:
+            await self._do_edit(event, prompt, backend=None)
+            event.stop_event()
+
+    @filter.regex(r"[/!！.。．][^\s]+", priority=-10)
+    async def preset_regex_fallback(self, event: AstrMessageEvent):
+        """兼容“图片在前、预设命令在后”的消息：确保 /<预设名> 能触发。"""
+        msg = (event.message_str or "").strip()
+        preset_names = self.edit.get_preset_names()
+        if not preset_names:
+            return
+
+        # 如果首段文本本来就是 /预设，则交给 command handler，避免重复处理
+        try:
+            if self._is_direct_command_message(event, tuple(preset_names)):
+                return
+        except Exception:
+            pass
+
+        # 仅当消息/引用里确实带图（不含头像兜底）时才兜底，避免误伤其它插件命令
+        try:
+            if not await self._has_message_images(event):
+                return
+        except Exception:
+            return
+
+        # 在任意位置找到第一个匹配的预设命令
+        used_preset: str | None = None
+        for name in preset_names:
+            for prefix in "/!！.。．":
+                if f"{prefix}{name}" in msg:
+                    used_preset = name
+                    break
+            if used_preset:
+                break
+
+        if not used_preset:
+            return
+
+        extra_prompt = self._extract_command_arg_anywhere(msg, used_preset)
+        await self._do_edit_direct(event, extra_prompt, preset=used_preset)
+        event.stop_event()
+
+    # ==================== 服务商 & 链路管理 ====================
+
+    @filter.command("改图帮助")
+    async def edit_help(self, event: AstrMessageEvent):
+        """显示改图帮助"""
+        msg = """🎨 改图功能帮助
+
+━━ 基础命令 ━━
+/aiedit [@provider_id] <提示词>
+
+━━ 使用方式 ━━
+1. 发送图片 + 命令
+2. 引用图片消息 + 命令
+
+━━ 服务商链路 ━━
+在 WebUI 配置：
+- providers：添加服务商（id/url/key/model/超时/重试等）
+- features.edit.chain：按顺序填写 provider_id（第一个=主用，其余=兜底）
+
+━━ 自定义预设 ━━
+查看预设：/预设列表
+在 WebUI 配置 features.edit.presets 添加：
+格式: 预设名:英文提示词
+示例: 手办化:Transform into figurine style
+"""
+
+        yield event.plain_result(msg)
+
+    # ==================== LLM 工具 ====================
+
+    async def _do_edit_direct(
+        self,
+        event: AstrMessageEvent,
+        prompt: str,
+        backend: str | None = None,
+        preset: str | None = None,
+    ):
+        """改图执行入口 (非 generator 版本，用于动态注册的命令)
+
+        使用 event.send() 直接发送消息，不使用 yield
+        """
+        user_id = str(event.get_sender_id() or "")
+        request_id = self._debounce_key(event, "edit", user_id)
+
+        # 防抖
+        if self.debouncer.hit(request_id):
+            await self._fail_cmd(event)
+            return
+
+        p = (prompt or "").strip()
+        override, rest = self._parse_provider_override_prefix(p)
+        if override:
+            backend = override
+            prompt = rest
+
+        # 获取图片
+        image_segs = await get_images_from_event(
+            event,
+            include_avatar=True,
+            include_sender_avatar_fallback=False,
+        )
+        logger.debug(f"[改图] 获取到 {len(image_segs)} 个图片段")
+        if not image_segs:
+            await self._fail_cmd(event)
+            return
+
+        bytes_images = await self._image_segs_to_bytes(image_segs)
+        if not bytes_images:
+            await self._fail_cmd(event)
+            return
+
+        if not await self._begin_user_job(user_id, kind="image"):
+            await self._fail_cmd(event)
+            return
+
+        # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
+        self.debouncer.hit(self._debounce_key(event, "aiimg", user_id))
+
+        try:
+            # 发送等待提示，同时贴处理中表情
+            await asyncio.gather(
+                event.send(event.plain_result(self._pending_msg_edit(prompt))),
+                mark_processing(event),
+                return_exceptions=True,
+            )
+            t_start = time.perf_counter()
+            image_path = await self.edit.edit(
+                prompt=prompt,
+                images=bytes_images,
+                backend=backend,
+                preset=preset,
+            )
+            t_end = time.perf_counter()
+
+            self._remember_last_image(event, image_path)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
+            if not sent:
+                await mark_failed(event)
+                event.stop_event()
+                logger.warning(
+                    "[改图] 结果发送失败，已仅使用表情标注: reason=%s",
+                    sent.reason,
+                )
+                return
+
+            # 标记成功
+            await mark_success(event)
+            display_name = preset or (prompt[:20] if prompt else "改图")
+            logger.info(f"[改图] 完成: {display_name}..., 耗时={t_end - t_start:.2f}s")
+
+        except Exception as e:
+            logger.error(f"[改图] 失败: {e}", exc_info=True)
+            await mark_failed(event)
+        finally:
+            await self._end_user_job(user_id, kind="image")
+            event.stop_event()
+            event.should_call_llm(True)
+
+    async def _do_edit(
+        self,
+        event: AstrMessageEvent,
+        prompt: str,
+        backend: str | None = None,
+        preset: str | None = None,
+    ):
+        """统一改图执行入口
+
+        预设触发逻辑:
+        1. 如果 preset 参数已指定，直接使用
+        2. 否则检查 prompt 是否匹配预设名，若匹配则自动转为预设
+        3. 都不匹配则作为普通提示词处理
+        """
+        user_id = str(event.get_sender_id() or "")
+        request_id = self._debounce_key(event, "edit", user_id)
+
+        # 防抖
+        if self.debouncer.hit(request_id):
+            await self._fail_cmd(event)
+            return
+
+        # Optional provider override: "/aiedit @provider_id <prompt>"
+        p = (prompt or "").strip()
+        override, rest = self._parse_provider_override_prefix(p)
+        if override:
+            backend = override
+            prompt = rest
+
+        # 预设自动检测: prompt 完全匹配预设名时，自动转为预设
+        if not preset and prompt:
+            prompt_stripped = prompt.strip()
+            preset_names = self.edit.get_preset_names()
+            if prompt_stripped in preset_names:
+                preset = prompt_stripped
+                prompt = ""  # 清空 prompt，使用预设的提示词
+                logger.debug(f"[改图] 自动匹配预设: {preset}")
+
+        # 获取图片
+        image_segs = await get_images_from_event(
+            event,
+            include_avatar=True,
+            include_sender_avatar_fallback=False,
+        )
+        if not image_segs:
+            await self._fail_cmd(event)
+            return
+
+        bytes_images = await self._image_segs_to_bytes(image_segs)
+
+        if not bytes_images:
+            await self._fail_cmd(event)
+            return
+
+        if not await self._begin_user_job(user_id, kind="image"):
+            await self._fail_cmd(event)
+            return
+
+        try:
+            # 发送等待提示，同时贴处理中表情
+            await asyncio.gather(
+                event.send(event.plain_result(self._pending_msg_edit(prompt))),
+                mark_processing(event),
+                return_exceptions=True,
+            )
+            t_start = time.perf_counter()
+            image_path = await self.edit.edit(
+                prompt=prompt,
+                images=bytes_images,
+                backend=backend,
+                preset=preset,
+            )
+            t_end = time.perf_counter()
+
+            self._remember_last_image(event, image_path)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
+            if not sent:
+                await mark_failed(event)
+                event.stop_event()
+                logger.warning(
+                    "[改图] 结果发送失败，已仅使用表情标注: reason=%s",
+                    sent.reason,
+                )
+                return
+
+            # 标记成功
+            await mark_success(event)
+            display_name = preset or (prompt[:20] if prompt else "改图")
+            logger.info(f"[改图] 完成: {display_name}..., 耗时={t_end - t_start:.2f}s")
+
+        except Exception as e:
+            logger.error(f"[改图] 失败: {e}")
+            await mark_failed(event)
+        finally:
+            await self._end_user_job(user_id, kind="image")
+            event.stop_event()
+            event.should_call_llm(True)
+
+    # ==================== 自拍参考照：内部实现 ====================
+
+    @filter.command("自拍")
+    async def selfie_command(self, event: AstrMessageEvent):
+        """使用“自拍参考照”生成 Bot 自拍。
+
+        用法:
+        - /自拍 <提示词>
+        - 可附带多张参考图（衣服/姿势/场景）作为额外参考
+        """
+        if not self._is_selfie_enabled():
+            await self._fail_cmd(event)
+            return
+        prompt = self._extract_extra_prompt(event, "自拍")
+        await self._do_selfie(event, prompt, backend=None)
+
+    @filter.regex(r"[/!！.。．]自拍(\s|$)", priority=-10)
+    async def selfie_regex_fallback(self, event: AstrMessageEvent):
+        """兼容“图片在前、文字在后”的消息：确保 /自拍 能触发。"""
+        msg = (event.message_str or "").strip()
+        # 如果本来就是“首段文本命令”，交给 command handler，避免重复回复
+        if self._is_direct_command_message(event, ("自拍",)):
+            return
+        prompt = self._extract_command_arg_anywhere(msg, "自拍")
+        if prompt or "/自拍" in msg or "自拍" in msg:
+            if not self._is_selfie_enabled():
+                await self._fail_cmd(event)
+                return
+            await self._do_selfie(event, prompt, backend=None)
+            event.stop_event()
+
+    @filter.command("自拍参考")
+    async def selfie_reference_command(self, event: AstrMessageEvent):
+        """管理自拍参考照（建议仅管理员使用）。
+
+        用法:
+        - 发送图片 + /自拍参考 设置
+        - /自拍参考 查看
+        - /自拍参考 删除
+        """
+        if not self._is_selfie_enabled():
+            await self._fail_cmd(event)
+            return
+        arg = self._extract_extra_prompt(event, "自拍参考")
+        action, _, _rest = (arg or "").strip().partition(" ")
+        action = action.strip().lower()
+
+        if not action or action in {"帮助", "help", "h"}:
+            msg = (
+                "📸 自拍参考照\n"
+                "━━━━━━━━━━━━━━\n"
+                "设置：发送图片 + /自拍参考 设置\n"
+                "查看：/自拍参考 查看\n"
+                "删除：/自拍参考 删除\n"
+                "━━━━━━━━━━━━━━\n"
+                "生成自拍：/自拍 <提示词>\n"
+                "可附带额外参考图（衣服/姿势/场景）"
+            )
+            yield event.plain_result(msg)
+            return
+
+        if action in {"设置", "set"}:
+            await self._set_selfie_reference(event)
+            return
+
+        if action in {"查看", "show", "看"}:
+            async for result in self._show_selfie_reference(event):
+                yield result
+            return
+
+        if action in {"删除", "del", "delete"}:
+            await self._delete_selfie_reference(event)
+            return
+
+        await mark_failed(event)
+        event.stop_event()
+
+    @filter.regex(r"[/!！.。．]自拍参考(\s|$)", priority=-10)
+    async def selfie_reference_regex_fallback(self, event: AstrMessageEvent):
+        """兼容“图片在前、文字在后”的消息：确保 /自拍参考 能触发。"""
+        msg = (event.message_str or "").strip()
+        if self._is_direct_command_message(event, ("自拍参考",)):
+            return
+        if not self._is_selfie_enabled():
+            await self._fail_cmd(event)
+            return
+        arg = self._extract_command_arg_anywhere(msg, "自拍参考")
+        action, _, _rest = (arg or "").strip().partition(" ")
+        action = action.strip().lower()
+
+        if not action or action in {"帮助", "help", "h"}:
+            yield event.plain_result(
+                "📸 自拍参考照\n"
+                "━━━━━━━━━━━━━━\n"
+                "设置：发送图片 + /自拍参考 设置\n"
+                "查看：/自拍参考 查看\n"
+                "删除：/自拍参考 删除\n"
+                "━━━━━━━━━━━━━━\n"
+                "生成自拍：/自拍 <提示词>\n"
+                "可附带额外参考图（衣服/姿势/场景）"
+            )
+            event.stop_event()
+            return
+
+        if action in {"设置", "set"}:
+            await self._set_selfie_reference(event)
+            event.stop_event()
+            return
+
+        if action in {"查看", "show", "看"}:
+            async for r in self._show_selfie_reference(event):
+                yield r
+            event.stop_event()
+            return
+
+        if action in {"删除", "del", "delete"}:
+            await self._delete_selfie_reference(event)
+            event.stop_event()
+            return
+
+        await mark_failed(event)
+        event.stop_event()
+
+    # ==================== 视频生成 ====================
+
+    async def _do_selfie(
+        self,
+        event: AstrMessageEvent,
+        prompt: str,
+        backend: str | None = None,
+    ):
+        """指令 /自拍 执行入口。"""
+        if not self._is_selfie_enabled():
+            await self._fail_cmd(event)
+            return
+
+        user_id = str(event.get_sender_id() or "")
+        request_id = self._debounce_key(event, "selfie", user_id)
+
+        if self.debouncer.hit(request_id):
+            await self._fail_cmd(event)
+            return
+
+        if not await self._begin_user_job(user_id, kind="image"):
+            await self._fail_cmd(event)
+            return
+
+        p = (prompt or "").strip()
+        override, rest = self._parse_provider_override_prefix(p)
+        if override:
+            backend = override
+            prompt = rest
+
+        try:
+            # 发送等待提示文案，同时贴"处理中"表情（两者并行）
+            pending_text = self._pending_msg_selfie(prompt)
+            await asyncio.gather(
+                event.send(event.plain_result(pending_text)),
+                mark_processing(event),
+                return_exceptions=True,
+            )
+
+            _t0 = time.perf_counter()
+            image_path, task_meta = await self._generate_selfie_image_with_meta(
+                event, prompt, backend
+            )
+            self._remember_last_image(event, image_path)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=time.perf_counter() - _t0)
+            if not sent:
+                await mark_failed(event)
+                event.stop_event()
+                logger.warning(
+                    "[自拍] 结果发送失败，已仅使用表情标注: reason=%s",
+                    sent.reason,
+                )
+                return
+            await mark_success(event)
+            await self._save_last_image_task_meta(event, task_meta)
+        except Exception as e:
+            logger.error(f"[自拍] 失败: {e}", exc_info=True)
+            try:
+                await event.send(event.plain_result(self._error_msg_selfie(e)))
+            except Exception:
+                pass
+            await mark_failed(event)
+        finally:
+            await self._end_user_job(user_id, kind="image")
+            event.stop_event()
+            event.should_call_llm(True)
+
+    async def _set_selfie_reference(self, event: AstrMessageEvent):
+        if not self._is_selfie_enabled():
+            await self._fail_cmd(event)
+            return
+
+        image_segs = await get_images_from_event(event, include_avatar=False)
+        if not image_segs:
+            await self._fail_cmd(event)
+            return
+
+        bytes_images = await self._image_segs_to_bytes(image_segs)
+        if not bytes_images:
+            await self._fail_cmd(event)
+            return
+
+        # 限制数量，避免一次塞太多
+        max_images = 8
+        bytes_images = bytes_images[:max_images]
+
+        store_key = self._get_selfie_ref_store_key(event)
+        try:
+            await self.refs.set(store_key, bytes_images)
+        except Exception:
+            await self._fail_cmd(event)
+            return
+
+        await mark_success(event)
+
+    async def _show_selfie_reference(self, event: AstrMessageEvent):
+        if not self._is_selfie_enabled():
+            await self._fail_cmd(event)
+            return
+
+        paths, source = await self._get_selfie_reference_paths(event)
+        if not paths:
+            await self._fail_cmd(event)
+            return
+
+        # 最多回显 5 张，避免刷屏
+        max_show = 5
+        show_paths = paths[:max_show]
+        img_components = []
+        for p in show_paths:
+            ps = str(p)
+            if ps.startswith("http://") or ps.startswith("https://"):
+                img_components.append(Image.fromURL(ps))
+            else:
+                img_components.append(Image.fromFileSystem(ps))
+        if img_components:
+            yield event.chain_result(img_components)
+        yield event.plain_result(
+            f"📌 当前自拍参考照来源：{source}，共 {len(paths)} 张（已展示 {len(show_paths)} 张）"
+        )
+
+    async def _delete_selfie_reference(self, event: AstrMessageEvent):
+        if not self._is_selfie_enabled():
+            await self._fail_cmd(event)
+            return
+
+        store_key = self._get_selfie_ref_store_key(event)
+        deleted = await self.refs.delete(store_key)
+
+        webui_paths = self._get_config_selfie_reference_paths()
+        if webui_paths:
+            logger.info(
+                "[自拍参考] 命令保存的参考照已删除，但 WebUI reference_images 仍生效（优先级更高）"
+            )
+
+        if deleted:
+            await mark_success(event)
+        else:
+            await mark_failed(event)
+            event.stop_event()
+
+    async def _video_begin(self, user_id: str) -> bool:
+        """单用户并发保护：成功占用返回 True，否则 False（上限可配置）"""
+        return await self._begin_user_job(str(user_id or ""), kind="video")
+
+    async def _video_end(self, user_id: str) -> None:
+        await self._end_user_job(str(user_id or ""), kind="video")
+
+    async def _send_video_result(self, event: AstrMessageEvent, video_url: str) -> None:
+        vconf = self._get_feature("video")
+        mode = str(vconf.get("send_mode", "auto")).strip().lower()
+        if mode not in {"auto", "url", "file"}:
+            mode = "auto"
+
+        send_timeout = int(vconf.get("send_timeout_seconds", 90) or 90)
+        send_timeout = max(10, min(send_timeout, 300))
+
+        download_timeout = int(vconf.get("download_timeout_seconds", 300) or 300)
+        download_timeout = max(1, min(download_timeout, 3600))
+
+        async def _send_file(url: str) -> bool:
+            try:
+                video_path = await self.videomgr.download_video(
+                    url, timeout_seconds=download_timeout
+                )
+                await asyncio.wait_for(
+                    event.send(
+                        event.chain_result([Video.fromFileSystem(str(video_path))])
+                    ),
+                    timeout=float(send_timeout),
+                )
+                return True
+            except Exception as e:
+                logger.warning(f"[视频] 本地文件发送失败: {e}")
+                return False
+
+        async def _send_url(url: str) -> bool:
+            try:
+                await asyncio.wait_for(
+                    event.send(event.chain_result([Video.fromURL(url)])),
+                    timeout=float(send_timeout),
+                )
+                return True
+            except Exception as e:
+                logger.warning(f"[视频] URL 发送失败: {e}")
+                return False
+
+        # file/url forced
+        if mode == "file":
+            if await _send_file(video_url):
+                return
+            await event.send(event.plain_result(video_url))
+            return
+
+        if mode == "url":
+            if await _send_url(video_url):
+                return
+            await event.send(event.plain_result(video_url))
+            return
+
+        # auto: prefer file first (most platforms won't render URL as playable video)
+        if await _send_file(video_url):
+            return
+        if await _send_url(video_url):
+            return
+        await event.send(event.plain_result(video_url))
+
+    @filter.command("视频")
+    async def generate_video_command(self, event: AstrMessageEvent):
+        """生成视频
+
+        用法:
+        - /视频 [@provider_id] <提示词>
+        - /视频 [@provider_id] <预设名> [额外提示词]
+        """
+        if not bool(self._get_feature("video").get("enabled", False)):
+            await self._fail_cmd(event)
+            return
+        arg = self._extract_extra_prompt(event, "视频")
+        if not arg:
+            await self._fail_cmd(event)
+            return
+
+        provider_override, arg = self._parse_provider_override_prefix(arg)
+        if not arg:
+            await self._fail_cmd(event)
+            return
+
+        preset, prompt = self._parse_video_args(arg)
+        presets = self._get_video_presets()
+        if preset and preset in presets:
+            preset_prompt = presets[preset]
+            prompt = f"{preset_prompt}, {prompt}" if prompt else preset_prompt
+
+        user_id = str(event.get_sender_id() or "")
+        request_id = self._debounce_key(event, "video", user_id)
+
+        if self.debouncer.hit(request_id):
+            await self._fail_cmd(event)
+            return
+
+        if not await self._video_begin(user_id):
+            await self._fail_cmd(event)
+            return
+
+        try:
+            await asyncio.gather(
+                event.send(event.plain_result(self._pending_msg_video(prompt))),
+                mark_processing(event),
+                return_exceptions=True,
+            )
+        except Exception:
+            await self._video_end(user_id)
+            await self._fail_cmd(event)
+            return
+
+        try:
+            task = asyncio.create_task(
+                self._async_generate_video(
+                    event, prompt, user_id, provider_id=provider_override
+                )
+            )
+        except Exception:
+            await self._video_end(user_id)
+            await self._fail_cmd(event)
+            return
+
+        self._video_tasks.add(task)
+        task.add_done_callback(lambda t: self._video_tasks.discard(t))
+        return
+
+    @filter.regex(r"[/!！.。．]视频(\s|$)", priority=-10)
+    async def generate_video_regex_fallback(self, event: AstrMessageEvent):
+        """兼容“图片在前、文字在后”的消息：确保 /视频 能触发。"""
+        msg = (event.message_str or "").strip()
+        if self._is_direct_command_message(event, ("视频",)):
+            return
+
+        arg = self._extract_command_arg_anywhere(msg, "视频")
+        if not arg and "/视频" not in msg:
+            return
+        if not bool(self._get_feature("video").get("enabled", False)):
+            await self._fail_cmd(event)
+            return
+        if not arg:
+            await self._fail_cmd(event)
+            return
+
+        provider_override, arg = self._parse_provider_override_prefix(arg)
+        if not arg:
+            await self._fail_cmd(event)
+            return
+
+        preset, prompt = self._parse_video_args(arg)
+        presets = self._get_video_presets()
+        if preset and preset in presets:
+            preset_prompt = presets[preset]
+            prompt = f"{preset_prompt}, {prompt}" if prompt else preset_prompt
+
+        user_id = str(event.get_sender_id() or "")
+        request_id = self._debounce_key(event, "video", user_id)
+
+        if self.debouncer.hit(request_id):
+            await self._fail_cmd(event)
+            return
+
+        if not await self._video_begin(user_id):
+            await self._fail_cmd(event)
+            return
+
+        try:
+            await asyncio.gather(
+                event.send(event.plain_result(self._pending_msg_video(prompt))),
+                mark_processing(event),
+                return_exceptions=True,
+            )
+        except Exception:
+            await self._video_end(user_id)
+            await self._fail_cmd(event)
+            return
+
+        try:
+            task = asyncio.create_task(
+                self._async_generate_video(
+                    event, prompt, user_id, provider_id=provider_override
+                )
+            )
+        except Exception:
+            await self._video_end(user_id)
+            await self._fail_cmd(event)
+            return
+
+        self._video_tasks.add(task)
+        task.add_done_callback(lambda t: self._video_tasks.discard(t))
+        event.stop_event()
+        return
+
+    @filter.command("视频预设列表")
+    async def list_video_presets(self, event: AstrMessageEvent):
+        """列出所有可用视频预设"""
+        presets = self._get_video_presets()
+        names = list(presets.keys())
+        if not names:
+            yield event.plain_result(
+                "📋 视频预设列表\n暂无预设（请在配置 features.video.presets 中添加）"
+            )
+            return
+
+        msg = "📋 视频预设列表\n"
+        for name in names:
+            msg += f"- {name}\n"
+        msg += "\n用法: /视频 [@provider_id] <预设名> [额外提示词]"
+        yield event.plain_result(msg)
+
+    # ==================== 管理命令 ====================
+
+    async def _async_generate_video(
+        self,
+        event: AstrMessageEvent,
+        prompt: str,
+        user_id: str,
+        *,
+        provider_id: str | None = None,
+        llm_tool_failure: bool = False,
+    ) -> None:
+        try:
+            image_segs = await get_images_from_event(
+                event,
+                include_avatar=True,
+                include_sender_avatar_fallback=False,
+            )
+            had_image = bool(image_segs)
+            image_bytes: bytes | None = None
+            for i, seg in enumerate(image_segs):
+                try:
+                    b64 = await asyncio.wait_for(seg.convert_to_base64(), timeout=30.0)
+                    image_bytes = decode_base64_image_payload(b64)
+                    break
+                except Exception as e:
+                    logger.warning(f"[视频] 图片 {i + 1} 转换失败，跳过: {e}")
+
+            # 允许文生视频（无图）走支持的后端；但若用户确实发了图却读不到，则直接失败
+            if had_image and not image_bytes:
+                if llm_tool_failure:
+                    await self._append_plugin_conversation_note(
+                        event,
+                        "The last video generation task failed and has ended because the source image could not be read. Do not retry automatically unless the user explicitly asks.",
+                    )
+                if llm_tool_failure:
+                    await self._signal_llm_tool_failure(event)
+                else:
+                    await self._fail_cmd(event)
+                return
+
+            t_start = time.perf_counter()
+            candidates = (
+                [str(provider_id).strip()] if provider_id else self._get_video_chain()
+            )
+            candidates = [c for c in candidates if c]
+            if not candidates:
+                raise RuntimeError(
+                    "No video providers configured. Please set features.video.chain."
+                )
+
+            last_error: Exception | None = None
+            video_url: str | None = None
+            used_pid: str | None = None
+            for pid in candidates:
+                try:
+                    backend = self.registry.get_video_backend(pid)
+                    candidate_url = await backend.generate_video_url(
+                        prompt=prompt, image_bytes=image_bytes
+                    )
+                    candidate_url = str(candidate_url or "").strip()
+                    if not candidate_url:
+                        raise RuntimeError("Provider returned empty video url")
+                    video_url = candidate_url
+                    used_pid = pid
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.warning("[视频] Provider=%s 失败: %s", pid, e)
+
+            if not video_url:
+                raise RuntimeError(f"视频生成失败: {last_error}") from last_error
+
+            await self._send_video_result(event, video_url)
+            await mark_success(event)
+            if llm_tool_failure:
+                await self._append_plugin_conversation_note(
+                    event,
+                    "The last video generation task has completed and the video was already sent to the user. Do not continue or resubmit this task unless the user explicitly asks for another video.",
+                )
+
+            t_end = time.perf_counter()
+            name = used_pid or "video"
+            logger.info(f"[视频] 完成: provider={name}, 耗时={t_end - t_start:.2f}s")
+
+        except Exception as e:
+            logger.error(f"[视频] 失败: {e}", exc_info=True)
+            if llm_tool_failure:
+                await self._append_plugin_conversation_note(
+                    event,
+                    "The last video generation task failed and has ended. Reason: "
+                    + self._summarize_status_text(
+                        e,
+                        fallback="unknown error",
+                    )
+                    + ". Do not retry automatically unless the user explicitly asks.",
+                )
+            if llm_tool_failure:
+                await self._signal_llm_tool_failure(event)
+            else:
+                await mark_failed(event)
+        finally:
+            await self._video_end(user_id)
+            event.stop_event()
+            event.should_call_llm(True)
+
+    @filter.command("重发图片")
+    async def resend_last_image(self, event: AstrMessageEvent):
+        """重发最近一次生成/改图的图片（不重新生成，不消耗次数）。"""
+        user_id = str(event.get_sender_id() or "")
+        p = self._last_image_by_user.get(user_id)
+        if not p:
+            await self._fail_cmd(event)
+            return
+        if not Path(p).exists():
+            await self._fail_cmd(event)
+            return
+        _t0 = time.perf_counter()
+        ok = await self._send_image_with_fallback(event, p, elapsed=time.perf_counter() - _t0)
+        if ok:
+            await mark_success(event)
+        else:
+            await mark_failed(event)
+        event.stop_event()
+        event.should_call_llm(True)
+
+    @filter.command("服务商")
+    async def provider_list_command(self, event: AstrMessageEvent):
+        """查看所有已配置的服务商。用法: /服务商"""
+        ids = self.registry.provider_ids()
+        if not ids:
+            yield event.plain_result("⚠️ 暂无已配置的服务商，请在配置页添加。")
+            return
+        lines = ["🔌 已配置服务商："]
+        for pid in ids:
+            p = self.registry.get(pid)
+            tkey = str((p or {}).get("__template_key") or "")
+            label = str((p or {}).get("label") or "")
+            model = str((p or {}).get("model") or "")
+            meta = " · ".join(x for x in [tkey, model] if x)
+            lines.append(f"  [{pid}]  {meta}")
+        lines.append("\n用 /链路 查看各功能当前链路配置。")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("链路")
+    async def chain_command(self, event: AstrMessageEvent):
+        """查看或设置各功能的服务商链路。
+
+        用法:
+        - /链路                           查看当前链路
+        - /链路 draw @主用 @备用1 @备用2  设置文生图链路
+        - /链路 edit @主用 @备用          设置改图链路
+        - /链路 selfie @主用              设置自拍链路
+        - /链路 video @主用               设置视频链路
+        """
+        arg = self._extract_extra_prompt(event, "链路").strip()
+
+        # 无参数：查看当前链路
+        if not arg:
+            yield event.plain_result(self._format_chain_status())
+            return
+
+        # 解析 "draw @p1 @p2 ..." 格式
+        parts = arg.split()
+        feat_key = parts[0].lower()
+        feat_map = {"draw": "draw", "文生图": "draw",
+                    "edit": "edit", "改图": "edit", "图生图": "edit",
+                    "selfie": "selfie", "自拍": "selfie",
+                    "video": "video", "视频": "video"}
+        if feat_key not in feat_map:
+            yield event.plain_result(
+                f"⚠️ 未知功能「{parts[0]}」\n"
+                "可用功能：draw/文生图、edit/改图、selfie/自拍、video/视频"
+            )
+            return
+
+        feat = feat_map[feat_key]
+        provider_ids = self.registry.provider_ids()
+
+        # 解析 @provider_id 列表
+        raw_ids = [p.lstrip("@") for p in parts[1:] if p.startswith("@")]
+        non_at  = [p for p in parts[1:] if not p.startswith("@")]
+        if not raw_ids and not non_at:
+            # 无参数：只显示该功能当前链路
+            yield event.plain_result(self._format_chain_status(feat))
+            return
+        if not raw_ids and non_at:
+            # 有参数但忘写@
+            yield event.plain_result(
+                f"⚠️ 服务商 ID 需要以 @ 开头。\n"
+                f"示例：/链路 {parts[0]} @{non_at[0]}\n"
+                f"用 /服务商 查看可用 ID。"
+            )
+            return
+
+        # 验证每个 id，大小写不敏感
+        resolved, unknown = [], []
+        for rid in raw_ids:
+            matched = next((p for p in provider_ids if p.lower() == rid.lower()), None)
+            if matched:
+                resolved.append(matched)
+            else:
+                unknown.append(rid)
+
+        if unknown:
+            yield event.plain_result(
+                f"⚠️ 以下服务商未配置：{', '.join(unknown)}\n"
+                f"用 /服务商 查看可用列表。"
+            )
+            return
+
+        # 更新 chain
+        has_output = feat != "video"
+        new_chain = [{"provider_id": pid, "output": ""} if has_output else {"provider_id": pid}
+                     for pid in resolved]
+
+        if isinstance(self.config, dict):
+            feats = self.config.setdefault("features", {})
+            feats.setdefault(feat, {})["chain"] = new_chain
+        self._safe_update_config()
+
+        # 格式化确认消息
+        order_labels = ["主用"] + [f"备用{i}" for i in range(1, len(resolved))]
+        lines = [f"✅ 已更新「{feat}」链路："]
+        for label, pid in zip(order_labels, resolved):
+            lines.append(f"  {label}：{pid}")
+        yield event.plain_result("\n".join(lines))
+
+    def _format_chain_status(self, feat_filter: str | None = None) -> str:
+        """格式化各功能链路状态。"""
+        feat_names = {"draw": "文生图", "edit": "改图", "selfie": "自拍", "video": "视频"}
+        feats = (self.config or {}).get("features", {}) if isinstance(self.config, dict) else {}
+        lines = ["🔗 当前链路配置："]
+        for feat_key, feat_label in feat_names.items():
+            if feat_filter and feat_key != feat_filter:
+                continue
+            chain = (feats.get(feat_key) or {}).get("chain") or []
+            if not chain:
+                lines.append(f"  {feat_label}：（未配置，使用系统默认）")
+            else:
+                pids = [str(item.get("provider_id") or "") for item in chain if isinstance(item, dict)]
+                pids = [p for p in pids if p]
+                order_labels = ["主"] + [f"备{i}" for i in range(1, len(pids))]
+                chain_str = "  →  ".join(f"{l}:{p}" for l, p in zip(order_labels, pids))
+                lines.append(f"  {feat_label}：{chain_str}")
+        if not feat_filter:
+            lines.append("\n用 /服务商 查看所有可用服务商。")
+        return "\n".join(lines)
+
+    # ==================== 人设管理 ====================
+
+    @filter.command("人设")
+    async def persona_list_command(self, event: AstrMessageEvent):
+        """查看所有人设列表及当前激活人设。用法: /人设"""
+        msg = "🎭 可用人设：\n"
+        for index, p in enumerate(self.persona_mgr.all_personas, start=1):
+            marker = "👉" if p.id == self.persona_mgr.active.id else "  "
+            msg += f"{marker} [{index}] {p.name} ({p.id}) · 参考图 {len(p.ref_images)} 张\n"
+        msg += "\n使用 /切换人设 [序号/ID/名称] 切换自拍人格与对应参考图组。"
+        yield event.plain_result(msg)
+
+    @filter.command("切换人设")
+    async def persona_switch_command(self, event: AstrMessageEvent):
+        """切换当前激活的人设。用法: /切换人设 [序号/ID/名称]"""
+        selector = self._extract_extra_prompt(event, "切换人设").strip()
+        if not selector:
+            yield event.plain_result("⚠️ 缺少人设。用法: /切换人设 [序号/ID/名称]\n可先发送 /人设 查看列表。")
+            return
+
+        target = self.persona_mgr.switch(selector)
+        if not target:
+            yield event.plain_result(f"⚠️ 找不到人设: {selector}\n可先发送 /人设 查看列表。")
+            return
+
+        # 对齐 omnidraw：_set_active_persona → _persist_config → _safe_update_context_config
+        if isinstance(self.config, dict):
+            self.config.setdefault("persona_config", {})["active_persona_id"] = target.id
+        self._safe_update_config()
+
+        ref_count = len(self.persona_mgr.get_active_ref_paths())
+        yield event.plain_result(
+            f"✅ 已切换至人设「{target.name}」，"
+            f"自拍将使用该人设的 {ref_count} 张参考图。"
+        )
+
+    # ==================== Bot 自拍（参考照） ====================
+
     async def terminate(self):
         self.debouncer.clear_all()
         try:
