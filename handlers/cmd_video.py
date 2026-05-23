@@ -88,19 +88,16 @@ class VideoCommandsMixin:
         - /视频 [@provider_id] <预设名> [额外提示词]
         """
         if not bool(self._get_feature("video").get("enabled", False)):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         arg = self._extract_extra_prompt(event, "视频")
         if not arg:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         provider_override, arg = self._parse_provider_override_prefix(arg)
         if not arg:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         preset, prompt = self._parse_video_args(arg)
@@ -113,13 +110,11 @@ class VideoCommandsMixin:
         request_id = self._debounce_key(event, "video", user_id)
 
         if self.debouncer.hit(request_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         if not await self._video_begin(user_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         try:
@@ -130,8 +125,7 @@ class VideoCommandsMixin:
             )
         except Exception:
             await self._video_end(user_id)
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         try:
@@ -142,8 +136,7 @@ class VideoCommandsMixin:
             )
         except Exception:
             await self._video_end(user_id)
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         self._video_tasks.add(task)
@@ -162,18 +155,15 @@ class VideoCommandsMixin:
         if not arg and "/视频" not in msg:
             return
         if not bool(self._get_feature("video").get("enabled", False)):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
         if not arg:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         provider_override, arg = self._parse_provider_override_prefix(arg)
         if not arg:
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         preset, prompt = self._parse_video_args(arg)
@@ -186,13 +176,11 @@ class VideoCommandsMixin:
         request_id = self._debounce_key(event, "video", user_id)
 
         if self.debouncer.hit(request_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         if not await self._video_begin(user_id):
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         try:
@@ -203,8 +191,7 @@ class VideoCommandsMixin:
             )
         except Exception:
             await self._video_end(user_id)
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         try:
@@ -215,8 +202,7 @@ class VideoCommandsMixin:
             )
         except Exception:
             await self._video_end(user_id)
-            await mark_failed(event)
-            event.stop_event()
+            await self._fail_cmd(event)
             return
 
         self._video_tasks.add(task)
@@ -280,7 +266,7 @@ class VideoCommandsMixin:
                 if llm_tool_failure:
                     await self._signal_llm_tool_failure(event)
                 else:
-                    await mark_failed(event)
+                    await self._fail_cmd(event)
                 return
 
             t_start = time.perf_counter()
