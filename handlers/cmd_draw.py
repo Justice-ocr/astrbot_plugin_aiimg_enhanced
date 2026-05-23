@@ -45,9 +45,10 @@ class DrawCommandsMixin:
                 mark_processing(event),
                 return_exceptions=True,
             )
+            _t0 = time.perf_counter()
             executed = await self._execute_image_task_spec(event, spec)
             self._remember_last_image(event, executed.image_path)
-            sent = await self._send_image_with_fallback(event, executed.image_path)
+            sent = await self._send_image_with_fallback(event, executed.image_path, elapsed=time.perf_counter() - _t0)
             if not sent:
                 await mark_failed(event)
                 return
@@ -130,7 +131,7 @@ class DrawCommandsMixin:
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
-            sent = await self._send_image_with_fallback(event, image_path)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
             if not sent:
                 await mark_failed(event)
                 logger.warning(
