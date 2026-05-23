@@ -27,7 +27,6 @@ class MiscCommandsMixin:
     @filter.command("服务商")
     async def provider_list_command(self, event: AstrMessageEvent):
         """查看所有已配置的服务商。用法: /服务商"""
-        event.should_call_llm(True)
         ids = self.registry.provider_ids()
         if not ids:
             yield event.plain_result("⚠️ 暂无已配置的服务商，请在配置页添加。")
@@ -55,7 +54,6 @@ class MiscCommandsMixin:
         - /链路 selfie @主用              设置自拍链路
         - /链路 video @主用               设置视频链路
         """
-        event.should_call_llm(True)
         arg = self._extract_extra_prompt(event, "链路").strip()
 
         # 无参数：查看当前链路
@@ -157,7 +155,6 @@ class MiscCommandsMixin:
     @filter.command("人设")
     async def persona_list_command(self, event: AstrMessageEvent):
         """查看所有人设列表及当前激活人设。用法: /人设"""
-        event.should_call_llm(True)
         msg = "🎭 可用人设：\n"
         for index, p in enumerate(self.persona_mgr.all_personas, start=1):
             marker = "👉" if p.id == self.persona_mgr.active.id else "  "
@@ -169,7 +166,6 @@ class MiscCommandsMixin:
     @filter.command("切换人设")
     async def persona_switch_command(self, event: AstrMessageEvent):
         """切换当前激活的人设。用法: /切换人设 [序号/ID/名称]"""
-        event.should_call_llm(True)
         selector = self._extract_extra_prompt(event, "切换人设").strip()
         if not selector:
             yield event.plain_result("⚠️ 缺少人设。用法: /切换人设 [序号/ID/名称]\n可先发送 /人设 查看列表。")
