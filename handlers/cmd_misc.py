@@ -25,6 +25,7 @@ class MiscCommandsMixin:
         else:
             await mark_failed(event)
         event.stop_event()
+        event.should_call_llm(True)
 
 
     @filter.command("服务商")
