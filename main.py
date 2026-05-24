@@ -922,6 +922,17 @@ class GiteeAIImagePlugin(
     def _selfie_disabled_message() -> str:
         return "自拍参考图模式已关闭（features.selfie.enabled=false）"
 
+    async def _send_elapsed_hint(
+        self, event: AstrMessageEvent, elapsed: float | None
+    ) -> None:
+        """发图后追发耗时提示，失败静默。"""
+        if elapsed is None:
+            return
+        try:
+            await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
+        except Exception:
+            pass
+
     async def _send_image_with_fallback(
         self,
         event: AstrMessageEvent,
@@ -965,11 +976,7 @@ class GiteeAIImagePlugin(
                     await event.send(event.plain_result("（图片较大，以文件形式发送）"))
                 except Exception:
                     pass
-                if elapsed is not None:
-                    try:
-                        await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
-                    except Exception:
-                        pass
+                await self._send_elapsed_hint(event, elapsed)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=True)
             except Exception as e:
                 logger.warning("[send_image] large image file send failed: %s", e)
@@ -983,11 +990,7 @@ class GiteeAIImagePlugin(
             try:
                 await event.send(event.chain_result([Image.fromFileSystem(str(p))]))
                 logger.debug("[send_image] fromFileSystem OK (attempt=%s)", attempt)
-                if elapsed is not None:
-                    try:
-                        await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
-                    except Exception:
-                        pass
+                await self._send_elapsed_hint(event, elapsed)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=False)
             except Exception as e:
                 last_exc = e
@@ -999,11 +1002,7 @@ class GiteeAIImagePlugin(
                 data = await asyncio.to_thread(p.read_bytes)
                 await event.send(event.chain_result([Image.fromBytes(data)]))
                 logger.info("[send_image] fromBytes OK (attempt=%s)", attempt)
-                if elapsed is not None:
-                    try:
-                        await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
-                    except Exception:
-                        pass
+                await self._send_elapsed_hint(event, elapsed)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=True)
             except Exception as e:
                 last_exc = e
@@ -1019,11 +1018,7 @@ class GiteeAIImagePlugin(
                     try:
                         await event.send(event.chain_result([Image.fromBytes(compact)]))
                         logger.info("[send_image] compact fromBytes OK")
-                        if elapsed is not None:
-                            try:
-                                await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
-                            except Exception:
-                                pass
+                        await self._send_elapsed_hint(event, elapsed)
                         return SendImageResult(ok=True, cached_path=p, used_fallback=True)
                     except Exception as e:
                         last_exc = e
@@ -1239,6 +1234,46 @@ class GiteeAIImagePlugin(
             for name in command_names
         )
 
+    async def _resolve_aiimg_backend_and_mode(
+        self,
+        prompt: str,
+        backend: str,
+        mode: str,
+        event: AstrMessageEvent,
+    ) -> tuple[str | None, str]:
+        """解析 LLM 工具调用的 backend 和 mode。
+
+        优先级：@前缀 > LLM意图分类 > auto。
+        返回 (target_backend, resolved_mode)。
+        """
+        known_ids = set(self.registry.provider_ids())
+        b_raw = (backend or "auto").strip()
+
+        if not b_raw or b_raw.lower() == "auto":
+            target_backend: str | None = None
+        elif b_raw in known_ids:
+            target_backend = b_raw
+        else:
+            logger.warning(
+                "[aiimg_generate] 忽略未知 backend=%s，回退自动链路", b_raw
+            )
+            target_backend = None
+
+        # LLM 意图分类（仅 auto backend 时才做，避免与明确指定冲突）
+        if target_backend is None:
+            has_image = bool(await get_images_from_event(event, include_avatar=False))
+            llm_cls = await self._classify_intent_with_llm(prompt, has_image=has_image)
+            if llm_cls:
+                llm_backend = llm_cls.get("backend")
+                if llm_backend and llm_backend in known_ids:
+                    target_backend = llm_backend
+                    logger.debug("[aiimg_generate] LLM识别服务商: %s", target_backend)
+                if mode == "auto" and llm_cls.get("mode") in ("edit", "selfie_ref"):
+                    mode = llm_cls["mode"]
+                    logger.debug("[aiimg_generate] LLM识别mode: %s", mode)
+
+        return target_backend, mode
+
     @filter.llm_tool(name="aiimg_generate")
     async def aiimg_generate(
         self,
@@ -1317,44 +1352,13 @@ class GiteeAIImagePlugin(
                 "An image request for this user is already in progress. Do not resubmit unless the user asks for a new request."
             )
 
-        # 方案 B：@provider_id 前缀解析
+        # 解析 backend：@前缀 → LLM分类 → auto
         provider_from_prompt, prompt = self._parse_provider_override_prefix(prompt)
         if provider_from_prompt and (not backend or backend.lower() == "auto"):
             backend = provider_from_prompt
-            logger.debug("[aiimg_generate] 从 @前缀 解析出 backend=%s", backend)
-
-        b_raw = (backend or "auto").strip()
-        known_provider_ids = set(self.registry.provider_ids())
-        if not b_raw or b_raw.lower() == "auto":
-            target_backend = None
-        elif b_raw in known_provider_ids:
-            target_backend = b_raw
-        else:
-            logger.warning(
-                "[aiimg_generate] 忽略未知 backend 覆盖，回退自动链路: backend=%s",
-                b_raw,
-            )
-            target_backend = None
-
-        # 方案 C：LLM 意图分类（若用户配置了 intent_classifier）
-        # auto 模式下才做，避免与已明确指定的 backend 冲突
-        if target_backend is None:
-            has_image = bool(
-                await get_images_from_event(event, include_avatar=False)
-            )
-            llm_cls = await self._classify_intent_with_llm(prompt, has_image=has_image)
-            if llm_cls:
-                # backend 判断
-                llm_backend = llm_cls.get("backend")
-                if llm_backend and llm_backend in known_provider_ids:
-                    target_backend = llm_backend
-                    logger.debug(
-                        "[aiimg_generate] LLM识别服务商: %s", target_backend
-                    )
-                # mode 判断（仅 auto 时覆盖）
-                if m == "auto" and llm_cls.get("mode") in ("edit", "selfie_ref"):
-                    m = llm_cls["mode"]
-                    logger.debug("[aiimg_generate] LLM识别mode: %s", m)
+        target_backend, m = await self._resolve_aiimg_backend_and_mode(
+            prompt, backend, m, event
+        )
 
         output = (output or "").strip()
         size = output if output and "x" in output else None
