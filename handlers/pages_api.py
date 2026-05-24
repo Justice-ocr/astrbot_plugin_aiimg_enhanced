@@ -41,6 +41,17 @@ class PagesAPIMixin:
             register_web_api(f"/{_pid}/{name}", handler, methods, desc)
 
 
+    def _check_path_safe(self, path: str):
+        """检查路径合法性，返回 (Path, None) 或 (None, error_response_tuple)。"""
+        p = pathlib.Path(path)
+        try:
+            p.resolve().relative_to(pathlib.Path(self.data_dir).resolve())
+        except ValueError:
+            return None, (jsonify({"success": False, "error": "禁止访问"}), 403)
+        if not p.is_file():
+            return None, (jsonify({"success": False, "error": "文件不存在"}), 404)
+        return p, None
+
     async def _pages_get_config(self):
         """GET /astrbot_plugin_aiimg_enhanced/get_config"""
         try:
@@ -245,14 +256,9 @@ class PagesAPIMixin:
             path = str(request.args.get("path") or "").strip()
             if not path:
                 return jsonify({"success": False, "error": "缺少 path 参数"}), 400
-            p = pathlib.Path(path)
-            # 安全检查：只允许 data_dir 下的文件
-            try:
-                p.resolve().relative_to(pathlib.Path(self.data_dir).resolve())
-            except ValueError:
-                return jsonify({"success": False, "error": "禁止访问"}), 403
-            if not p.is_file():
-                return jsonify({"success": False, "error": "文件不存在"}), 404
+            p, err = self._check_path_safe(path)
+            if err is not None:
+                return err
             mime = mimetypes.guess_type(str(p))[0] or "image/png"
             return await send_file(str(p), mimetype=mime)
         except Exception as e:
@@ -267,13 +273,9 @@ class PagesAPIMixin:
             path = str(request.args.get("path") or "").strip()
             if not path:
                 return jsonify({"success": False, "error": "缺少 path 参数"}), 400
-            p = pathlib.Path(path)
-            try:
-                p.resolve().relative_to(pathlib.Path(self.data_dir).resolve())
-            except ValueError:
-                return jsonify({"success": False, "error": "禁止访问"}), 403
-            if not p.is_file():
-                return jsonify({"success": False, "error": "文件不存在"}), 404
+            p, err = self._check_path_safe(path)
+            if err is not None:
+                return err
             mime = mimetypes.guess_type(str(p))[0] or "image/png"
             raw = await asyncio.to_thread(p.read_bytes)
             b64 = base64.b64encode(raw).decode()
