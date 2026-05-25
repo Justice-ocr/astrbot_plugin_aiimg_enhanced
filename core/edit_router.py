@@ -108,7 +108,13 @@ class EditRouter:
         resolution: str | None = None,
         default_output: str | None = None,
         chain_override: list | None = None,
-    ) -> Path:
+    ) -> tuple[Path, list[dict]]:
+        """Edit/transform an image.
+
+        Returns:
+            (image_path, provider_tries) where provider_tries is a list of
+            dicts with keys: pid (str), ok (bool), error (str).
+        """
         feature = self._feature_conf()
         if not bool(feature.get("enabled", True)):
             raise RuntimeError("Image edit is disabled (features.edit.enabled=false)")
@@ -149,6 +155,7 @@ class EditRouter:
 
         last_error: Exception | None = None
         t_start = time.perf_counter()
+        provider_tries: list[dict] = []
 
         for pid, out_override in candidates:
             try:
@@ -156,6 +163,7 @@ class EditRouter:
             except Exception as e:
                 last_error = e
                 logger.warning("[edit] Provider build failed: %s: %s", pid, e)
+                provider_tries.append({"pid": pid, "ok": False, "error": str(e)})
                 continue
 
             if size or resolution:
@@ -196,11 +204,14 @@ class EditRouter:
                         pid,
                         time.perf_counter() - t_start,
                     )
-                    return result
+                    provider_tries.append({"pid": pid, "ok": True, "error": ""})
+                    return result, provider_tries
                 except Exception as e:
                     last_error = e
                     logger.warning("[edit] Provider=%s failed: %s", pid, e)
                     if attempt + 1 < max_attempts:
                         await asyncio.sleep(0.5 * (2**attempt))
+
+            provider_tries.append({"pid": pid, "ok": False, "error": str(last_error)})
 
         raise RuntimeError(f"Edit failed: {last_error}") from last_error
