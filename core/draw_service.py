@@ -51,7 +51,13 @@ class ImageDrawService:
         size: str | None = None,
         resolution: str | None = None,
         provider_id: str | None = None,
-    ) -> Path:
+    ) -> tuple[Path, list[dict]]:
+        """Generate an image.
+
+        Returns:
+            (image_path, provider_tries) where provider_tries is a list of
+            dicts with keys: pid (str), ok (bool), error (str).
+        """
         feature = self._feature_conf()
         if not bool(feature.get("enabled", True)):
             raise RuntimeError(
@@ -73,12 +79,15 @@ class ImageDrawService:
         default_output = self._default_output()
 
         last_error: Exception | None = None
+        provider_tries: list[dict] = []
+
         for pid, out_override in candidates:
             try:
                 backend = self.registry.get_backend(pid)
             except Exception as e:
                 last_error = e
                 logger.warning("[draw] Provider build failed: %s: %s", pid, e)
+                provider_tries.append({"pid": pid, "ok": False, "error": str(e)})
                 continue
 
             output = out_override or default_output
@@ -101,9 +110,11 @@ class ImageDrawService:
                 logger.info(
                     "[draw] Provider=%s success in %.2fs", pid, time.perf_counter() - t0
                 )
-                return result
+                provider_tries.append({"pid": pid, "ok": True, "error": ""})
+                return result, provider_tries
             except Exception as e:
                 last_error = e
                 logger.warning("[draw] Provider=%s failed: %s", pid, e)
+                provider_tries.append({"pid": pid, "ok": False, "error": str(e)})
 
         raise RuntimeError(f"Draw failed: {last_error}") from last_error
