@@ -923,13 +923,27 @@ class GiteeAIImagePlugin(
         return "自拍参考图模式已关闭（features.selfie.enabled=false）"
 
     async def _send_elapsed_hint(
-        self, event: AstrMessageEvent, elapsed: float | None
+        self,
+        event: AstrMessageEvent,
+        elapsed: float | None,
+        provider_tries: list[dict] | None = None,
     ) -> None:
-        """发图后追发耗时提示，失败静默。"""
+        """发图后追发耗时+服务商信息提示，失败静默。
+
+        provider_tries: [{pid, ok, error}, ...] 所有尝试过的服务商列表，
+        成功的用 ✅，失败的用 ❌，多个用 → 连接。
+        """
         if elapsed is None:
             return
         try:
-            await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
+            parts = [f"⏱ {elapsed:.1f}s"]
+            if provider_tries:
+                provider_str = " → ".join(
+                    f"{'✅' if t['ok'] else '❌'} {t['pid']}"
+                    for t in provider_tries
+                )
+                parts.append(provider_str)
+            await event.send(event.plain_result("  |  ".join(parts)))
         except Exception:
             pass
 
@@ -940,6 +954,7 @@ class GiteeAIImagePlugin(
         *,
         max_attempts: int = 3,
         elapsed: float | None = None,
+        provider_tries: list[dict] | None = None,
     ) -> SendImageResult:
         """发送图片，按顺序尝试不同方式，每次只发一次，成功立即返回。
 
@@ -976,7 +991,7 @@ class GiteeAIImagePlugin(
                     await event.send(event.plain_result("（图片较大，以文件形式发送）"))
                 except Exception:
                     pass
-                await self._send_elapsed_hint(event, elapsed)
+                await self._send_elapsed_hint(event, elapsed, provider_tries)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=True)
             except Exception as e:
                 logger.warning("[send_image] large image file send failed: %s", e)
@@ -990,7 +1005,7 @@ class GiteeAIImagePlugin(
             try:
                 await event.send(event.chain_result([Image.fromFileSystem(str(p))]))
                 logger.debug("[send_image] fromFileSystem OK (attempt=%s)", attempt)
-                await self._send_elapsed_hint(event, elapsed)
+                await self._send_elapsed_hint(event, elapsed, provider_tries)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=False)
             except Exception as e:
                 last_exc = e
@@ -1002,7 +1017,7 @@ class GiteeAIImagePlugin(
                 data = await asyncio.to_thread(p.read_bytes)
                 await event.send(event.chain_result([Image.fromBytes(data)]))
                 logger.info("[send_image] fromBytes OK (attempt=%s)", attempt)
-                await self._send_elapsed_hint(event, elapsed)
+                await self._send_elapsed_hint(event, elapsed, provider_tries)
                 return SendImageResult(ok=True, cached_path=p, used_fallback=True)
             except Exception as e:
                 last_exc = e
@@ -1018,7 +1033,7 @@ class GiteeAIImagePlugin(
                     try:
                         await event.send(event.chain_result([Image.fromBytes(compact)]))
                         logger.info("[send_image] compact fromBytes OK")
-                        await self._send_elapsed_hint(event, elapsed)
+                        await self._send_elapsed_hint(event, elapsed, provider_tries)
                         return SendImageResult(ok=True, cached_path=p, used_fallback=True)
                     except Exception as e:
                         last_exc = e
@@ -1034,7 +1049,7 @@ class GiteeAIImagePlugin(
                         pass
                     if elapsed is not None:
                             try:
-                                await event.send(event.plain_result(f"⏱ {elapsed:.1f}s"))
+                                await self._send_elapsed_hint(event, elapsed, provider_tries)
                             except Exception:
                                 pass
                     return SendImageResult(ok=True, cached_path=p, used_fallback=True)
@@ -1426,6 +1441,7 @@ class GiteeAIImagePlugin(
                         return await self._finalize_llm_tool_image(
                             event, image_path, task_meta=task_meta,
                     elapsed=time.perf_counter() - _t_start,
+                            provider_tries=task_meta.get("provider_tries"),
                         )
 
             if m == "auto":
@@ -1450,6 +1466,7 @@ class GiteeAIImagePlugin(
                         return await self._finalize_llm_tool_image(
                             event, image_path, task_meta=task_meta,
                     elapsed=time.perf_counter() - _t_start,
+                            provider_tries=task_meta.get("provider_tries"),
                         )
 
             # 改图：用户消息中有图片（不含头像兜底）或显式指定
@@ -1493,7 +1510,7 @@ class GiteeAIImagePlugin(
                     [f"{len(b)//1024}KB" for b in bytes_images],
                     target_backend or "auto",
                 )
-                image_path = await self.edit.edit(
+                image_path, _prov_tries = await self.edit.edit(
                     prompt=prompt,
                     images=bytes_images,
                     backend=target_backend,
@@ -1510,6 +1527,7 @@ class GiteeAIImagePlugin(
                 return await self._finalize_llm_tool_image(
                     event, image_path, task_meta=task_meta,
                     elapsed=time.perf_counter() - _t_start,
+                    provider_tries=_prov_tries,
                 )
 
             # 默认：文生图
@@ -1522,7 +1540,7 @@ class GiteeAIImagePlugin(
                 prompt = "a selfie photo"
 
             logger.info("[aiimg_generate] route=draw")
-            image_path = await self.draw.generate(
+            image_path, _prov_tries = await self.draw.generate(
                 prompt,
                 provider_id=target_backend,
                 size=size,
@@ -1538,6 +1556,7 @@ class GiteeAIImagePlugin(
             return await self._finalize_llm_tool_image(
                 event, image_path, task_meta=task_meta,
                     elapsed=time.perf_counter() - _t_start,
+                    provider_tries=_prov_tries,
             )
 
         except Exception as e:
@@ -1807,7 +1826,7 @@ class GiteeAIImagePlugin(
             _t0 = time.perf_counter()
             executed = await self._execute_image_task_spec(event, spec)
             self._remember_last_image(event, executed.image_path)
-            sent = await self._send_image_with_fallback(event, executed.image_path, elapsed=time.perf_counter() - _t0)
+            sent = await self._send_image_with_fallback(event, executed.image_path, elapsed=time.perf_counter() - _t0, provider_tries=executed.task_meta.get("provider_tries"))
             if not sent:
                 await self._fail_cmd(event)
                 return
@@ -1879,13 +1898,13 @@ class GiteeAIImagePlugin(
                 return_exceptions=True,
             )
             t_start = time.perf_counter()
-            image_path = await self.draw.generate(
+            image_path, _prov_tries = await self.draw.generate(
                 prompt, size=size, provider_id=provider_override
             )
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
-            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start, provider_tries=_prov_tries)
             if not sent:
                 await mark_failed(event)
                 logger.warning(
@@ -2250,7 +2269,7 @@ class GiteeAIImagePlugin(
                 return_exceptions=True,
             )
             t_start = time.perf_counter()
-            image_path = await self.edit.edit(
+            image_path, _prov_tries = await self.edit.edit(
                 prompt=prompt,
                 images=bytes_images,
                 backend=backend,
@@ -2259,7 +2278,7 @@ class GiteeAIImagePlugin(
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
-            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start, provider_tries=_prov_tries)
             if not sent:
                 await mark_failed(event)
                 event.stop_event()
@@ -2348,7 +2367,7 @@ class GiteeAIImagePlugin(
                 return_exceptions=True,
             )
             t_start = time.perf_counter()
-            image_path = await self.edit.edit(
+            image_path, _prov_tries = await self.edit.edit(
                 prompt=prompt,
                 images=bytes_images,
                 backend=backend,
@@ -2357,7 +2376,7 @@ class GiteeAIImagePlugin(
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
-            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start, provider_tries=_prov_tries)
             if not sent:
                 await mark_failed(event)
                 event.stop_event()
@@ -2547,7 +2566,7 @@ class GiteeAIImagePlugin(
                 event, prompt, backend
             )
             self._remember_last_image(event, image_path)
-            sent = await self._send_image_with_fallback(event, image_path, elapsed=time.perf_counter() - _t0)
+            sent = await self._send_image_with_fallback(event, image_path, elapsed=time.perf_counter() - _t0, provider_tries=task_meta.get("provider_tries"))
             if not sent:
                 await mark_failed(event)
                 event.stop_event()
@@ -3343,7 +3362,7 @@ class GiteeAIImagePlugin(
             prompt = str(spec.effective_prompt or spec.user_prompt or "").strip()
             if not prompt:
                 raise RuntimeError("文生图提示词为空。")
-            image_path = await self.draw.generate(
+            image_path, _prov_tries = await self.draw.generate(
                 prompt,
                 provider_id=spec.provider_id,
                 size=size,
@@ -3357,13 +3376,14 @@ class GiteeAIImagePlugin(
                 continue_with="text",
                 backend=spec.provider_id,
             )
+            task_meta["provider_tries"] = _prov_tries
             return ExecutedImageTask(spec=spec, image_path=image_path, task_meta=task_meta)
 
         if spec.mode == "edit":
             bytes_images = prepared_edit_images
             if bytes_images is None:
                 bytes_images = await self._prepare_edit_image_bytes(event)
-            image_path = await self.edit.edit(
+            image_path, _prov_tries = await self.edit.edit(
                 prompt=spec.user_prompt,
                 images=bytes_images,
                 backend=spec.provider_id,
@@ -3381,6 +3401,7 @@ class GiteeAIImagePlugin(
             )
             if spec.preset_name:
                 task_meta["preset_name"] = spec.preset_name
+            task_meta["provider_tries"] = _prov_tries
             return ExecutedImageTask(spec=spec, image_path=image_path, task_meta=task_meta)
 
         if spec.mode == "selfie_ref":
@@ -3708,10 +3729,11 @@ class GiteeAIImagePlugin(
         *,
         task_meta: dict[str, Any],
         elapsed: float | None = None,
+        provider_tries: list[dict] | None = None,
     ) -> mcp.types.CallToolResult:
         self._remember_last_image(event, image_path)
 
-        sent = await self._send_image_with_fallback(event, image_path, elapsed=elapsed)
+        sent = await self._send_image_with_fallback(event, image_path, elapsed=elapsed, provider_tries=provider_tries)
         if not sent:
             await self._signal_llm_tool_failure(event)
             logger.warning(
@@ -4109,7 +4131,7 @@ class GiteeAIImagePlugin(
 
         default_output = str(conf.get("default_output") or "").strip() or None
 
-        image_path = await self.edit.edit(
+        image_path, _prov_tries = await self.edit.edit(
             prompt=final_prompt,
             images=images,
             backend=backend,
@@ -4131,6 +4153,7 @@ class GiteeAIImagePlugin(
             follow_up=follow_up_meta is not None,
             backend=backend,
         )
+        task_meta["provider_tries"] = _prov_tries
         return image_path, task_meta
 
     async def _generate_selfie_image(
