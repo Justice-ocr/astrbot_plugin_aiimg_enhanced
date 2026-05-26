@@ -2368,12 +2368,27 @@ class GiteeAIImagePlugin(
         # DEBUG: 打印消息链内容帮助排查引用图片提取问题
         try:
             from .core.utils import _get_event_chain
+            from astrbot.core.message.components import Reply as _Reply
             _dbg_chain = _get_event_chain(event)
             logger.info(
-                "[改图][DEBUG] chain_len=%d types=%s",
+                "[改图][DEBUG] get_messages chain_len=%d types=%s",
                 len(_dbg_chain),
                 [type(s).__name__ for s in _dbg_chain],
             )
+            # 尝试从 message_obj.message（原始链）里找 Reply
+            _raw_msg = getattr(getattr(event, "message_obj", None), "message", None)
+            if isinstance(_raw_msg, list):
+                logger.info(
+                    "[改图][DEBUG] message_obj.message chain_len=%d types=%s",
+                    len(_raw_msg),
+                    [type(s).__name__ for s in _raw_msg],
+                )
+                for _seg in _raw_msg:
+                    if isinstance(_seg, _Reply):
+                        logger.info("[改图][DEBUG] Reply found in raw chain: id=%s chain=%s",
+                            getattr(_seg, "id", "?"),
+                            getattr(_seg, "chain", None),
+                        )
         except Exception as _e:
             logger.debug("[改图][DEBUG] chain inspect failed: %s", _e)
 
