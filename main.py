@@ -2254,11 +2254,15 @@ class GiteeAIImagePlugin(
         )
         logger.debug(f"[改图] 获取到 {len(image_segs)} 个图片段")
         if not image_segs:
+            await event.send(event.plain_result(
+                "🖼️ 改图需要提供一张图片。\n请同时发送图片 + 指令，或引用一条含图片的消息。"
+            ))
             await self._fail_cmd(event)
             return
 
         bytes_images = await self._image_segs_to_bytes(image_segs)
         if not bytes_images:
+            await event.send(event.plain_result("⚠️ 图片读取失败，请重新发送。"))
             await self._fail_cmd(event)
             return
 
@@ -2367,12 +2371,16 @@ class GiteeAIImagePlugin(
             include_sender_avatar_fallback=False,
         )
         if not image_segs:
+            await event.send(event.plain_result(
+                "🖼️ 改图需要提供一张图片。\n请同时发送图片 + 指令，或引用一条含图片的消息。\n例如：发送图片，并在同一条消息里写 /改图 <提示词>"
+            ))
             await self._fail_cmd(event)
             return
 
         bytes_images = await self._image_segs_to_bytes(image_segs)
 
         if not bytes_images:
+            await event.send(event.plain_result("⚠️ 图片读取失败，请重新发送。"))
             await self._fail_cmd(event)
             return
 
