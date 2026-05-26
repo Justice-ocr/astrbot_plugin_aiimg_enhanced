@@ -64,13 +64,18 @@ class EditRouter:
         return list(self.presets.keys())
 
     def get_available_backends(self) -> list[str]:
+        """返回实际支持改图的服务商 ID 列表（排除 supports_edit=False 的后端）。"""
         out: list[str] = []
         for pid in self.registry.provider_ids():
             try:
                 backend = self.registry.get_backend(pid)
                 edit_fn = getattr(backend, "edit", None)
-                if callable(edit_fn):
-                    out.append(pid)
+                if not callable(edit_fn):
+                    continue
+                # 检查 supports_edit 属性，False 时该后端不支持改图
+                if not getattr(backend, "supports_edit", True):
+                    continue
+                out.append(pid)
             except Exception:
                 continue
         return out
