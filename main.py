@@ -1510,17 +1510,25 @@ class GiteeAIImagePlugin(
                     [f"{len(b)//1024}KB" for b in bytes_images],
                     target_backend or "auto",
                 )
+                # 若 prompt 精确匹配预设名，自动转为预设（与 _do_edit 逻辑一致）
+                edit_preset: str | None = None
+                edit_prompt = prompt
+                if prompt and prompt.strip() in self.edit.get_preset_names():
+                    edit_preset = prompt.strip()
+                    edit_prompt = ""
+
                 image_path, _prov_tries = await self.edit.edit(
-                    prompt=prompt,
+                    prompt=edit_prompt,
                     images=bytes_images,
                     backend=target_backend,
+                    preset=edit_preset,
                     size=size,
                     resolution=resolution,
                 )
                 task_meta = self._build_image_task_meta(
                     mode="edit",
                     user_prompt=prompt,
-                    effective_prompt=prompt,
+                    effective_prompt=edit_prompt or (self.edit.presets.get(edit_preset, "") if edit_preset else prompt),
                     continue_with="edit",
                     backend=target_backend,
                 )
@@ -2358,6 +2366,9 @@ class GiteeAIImagePlugin(
         if not await self._begin_user_job(user_id, kind="image"):
             await self._fail_cmd(event)
             return
+
+        # 占用 aiimg 防重槽，阻止 LLM 工具调用重复生图
+        self.debouncer.hit(self._debounce_key(event, "aiimg", user_id))
 
         try:
             # 发送等待提示，同时贴处理中表情
