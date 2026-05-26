@@ -47,7 +47,23 @@ class EditRouter:
         return str(self._feature_conf().get("default_output") or "").strip()
 
     def _chain(self) -> list:
-        return as_list(self._feature_conf().get("chain"))
+        """返回改图服务商链路。
+        
+        若 features.edit.chain 为空，自动 fallback 到 features.selfie.chain，
+        与自拍功能共用同一批服务商（两者调用的是同一个 edit 接口）。
+        """
+        chain = as_list(self._feature_conf().get("chain"))
+        if chain:
+            return chain
+        # fallback：edit chain 未配置时复用 selfie chain
+        feats = as_dict(self.config.get("features"))
+        selfie_conf = as_dict(feats.get("selfie"))
+        selfie_chain = as_list(selfie_conf.get("chain"))
+        if selfie_chain:
+            logger.debug(
+                "[edit] features.edit.chain 未配置，自动 fallback 到 features.selfie.chain"
+            )
+        return selfie_chain
 
     def _load_presets(self) -> dict[str, str]:
         presets: dict[str, str] = {}
