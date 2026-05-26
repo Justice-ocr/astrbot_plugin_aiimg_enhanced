@@ -2365,54 +2365,6 @@ class GiteeAIImagePlugin(
                 logger.debug(f"[改图] 自动匹配预设: {preset}")
 
         # 获取图片
-        # DEBUG: 打印消息链内容帮助排查引用图片提取问题
-        try:
-            from .core.utils import _get_event_chain
-            from astrbot.core.message.components import Reply as _Reply
-            _dbg_chain = _get_event_chain(event)
-            logger.info(
-                "[改图][DEBUG] get_messages chain_len=%d types=%s",
-                len(_dbg_chain),
-                [type(s).__name__ for s in _dbg_chain],
-            )
-            # 尝试从 message_obj.message（原始链）里找 Reply
-            _raw_msg = getattr(getattr(event, "message_obj", None), "message", None)
-            if isinstance(_raw_msg, list):
-                logger.info(
-                    "[改图][DEBUG] message_obj.message chain_len=%d types=%s",
-                    len(_raw_msg),
-                    [type(s).__name__ for s in _raw_msg],
-                )
-                for _seg in _raw_msg:
-                    if isinstance(_seg, _Reply):
-                        logger.info("[改图][DEBUG] Reply found in raw chain: id=%s chain=%s",
-                            getattr(_seg, "id", "?"),
-                            getattr(_seg, "chain", None),
-                        )
-            # 打印完整 raw event 结构
-            _mobj = getattr(event, "message_obj", None)
-            _raw = getattr(_mobj, "raw_message", None)
-            # 尝试从 raw_message（Event 对象）里拿原始 message 数组
-            _raw_event_msg = None
-            if hasattr(_raw, "__dict__"):
-                _raw_event_msg = getattr(_raw, "message", None)
-            elif isinstance(_raw, dict):
-                _raw_event_msg = _raw.get("message")
-            logger.info("[改图][DEBUG] raw_event.message type=%s val=%s",
-                type(_raw_event_msg).__name__,
-                str(_raw_event_msg)[:300],
-            )
-            # 也尝试 event 自身的 _event / raw_event 属性
-            for _attr in ("_event", "raw_event", "event", "_raw_event"):
-                _ev = getattr(event, _attr, None)
-                if _ev is not None:
-                    _ev_msg = getattr(_ev, "message", None) or (isinstance(_ev, dict) and _ev.get("message"))
-                    if _ev_msg:
-                        logger.info("[改图][DEBUG] event.%s.message=%s", _attr, str(_ev_msg)[:300])
-                        break
-        except Exception as _e:
-            logger.debug("[改图][DEBUG] chain inspect failed: %s", _e)
-
         image_segs = await get_images_from_event(
             event,
             include_avatar=True,
