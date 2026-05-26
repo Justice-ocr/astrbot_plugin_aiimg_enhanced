@@ -2304,6 +2304,19 @@ class GiteeAIImagePlugin(
         except Exception as e:
             logger.error(f"[改图] 失败: {e}", exc_info=True)
             await mark_failed(event)
+            err_str = str(e)
+            if "No edit providers configured" in err_str or "features.edit.chain" in err_str:
+                hint = "⚠️ 改图失败：未配置改图服务商链路。\n请在 WebUI → 改图 → chain 中添加支持改图的服务商。"
+            elif "不支持改图" in err_str or "does not support edit" in err_str:
+                hint = "⚠️ 改图失败：当前服务商不支持改图功能，请在 features.edit.chain 中使用支持改图的服务商。"
+            elif "disabled" in err_str.lower() and "edit" in err_str.lower():
+                hint = "⚠️ 改图功能已被禁用（features.edit.enabled=false）。"
+            else:
+                hint = f"⚠️ 改图失败：{err_str[:120]}"
+            try:
+                await event.send(event.plain_result(hint))
+            except Exception:
+                pass
         finally:
             await self._end_user_job(user_id, kind="image")
             event.stop_event()
@@ -2405,6 +2418,20 @@ class GiteeAIImagePlugin(
         except Exception as e:
             logger.error(f"[改图] 失败: {e}")
             await mark_failed(event)
+            # 向用户发送可读的错误原因，帮助排查配置问题
+            err_str = str(e)
+            if "No edit providers configured" in err_str or "features.edit.chain" in err_str:
+                hint = "⚠️ 改图失败：未配置改图服务商链路。\n请在 WebUI → 改图 → chain 中添加支持改图的服务商。"
+            elif "不支持改图" in err_str or "supports_edit" in err_str or "does not support edit" in err_str:
+                hint = "⚠️ 改图失败：当前服务商不支持改图功能，请在 features.edit.chain 中使用支持改图的服务商。"
+            elif "disabled" in err_str.lower() and "edit" in err_str.lower():
+                hint = "⚠️ 改图功能已被禁用（features.edit.enabled=false）。"
+            else:
+                hint = f"⚠️ 改图失败：{err_str[:120]}"
+            try:
+                await event.send(event.plain_result(hint))
+            except Exception:
+                pass
         finally:
             await self._end_user_job(user_id, kind="image")
             event.stop_event()
