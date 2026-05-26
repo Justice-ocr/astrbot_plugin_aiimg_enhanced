@@ -208,10 +208,9 @@ class EditRouter:
                     return result, provider_tries
                 except Exception as e:
                     last_error = e
-                    logger.warning("[edit] Provider=%s failed: %s", pid, e)
+                    logger.warning("[edit] Provider=%s attempt=%s failed: %s", pid, attempt + 1, e)
+                    provider_tries.append({"pid": pid, "ok": False, "error": str(e)})
                     if attempt + 1 < max_attempts:
                         await asyncio.sleep(0.5 * (2**attempt))
-
-            provider_tries.append({"pid": pid, "ok": False, "error": str(last_error)})
 
         raise RuntimeError(f"Edit failed: {last_error}") from last_error
