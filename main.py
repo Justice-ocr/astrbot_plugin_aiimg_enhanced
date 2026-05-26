@@ -2389,6 +2389,14 @@ class GiteeAIImagePlugin(
                             getattr(_seg, "id", "?"),
                             getattr(_seg, "chain", None),
                         )
+            # 打印 message_obj 完整原始结构（排查 aiocqhttp raw event 格式）
+            _mobj = getattr(event, "message_obj", None)
+            logger.info("[改图][DEBUG] message_obj type=%s attrs=%s",
+                type(_mobj).__name__,
+                {k: str(getattr(_mobj, k, None))[:120]
+                 for k in ("raw_message", "message_str", "message_type", "message")
+                 if hasattr(_mobj, k)},
+            )
         except Exception as _e:
             logger.debug("[改图][DEBUG] chain inspect failed: %s", _e)
 
