@@ -2389,14 +2389,27 @@ class GiteeAIImagePlugin(
                             getattr(_seg, "id", "?"),
                             getattr(_seg, "chain", None),
                         )
-            # 打印 message_obj 完整原始结构（排查 aiocqhttp raw event 格式）
+            # 打印完整 raw event 结构
             _mobj = getattr(event, "message_obj", None)
-            logger.info("[改图][DEBUG] message_obj type=%s attrs=%s",
-                type(_mobj).__name__,
-                {k: str(getattr(_mobj, k, None))[:120]
-                 for k in ("raw_message", "message_str", "message_type", "message")
-                 if hasattr(_mobj, k)},
+            _raw = getattr(_mobj, "raw_message", None)
+            # 尝试从 raw_message（Event 对象）里拿原始 message 数组
+            _raw_event_msg = None
+            if hasattr(_raw, "__dict__"):
+                _raw_event_msg = getattr(_raw, "message", None)
+            elif isinstance(_raw, dict):
+                _raw_event_msg = _raw.get("message")
+            logger.info("[改图][DEBUG] raw_event.message type=%s val=%s",
+                type(_raw_event_msg).__name__,
+                str(_raw_event_msg)[:300],
             )
+            # 也尝试 event 自身的 _event / raw_event 属性
+            for _attr in ("_event", "raw_event", "event", "_raw_event"):
+                _ev = getattr(event, _attr, None)
+                if _ev is not None:
+                    _ev_msg = getattr(_ev, "message", None) or (isinstance(_ev, dict) and _ev.get("message"))
+                    if _ev_msg:
+                        logger.info("[改图][DEBUG] event.%s.message=%s", _attr, str(_ev_msg)[:300])
+                        break
         except Exception as _e:
             logger.debug("[改图][DEBUG] chain inspect failed: %s", _e)
 
