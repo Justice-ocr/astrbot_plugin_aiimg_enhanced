@@ -2365,6 +2365,18 @@ class GiteeAIImagePlugin(
                 logger.debug(f"[改图] 自动匹配预设: {preset}")
 
         # 获取图片
+        # DEBUG: 打印消息链内容帮助排查引用图片提取问题
+        try:
+            from .core.utils import _get_event_chain
+            _dbg_chain = _get_event_chain(event)
+            logger.info(
+                "[改图][DEBUG] chain_len=%d types=%s",
+                len(_dbg_chain),
+                [type(s).__name__ for s in _dbg_chain],
+            )
+        except Exception as _e:
+            logger.debug("[改图][DEBUG] chain inspect failed: %s", _e)
+
         image_segs = await get_images_from_event(
             event,
             include_avatar=True,
