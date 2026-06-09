@@ -57,8 +57,12 @@ class PagesAPIMixin:
         try:
             payload = dict(self.config) if isinstance(self.config, dict) else {}
             payload["persona_config"] = self.persona_mgr.to_config_dict()
-            # 把本地路径的参考图转成 base64，前端可直接用 img.src（照万象画卷方案）
-            await asyncio.to_thread(self._inline_persona_ref_images, payload)
+            # Keep get_config lightweight by default. The settings page can preview
+            # local paths through get_image_b64, while save_config should not receive
+            # large data URLs that may make Quart time out while reading the body.
+            inline_refs = str(request.args.get("inline_ref_images") or "").lower()
+            if inline_refs in {"1", "true", "yes"}:
+                await asyncio.to_thread(self._inline_persona_ref_images, payload)
             # AstrBot Chat provider 列表，供前端意图分类下拉框使用
             try:
                 astrbot_providers = [

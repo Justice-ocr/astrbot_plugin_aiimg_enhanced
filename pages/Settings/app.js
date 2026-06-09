@@ -678,6 +678,8 @@ function delPersona(idx){
   renderPersonas();updateStats();markDirty();
 }
 let _personaIdx=-1;
+let _saving = false;
+let _refUploadTask = null;
 // 统一管理弹窗内的参考图列表（含本地路径、URL）
 // base64 在上传时立即通过 upload_ref_image 转为服务器路径，不在内存存储
 let _modalRefs = [];
@@ -765,9 +767,53 @@ function renderRefPreviews(refs) {
   });
 }
 
-function uploadRefImages(files) {
-  // 与 omnidraw 保持一致：FileReader 读 base64 存入 _modalRefs，直接预览
-  // 保存人设时 base64 随 save_config payload 一起发给后端，后端 _save_base64_refs 转存为本地文件
+async function uploadRefFile(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/api/plug/astrbot_plugin_aiimg_enhanced/upload_ref_image', {
+    method: 'POST',
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) throw new Error(data.error || `${file.name} 上传失败`);
+  return data.path;
+}
+
+function dataUrlToFile(dataUrl, filename) {
+  const m = String(dataUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m) throw new Error('无效的图片数据');
+  const mime = m[1];
+  const ext = (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], `${filename}.${ext}`, { type: mime });
+}
+
+async function normalizePersonaRefImages() {
+  let changed = false;
+  const profiles = S.persona_config?.profiles || [];
+  for (const profile of profiles) {
+    if (!profile || !Array.isArray(profile.persona_ref_image)) continue;
+    const refs = [];
+    for (let i = 0; i < profile.persona_ref_image.length; i++) {
+      const ref = profile.persona_ref_image[i];
+      if (String(ref).startsWith('data:image')) {
+        const file = dataUrlToFile(ref, `${profile.id || 'persona'}_${i}`);
+        refs.push(await uploadRefFile(file));
+        changed = true;
+      } else {
+        refs.push(ref);
+      }
+    }
+    profile.persona_ref_image = refs;
+  }
+  return changed;
+}
+
+async function uploadRefImages(files) {
+  // Upload immediately and keep only server paths in config. Sending large base64
+  // data URLs through save_config can make Quart time out while reading JSON.
   const btn = $('modal-upload-btn');
   const status = $('modal-upload-status');
   if (!files || !files.length) return;
@@ -781,35 +827,44 @@ function uploadRefImages(files) {
   }
 
   btn.disabled = true;
-  status.textContent = `读取中 (0/${fileArr.length})...`;
+  status.textContent = `上传中 (0/${fileArr.length})...`;
   status.className = 'upload-status uploading';
 
-  let done = 0;
-  fileArr.forEach(file => {
-    const r = new FileReader();
-    r.onload = evt => {
-      _modalRefs.push(evt.target.result);  // base64 data URL，可直接作为 img.src
+  const task = (async () => {
+    let done = 0;
+    for (const file of fileArr) {
+      const path = await uploadRefFile(file);
+      _modalRefs.push(path);
       done++;
-      status.textContent = `读取中 (${done}/${fileArr.length})...`;
-      if (done === fileArr.length) {
-        $('modal-refs').value = _modalRefs.filter(r => !r.startsWith('data:image')).join('\n');
-        renderRefPreviews(_modalRefs);
-        status.textContent = `✓ 已添加 ${fileArr.length} 张图片`;
-        status.className = 'upload-status ok';
-        setTimeout(() => { status.textContent=''; status.className='upload-status'; btn.disabled=false; }, 2000);
-        markDirty();
-      }
-    };
-    r.onerror = () => {
-      done++;
-      status.textContent = `✗ ${file.name} 读取失败`;
-      status.className = 'upload-status err';
-      if (done === fileArr.length) btn.disabled = false;
-    };
-    r.readAsDataURL(file);
-  });
+      status.textContent = `上传中 (${done}/${fileArr.length})...`;
+      $('modal-refs').value = _modalRefs.filter(r => !String(r).startsWith('data:image')).join('\n');
+      renderRefPreviews(_modalRefs);
+    }
+  })();
+  _refUploadTask = task;
+  try {
+    await task;
+    status.textContent = `✓ 已添加 ${fileArr.length} 张图片`;
+    status.className = 'upload-status ok';
+    markDirty();
+    setTimeout(() => { status.textContent=''; status.className='upload-status'; }, 2000);
+  } catch (e) {
+    status.textContent = `✗ ${e}`;
+    status.className = 'upload-status err';
+  } finally {
+    if (_refUploadTask === task) _refUploadTask = null;
+    btn.disabled = false;
+  }
 }
-function savePersonaModal(){
+async function savePersonaModal(){
+  if (_refUploadTask) {
+    try {
+      await _refUploadTask;
+    } catch (e) {
+      showToast(`参考图上传失败：${e}`, 'err');
+      return;
+    }
+  }
   const id=$('modal-id').value.trim().replace(/[^a-zA-Z0-9_\-]/g,'_')||`persona_${Date.now()}`;
   const persona_name=$('modal-name').value.trim()||id;
   const persona_base_prompt=$('modal-prompt').value.trim();
@@ -830,9 +885,18 @@ function savePersonaModal(){
 
 // ── 保存 ──────────────────────────────────────────────────────────────────────
 async function saveAll(){
+  if (_saving) return;
+  _saving = true;
   $('btn-save').disabled=true; $('btn-save').textContent='保存中...';
   $('save-hint').textContent='正在保存...'; $('save-hint').className='save-hint saving';
   try{
+    if (_refUploadTask) {
+      $('save-hint').textContent='正在等待参考图上传...';
+      await _refUploadTask;
+    }
+    if (await normalizePersonaRefImages()) {
+      $('save-hint').textContent='参考图已转存，正在保存...';
+    }
     const res=await bridge.apiPost('save_config',buildPayload());
     if(!res.success)throw new Error(res.error||'保存失败');
     markClean('配置已保存 ✓');showToast('✅ 配置已保存');
@@ -840,6 +904,7 @@ async function saveAll(){
     $('save-hint').textContent='保存失败'; $('save-hint').className='save-hint dirty';
     showToast(`保存失败：${e}`,'err');
   }finally{
+    _saving = false;
     $('btn-save').disabled=false; $('btn-save').textContent='保存更改';
   }
 }
@@ -855,7 +920,10 @@ async function init(){
   // 事件委托兜底（omnidraw同款，保证在各种iframe环境下都能触发）
   document.addEventListener('click', e => {
     const btn = e.target.closest('[data-action="save-config"]');
-    if (btn) saveAll();
+    if (btn) {
+      e.preventDefault();
+      saveAll();
+    }
   });
   $('btn-add-provider').addEventListener('click',()=>openProviderModal(-1));
   $('btn-provider-modal-close').addEventListener('click',()=>$('provider-modal').style.display='none');
