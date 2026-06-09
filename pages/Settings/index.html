@@ -269,24 +269,26 @@
 </div>
 
 <div id="persona-modal" class="modal-backdrop" style="display:none">
-  <div class="modal modal-wide">
+  <div class="modal modal-persona">
     <div class="modal-head"><span id="modal-persona-title">编辑人设</span><button class="modal-close" id="btn-modal-close">✕</button></div>
-    <div class="modal-body">
-      <div class="field-group"><label class="field-label">人设 ID <span class="hint">英文/数字/下划线</span></label><input type="text" class="inp full" id="modal-id" placeholder="default"/></div>
-      <div class="field-group"><label class="field-label">显示名称</label><input type="text" class="inp full" id="modal-name" placeholder="默认助理"/></div>
-      <div class="field-group"><label class="field-label">人物描述 <span class="hint">融入自拍 prompt</span></label><textarea class="ta" id="modal-prompt" rows="4" placeholder="外貌、气质、服装习惯..."></textarea></div>
-      <div class="field-group">
-        <label class="field-label">参考图</label>
-        <!-- 图片预览缩略图 -->
-        <div id="modal-ref-previews" class="ref-previews"></div>
-        <!-- 上传按钮 -->
+    <div class="modal-body persona-modal-body">
+      <div class="persona-edit-fields">
+        <div class="field-group"><label class="field-label">人设 ID <span class="hint">英文/数字/下划线</span></label><input type="text" class="inp full" id="modal-id" placeholder="default"/></div>
+        <div class="field-group"><label class="field-label">显示名称</label><input type="text" class="inp full" id="modal-name" placeholder="默认助理"/></div>
+        <div class="field-group"><label class="field-label">人物描述 <span class="hint">融入自拍 prompt</span></label><textarea class="ta" id="modal-prompt" rows="8" placeholder="外貌、气质、服装习惯..."></textarea></div>
+        <div class="field-group">
+          <label class="field-label">参考图路径 / URL <span class="hint">每行一个</span></label>
+          <textarea class="ta" id="modal-refs" rows="6" placeholder="/data/.../ref.jpg&#10;https://example.com/photo.jpg"></textarea>
+        </div>
         <div class="upload-row">
           <button class="btn-upload" id="modal-upload-btn" type="button">📁 上传图片</button>
           <span class="upload-status" id="modal-upload-status"></span>
           <input type="file" id="modal-file-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none"/>
         </div>
-        <label class="field-label" style="margin-top:8px">或手动填写路径 / URL <span class="hint">每行一个</span></label>
-        <textarea class="ta" id="modal-refs" rows="3" placeholder="/data/.../ref.jpg&#10;https://example.com/photo.jpg"></textarea>
+      </div>
+      <div class="persona-ref-panel">
+        <label class="field-label">参考图</label>
+        <div id="modal-ref-previews" class="ref-previews"></div>
       </div>
     </div>
     <div class="modal-foot">
