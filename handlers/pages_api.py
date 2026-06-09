@@ -58,10 +58,9 @@ class PagesAPIMixin:
         try:
             payload = dict(self.config) if isinstance(self.config, dict) else {}
             payload["persona_config"] = self.persona_mgr.to_config_dict()
-            # Inline small local reference images for preview. save_config normalizes
-            # any data URLs back to local files before posting, so previews stay
-            # reliable without recreating the large-payload timeout.
-            await asyncio.to_thread(self._inline_persona_ref_images, payload)
+            # Keep config references as paths. The settings page loads previews
+            # through get_image_b64_post so save_config does not receive preview
+            # data URLs during normal edits.
             # AstrBot Chat provider 列表，供前端意图分类下拉框使用
             try:
                 astrbot_providers = [

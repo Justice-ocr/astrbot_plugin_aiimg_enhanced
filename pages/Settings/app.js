@@ -828,24 +828,10 @@ function dataUrlToFile(dataUrl, filename) {
 }
 
 async function normalizePersonaRefImages() {
-  let changed = false;
-  const profiles = S.persona_config?.profiles || [];
-  for (const profile of profiles) {
-    if (!profile || !Array.isArray(profile.persona_ref_image)) continue;
-    const refs = [];
-    for (let i = 0; i < profile.persona_ref_image.length; i++) {
-      const ref = profile.persona_ref_image[i];
-      if (String(ref).startsWith('data:image')) {
-        const file = dataUrlToFile(ref, `${profile.id || 'persona'}_${i}`);
-        refs.push(await uploadRefFile(file));
-        changed = true;
-      } else {
-        refs.push(ref);
-      }
-    }
-    profile.persona_ref_image = refs;
-  }
-  return changed;
+  // Do not upload data URLs from the page before save. In AstrBot Pages this
+  // iframe may not be allowed to fetch plugin endpoints directly; save_config
+  // still has a backend fallback that persists any remaining data URLs.
+  return false;
 }
 
 async function uploadRefImages(files) {
