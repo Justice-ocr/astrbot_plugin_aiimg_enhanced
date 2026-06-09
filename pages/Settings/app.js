@@ -117,6 +117,7 @@ let S = {
   // chain状态单独存，key: 'draw'|'edit'|'selfie'|'video'
   chains:{ draw:[], edit:[], selfie:[], video:[] },
   persona_config:{ active_persona_id:'default', profiles:[] },
+  persona_ref_previews:{},
   reply_config:{},
   draw_presets:[], edit_presets:[], video_presets:[],
   dirty:false,
@@ -338,6 +339,7 @@ function applyConfig(cfg) {
   const pc=cfg.persona_config||{};
   S.persona_config.active_persona_id = pc.active_persona_id||'default';
   S.persona_config.profiles = Array.isArray(pc.profiles)?pc.profiles:[];
+  S.persona_ref_previews = (cfg.persona_ref_previews && typeof cfg.persona_ref_previews === 'object') ? cfg.persona_ref_previews : {};
   renderPersonas();
 
   // presets
@@ -786,6 +788,8 @@ function renderRefPreviews(refs) {
 
     if (isBase64 || isHttp) {
       img.src = refPreviewSrc(String(r));
+    } else if (S.persona_ref_previews && S.persona_ref_previews[String(r)]) {
+      img.src = S.persona_ref_previews[String(r)];
     } else {
       img.style.display = 'none';
       errDiv.style.display = 'flex';

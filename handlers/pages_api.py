@@ -61,6 +61,9 @@ class PagesAPIMixin:
             # Keep config references as paths. The settings page loads previews
             # through get_image_b64_post so save_config does not receive preview
             # data URLs during normal edits.
+            payload["persona_ref_previews"] = await asyncio.to_thread(
+                self._build_persona_ref_previews, payload
+            )
             # AstrBot Chat provider 列表，供前端意图分类下拉框使用
             try:
                 astrbot_providers = [
@@ -73,6 +76,39 @@ class PagesAPIMixin:
             return jsonify({"success": True, "config": payload})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)})
+
+    def _build_persona_ref_previews(self, payload: dict) -> dict:
+        """Return {local_path: data_url} for local persona reference previews.
+
+        This keeps persona_config unchanged so save_config posts paths, not
+        preview data URLs.
+        """
+        PAGE_MAX_PREVIEW = 20 * 1024 * 1024
+        previews = {}
+        persona_cfg = payload.get("persona_config")
+        if not isinstance(persona_cfg, dict):
+            return previews
+
+        def collect(refs: list) -> None:
+            for ref in refs:
+                ref = str(ref or "").strip()
+                if not ref or ref.startswith(("data:image", "http://", "https://")):
+                    continue
+                try:
+                    p = pathlib.Path(ref)
+                    if not p.is_file() or p.stat().st_size > PAGE_MAX_PREVIEW:
+                        continue
+                    mime = mimetypes.guess_type(str(p))[0] or "image/png"
+                    b64 = base64.b64encode(p.read_bytes()).decode()
+                    previews[ref] = f"data:{mime};base64,{b64}"
+                except Exception:
+                    continue
+
+        for profile in persona_cfg.get("profiles") or []:
+            if isinstance(profile, dict):
+                collect(profile.get("persona_ref_image") or [])
+        collect(persona_cfg.get("persona_ref_image") or [])
+        return previews
 
     def _inline_persona_ref_images(self, payload: dict) -> None:
         """把 persona_config 里所有本地路径的参考图转成 base64 data URL。
