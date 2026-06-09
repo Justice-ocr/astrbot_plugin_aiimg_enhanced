@@ -29,6 +29,7 @@ class PagesAPIMixin:
             ("switch_persona", self._pages_switch_persona, ["POST"], "切换人设"),
             ("get_image", self._pages_get_image, ["GET"], "获取本地参考图预览"),
             ("get_image_b64", self._pages_get_image_b64, ["GET"], "获取本地参考图base64（bridge用）"),
+            ("get_image_b64_post", self._pages_get_image_b64_post, ["POST"], "获取本地参考图base64（POST）"),
             (
                 "upload_ref_image",
                 self._pages_upload_ref_image,
@@ -57,12 +58,10 @@ class PagesAPIMixin:
         try:
             payload = dict(self.config) if isinstance(self.config, dict) else {}
             payload["persona_config"] = self.persona_mgr.to_config_dict()
-            # Keep get_config lightweight by default. The settings page can preview
-            # local paths through get_image_b64, while save_config should not receive
-            # large data URLs that may make Quart time out while reading the body.
-            inline_refs = str(request.args.get("inline_ref_images") or "").lower()
-            if inline_refs in {"1", "true", "yes"}:
-                await asyncio.to_thread(self._inline_persona_ref_images, payload)
+            # Inline small local reference images for preview. save_config normalizes
+            # any data URLs back to local files before posting, so previews stay
+            # reliable without recreating the large-payload timeout.
+            await asyncio.to_thread(self._inline_persona_ref_images, payload)
             # AstrBot Chat provider 列表，供前端意图分类下拉框使用
             try:
                 astrbot_providers = [
@@ -275,17 +274,29 @@ class PagesAPIMixin:
         """
         try:
             path = str(request.args.get("path") or "").strip()
-            if not path:
-                return jsonify({"success": False, "error": "缺少 path 参数"}), 400
-            p, err = self._check_path_safe(path)
-            if err is not None:
-                return err
-            mime = mimetypes.guess_type(str(p))[0] or "image/png"
-            raw = await asyncio.to_thread(p.read_bytes)
-            b64 = base64.b64encode(raw).decode()
-            return jsonify({"success": True, "data": f"data:{mime};base64,{b64}"})
+            return await self._pages_image_b64_response(path)
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
+
+    async def _pages_get_image_b64_post(self):
+        """POST /astrbot_plugin_aiimg_enhanced/get_image_b64_post  { "path": "..." }"""
+        try:
+            data = await request.get_json(force=True) or {}
+            path = str(data.get("path") or "").strip()
+            return await self._pages_image_b64_response(path)
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    async def _pages_image_b64_response(self, path: str):
+        if not path:
+            return jsonify({"success": False, "error": "缺少 path 参数"}), 400
+        p, err = self._check_path_safe(path)
+        if err is not None:
+            return err
+        mime = mimetypes.guess_type(str(p))[0] or "image/png"
+        raw = await asyncio.to_thread(p.read_bytes)
+        b64 = base64.b64encode(raw).decode()
+        return jsonify({"success": True, "data": f"data:{mime};base64,{b64}"})
 
     async def _save_base64_refs(self, refs: list) -> list:
         """把 persona_ref_image 列表里的 base64 data URL 转存为本地文件，返回替换后的列表。"""

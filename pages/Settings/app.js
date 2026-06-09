@@ -707,9 +707,38 @@ function refPreviewSrc(r) {
 
 async function loadLocalRefPreview(r, img, errDiv) {
   const url = `/api/plug/astrbot_plugin_aiimg_enhanced/get_image_b64?path=${encodeURIComponent(r)}`;
+  let lastError = null;
+  try {
+    const data = await bridge.apiPost('get_image_b64_post', { path: r });
+    if (data && data.success && data.data) {
+      img.src = data.data;
+      img.style.display = 'block';
+      errDiv.style.display = 'none';
+      return;
+    }
+    lastError = new Error(data?.error || 'bridge POST preview failed');
+  } catch (e) {
+    lastError = e;
+  }
+
+  try {
+    const data = await bridge.apiGet('get_image_b64?path=' + encodeURIComponent(r));
+    if (data && data.success && data.data) {
+      img.src = data.data;
+      img.style.display = 'block';
+      errDiv.style.display = 'none';
+      return;
+    }
+    lastError = new Error(data?.error || 'bridge GET preview failed');
+  } catch (e) {
+    lastError = e;
+  }
+
   const res = await fetch(url);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success || !data.data) throw new Error(data.error || 'preview failed');
+  if (!res.ok || !data.success || !data.data) {
+    throw new Error(data.error || lastError?.message || 'preview failed');
+  }
   img.src = data.data;
   img.style.display = 'block';
   errDiv.style.display = 'none';
