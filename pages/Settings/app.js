@@ -705,6 +705,16 @@ function refPreviewSrc(r) {
   return `/api/plug/astrbot_plugin_aiimg_enhanced/get_image?path=${encodeURIComponent(r)}`;
 }
 
+async function loadLocalRefPreview(r, img, errDiv) {
+  const url = `/api/plug/astrbot_plugin_aiimg_enhanced/get_image_b64?path=${encodeURIComponent(r)}`;
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success || !data.data) throw new Error(data.error || 'preview failed');
+  img.src = data.data;
+  img.style.display = 'block';
+  errDiv.style.display = 'none';
+}
+
 function renderRefPreviews(refs) {
   const el = $('modal-ref-previews');
   if (!el) return;
@@ -744,7 +754,13 @@ function renderRefPreviews(refs) {
       markDirty();
     });
 
-    img.src = refPreviewSrc(String(r));
+    if (isBase64 || isHttp) {
+      img.src = refPreviewSrc(String(r));
+    } else {
+      img.style.display = 'none';
+      errDiv.style.display = 'flex';
+      loadLocalRefPreview(String(r), img, errDiv).catch(() => {});
+    }
     img.onerror = () => { img.style.display = 'none'; errDiv.style.display = 'flex'; };
 
     wrap.append(img, errDiv, nameDiv, delBtn);
