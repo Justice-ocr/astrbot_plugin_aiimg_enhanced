@@ -744,22 +744,7 @@ function renderRefPreviews(refs) {
       markDirty();
     });
 
-    if (isBase64 || isHttp) {
-      img.src = r;
-    } else {
-      // 本地路径：get_config 时后端应已内联 base64，这里作为兜底
-      img.style.display = 'none';
-      errDiv.style.display = 'flex';
-      bridge.apiGet('get_image_b64?path=' + encodeURIComponent(r))
-        .then(d => {
-          if (d && d.success && d.data) {
-            img.src = d.data;
-            img.style.display = 'block';
-            errDiv.style.display = 'none';
-          }
-        })
-        .catch(() => {});
-    }
+    img.src = refPreviewSrc(String(r));
     img.onerror = () => { img.style.display = 'none'; errDiv.style.display = 'flex'; };
 
     wrap.append(img, errDiv, nameDiv, delBtn);
