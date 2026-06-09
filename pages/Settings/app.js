@@ -727,26 +727,27 @@ function renderRefPreviews(refs) {
     const shortName = isBase64 ? ('图片 ' + (i+1)) : (r.split(/[\/\\]/).pop() || r).slice(0, 24);
 
     const wrap = document.createElement('div');
-    wrap.className = 'ref-thumb';
+    wrap.className = 'ref-image-item';
     wrap.title = isBase64 ? shortName : r;
 
     const img = document.createElement('img');
+    img.className = 'ref-image';
     img.alt = shortName;
     img.loading = 'lazy';
 
     const errDiv = document.createElement('div');
-    errDiv.className = 'ref-thumb-err';
+    errDiv.className = 'ref-image-err';
     errDiv.style.display = 'none';
-    errDiv.textContent = '📷';
+    errDiv.textContent = '图片加载失败';
 
     const nameDiv = document.createElement('div');
-    nameDiv.className = 'ref-thumb-name';
+    nameDiv.className = 'ref-image-name';
     nameDiv.textContent = shortName;
 
     const delBtn = document.createElement('button');
-    delBtn.className = 'ref-thumb-del';
-    delBtn.title = '移除';
-    delBtn.textContent = '✕';
+    delBtn.className = 'ref-image-del';
+    delBtn.title = '删除';
+    delBtn.textContent = '删除';
     delBtn.addEventListener('click', () => {
       _modalRefs.splice(i, 1);
       $('modal-refs').value = _modalRefs.filter(x => !String(x).startsWith('data:image')).join('\n');
@@ -759,11 +760,17 @@ function renderRefPreviews(refs) {
     } else {
       img.style.display = 'none';
       errDiv.style.display = 'flex';
-      loadLocalRefPreview(String(r), img, errDiv).catch(() => {});
+      loadLocalRefPreview(String(r), img, errDiv).catch(e => {
+        errDiv.textContent = `图片加载失败：${e}`;
+      });
     }
-    img.onerror = () => { img.style.display = 'none'; errDiv.style.display = 'flex'; };
+    img.onerror = () => {
+      img.style.display = 'none';
+      errDiv.style.display = 'flex';
+      errDiv.textContent = '图片加载失败';
+    };
 
-    wrap.append(img, errDiv, nameDiv, delBtn);
+    wrap.append(delBtn, img, errDiv, nameDiv);
     el.appendChild(wrap);
   });
 }
