@@ -809,14 +809,18 @@ function renderRefPreviews(refs) {
 }
 
 async function uploadRefFile(file) {
-  const form = new FormData();
-  form.append('file', file);
-  const res = await fetch('/api/plug/astrbot_plugin_aiimg_enhanced/upload_ref_image', {
-    method: 'POST',
-    body: form,
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`${file.name} 读取失败`));
+    reader.readAsDataURL(file);
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success) throw new Error(data.error || `${file.name} 上传失败`);
+  const data = await bridge.apiPost('upload_ref_image_b64', {
+    filename: file.name,
+    data: dataUrl,
+  });
+  if (!data || !data.success || !data.path) throw new Error(data?.error || `${file.name} 上传失败`);
+  S.persona_ref_previews[data.path] = dataUrl;
   return data.path;
 }
 
