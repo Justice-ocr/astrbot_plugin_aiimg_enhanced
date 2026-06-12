@@ -3499,7 +3499,7 @@ class GiteeAIImagePlugin(
                     label = spec.variant_title or spec.effective_prompt or ""
                     caption = f"[{completed}/{total}] {label[:30]}" if label else f"[{completed}/{total}]"
                     await event.send(event.plain_result(caption))
-                    await self._send_image_with_fallback(event, result.image_path, elapsed=None)
+                    await self._send_image_with_fallback(event, result.image_path)
                 except Exception as e:
                     logger.warning("[batch] 流式发送第%d张失败: %s", completed, e)
             return result
@@ -3527,7 +3527,7 @@ class GiteeAIImagePlugin(
     ) -> None:
         for result in results:
             if result.success and result.value is not None:
-                await self._send_image_with_fallback(event, result.value.image_path, elapsed=None)
+                await self._send_image_with_fallback(event, result.value.image_path)
 
     async def _send_batch_results(
         self,

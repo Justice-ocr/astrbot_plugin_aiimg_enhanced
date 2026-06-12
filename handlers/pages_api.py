@@ -1,6 +1,7 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
 import base64
+import inspect
 import mimetypes
 import pathlib
 import re
@@ -9,8 +10,11 @@ from astrbot.api import logger
 import asyncio
 import time
 from ..core.persona_manager import PersonaManager
+from ..core.image_format import decode_base64_image_payload
 
 class PagesAPIMixin:
+    _REF_IMAGE_MAX_BYTES = 20 * 1024 * 1024
+
     def _register_pages_web_api(self) -> None:
         register_web_api = getattr(self.context, "register_web_api", None)
         if not callable(register_web_api):
@@ -32,6 +36,12 @@ class PagesAPIMixin:
                 self._pages_upload_ref_image,
                 ["POST"],
                 "上传人设参考图",
+            ),
+            (
+                "upload_ref_image_b64",
+                self._pages_upload_ref_image_b64,
+                ["POST"],
+                "上传人设参考图（base64 fallback）",
             ),
 
         ]
@@ -237,17 +247,16 @@ class PagesAPIMixin:
                 continue
             if ref.startswith("data:image"):
                 try:
-                    # data:image/jpeg;base64,XXXX
-                    m = re.match(r"data:(image/[^;]+);base64,(.+)", ref, re.DOTALL)
-                    if not m:
-                        continue
-                    mime, b64data = m.group(1), m.group(2)
-                    raw = base64.b64decode(b64data)
-                    if len(raw) > 20 * 1024 * 1024:
+                    raw = decode_base64_image_payload(ref)
+                    if len(raw) > self._REF_IMAGE_MAX_BYTES:
                         logger.warning("[AI绘图站] base64参考图超过20MB，跳过")
                         continue
-                    ext = mime.split("/")[-1].replace("jpeg", "jpg")
-                    fname = f"{int(time.time()*1000)}.{ext}"
+                    detected = self._detect_ref_image(raw)
+                    if detected is None:
+                        logger.warning("[AI绘图站] base64参考图格式无效，跳过")
+                        continue
+                    _mime, ext = detected
+                    fname = self._build_ref_filename("reference", ext)
                     save_path = ref_dir / fname
                     await asyncio.to_thread(save_path.write_bytes, raw)
                     result.append(str(save_path))
@@ -271,19 +280,20 @@ class PagesAPIMixin:
                 return jsonify({"success": False, "error": "未收到文件"}), 400
 
             filename = pathlib.Path(file.filename or "upload").name
-            ext = pathlib.Path(filename).suffix.lower()
-            if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-                return jsonify({"success": False, "error": f"不支持的文件格式: {ext}"}), 400
+            data = file.read()
+            if inspect.isawaitable(data):
+                data = await data
+            if len(data) > self._REF_IMAGE_MAX_BYTES:
+                return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
+            detected = self._detect_ref_image(data)
+            if detected is None:
+                return jsonify({"success": False, "error": "文件不是受支持的图片格式"}), 400
+            _mime, ext = detected
 
             ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
             ref_dir.mkdir(parents=True, exist_ok=True)
-
-            safe_name = f"{int(time.time() * 1000)}_{filename}"
+            safe_name = self._build_ref_filename(filename, ext)
             save_path = ref_dir / safe_name
-
-            data = file.read()
-            if len(data) > 20 * 1024 * 1024:
-                return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
 
             await asyncio.to_thread(save_path.write_bytes, data)
             logger.info("[AI绘图站] 参考图已上传: %s", save_path)
@@ -296,3 +306,58 @@ class PagesAPIMixin:
         except Exception as e:
             logger.error("[Pages] upload_ref_image 失败: %s", e, exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500
+
+    async def _pages_upload_ref_image_b64(self):
+        """POST /astrbot_plugin_aiimg_enhanced/upload_ref_image_b64
+        JSON: { filename, data: "data:image/...;base64,..." }
+        """
+        try:
+            data = await request.get_json(force=True) or {}
+            filename = pathlib.Path(str(data.get("filename") or "upload")).name
+            data_url = str(data.get("data") or "")
+
+            m = re.match(r"data:(image/[^;]+);base64,(.+)", data_url, re.DOTALL)
+            if not m:
+                return jsonify({"success": False, "error": "无效的图片数据"}), 400
+
+            raw = decode_base64_image_payload(data_url)
+            if len(raw) > self._REF_IMAGE_MAX_BYTES:
+                return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
+            detected = self._detect_ref_image(raw)
+            if detected is None:
+                return jsonify({"success": False, "error": "图片数据格式无效"}), 400
+            _mime, ext = detected
+
+            ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = self._build_ref_filename(filename, ext)
+            save_path = ref_dir / safe_name
+            await asyncio.to_thread(save_path.write_bytes, raw)
+            logger.info("[AI绘图站] 参考图已通过 base64 fallback 上传: %s", save_path)
+
+            return jsonify({
+                "success": True,
+                "path": str(save_path),
+                "filename": safe_name,
+            })
+        except Exception as e:
+            logger.error("[Pages] upload_ref_image_b64 失败: %s", e, exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @staticmethod
+    def _build_ref_filename(filename: str, ext: str) -> str:
+        stem = pathlib.Path(filename or "upload").stem.strip() or "upload"
+        stem = re.sub(r"[^\w.-]+", "_", stem).strip("._") or "upload"
+        return f"{time.time_ns()}_{stem[:80]}.{ext}"
+
+    @staticmethod
+    def _detect_ref_image(data: bytes) -> tuple[str, str] | None:
+        if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+            return "image/jpeg", "jpg"
+        if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png", "png"
+        if len(data) >= 6 and data[:6] in {b"GIF87a", b"GIF89a"}:
+            return "image/gif", "gif"
+        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "image/webp", "webp"
+        return None
