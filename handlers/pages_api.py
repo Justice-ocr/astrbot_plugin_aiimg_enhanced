@@ -43,6 +43,12 @@ class PagesAPIMixin:
                 ["POST"],
                 "上传人设参考图",
             ),
+            (
+                "upload_ref_image_b64",
+                self._pages_upload_ref_image_b64,
+                ["POST"],
+                "上传人设参考图（base64 fallback）",
+            ),
 
         ]
         for name, handler, methods, desc in routes:
@@ -314,4 +320,45 @@ class PagesAPIMixin:
             })
         except Exception as e:
             logger.error("[Pages] upload_ref_image 失败: %s", e, exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    async def _pages_upload_ref_image_b64(self):
+        """POST /astrbot_plugin_aiimg_enhanced/upload_ref_image_b64
+        JSON: { filename, data: "data:image/...;base64,..." }
+        """
+        try:
+            data = await request.get_json(force=True) or {}
+            filename = pathlib.Path(str(data.get("filename") or "upload")).name
+            data_url = str(data.get("data") or "")
+
+            m = re.match(r"data:(image/[^;]+);base64,(.+)", data_url, re.DOTALL)
+            if not m:
+                return jsonify({"success": False, "error": "无效的图片数据"}), 400
+
+            mime, b64data = m.group(1).lower(), m.group(2)
+            ext = pathlib.Path(filename).suffix.lower()
+            if ext not in self._REF_IMAGE_EXTS:
+                ext = self._REF_IMAGE_MIME_EXTS.get(mime, "")
+                if not ext:
+                    return jsonify({"success": False, "error": f"不支持的图片类型: {mime}"}), 400
+                filename = f"{pathlib.Path(filename).stem or 'upload'}{ext}"
+
+            raw = base64.b64decode(b64data)
+            if len(raw) > 20 * 1024 * 1024:
+                return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
+
+            ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = f"{int(time.time() * 1000)}_{filename}"
+            save_path = ref_dir / safe_name
+            await asyncio.to_thread(save_path.write_bytes, raw)
+            logger.info("[AI绘图站] 参考图已通过 base64 fallback 上传: %s", save_path)
+
+            return jsonify({
+                "success": True,
+                "path": str(save_path),
+                "filename": safe_name,
+            })
+        except Exception as e:
+            logger.error("[Pages] upload_ref_image_b64 失败: %s", e, exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500

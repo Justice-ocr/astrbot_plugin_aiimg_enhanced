@@ -856,10 +856,32 @@ async function uploadRefFile(file) {
     }
     S.persona_ref_previews[data.path] = previewUrl;
     return data.path;
-  } catch (e) {
-    URL.revokeObjectURL(previewUrl);
-    throw e;
+  } catch (multipartError) {
+    try {
+      const dataUrl = await readFileAsDataURL(file);
+      const data = await bridge.apiPost('upload_ref_image_b64', {
+        filename: file.name,
+        data: dataUrl,
+      });
+      if (!data || !data.success || !data.path) {
+        throw new Error(data?.error || `${file.name} 上传失败`);
+      }
+      S.persona_ref_previews[data.path] = previewUrl;
+      return data.path;
+    } catch (fallbackError) {
+      URL.revokeObjectURL(previewUrl);
+      throw new Error(`${multipartError}; fallback: ${fallbackError}`);
+    }
   }
+}
+
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`${file.name} 读取失败`));
+    reader.readAsDataURL(file);
+  });
 }
 
 async function uploadRefImages(files) {
