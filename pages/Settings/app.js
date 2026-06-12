@@ -76,6 +76,10 @@ const bridge = window.AstrBotPluginPage || {
     if (name === 'switch_persona') return { success:true, active:{id:payload.id,name:payload.id} };
     return { success:true };
   },
+  upload: async (name, file) => {
+    console.info('[mock upload]', name, file);
+    return { success:false, error:'Upload requires the AstrBot Pages bridge' };
+  },
 };
 
 // ── P_TEMPLATES ───────────────────────────────────────────────────────────────
@@ -117,6 +121,7 @@ let S = {
   // chain状态单独存，key: 'draw'|'edit'|'selfie'|'video'
   chains:{ draw:[], edit:[], selfie:[], video:[] },
   persona_config:{ active_persona_id:'default', profiles:[] },
+  // Runtime-only preview cache. Config responses contain paths, never image data.
   persona_ref_previews:{},
   reply_config:{},
   draw_presets:[], edit_presets:[], video_presets:[],
@@ -339,7 +344,7 @@ function applyConfig(cfg) {
   const pc=cfg.persona_config||{};
   S.persona_config.active_persona_id = pc.active_persona_id||'default';
   S.persona_config.profiles = Array.isArray(pc.profiles)?pc.profiles:[];
-  S.persona_ref_previews = (cfg.persona_ref_previews && typeof cfg.persona_ref_previews === 'object') ? cfg.persona_ref_previews : {};
+  S.persona_ref_previews = {};
   renderPersonas();
 
   // presets
@@ -685,6 +690,54 @@ let _refUploadTask = null;
 // 统一管理弹窗内的参考图列表（含本地路径、URL）
 // base64 在上传时立即通过 upload_ref_image 转为服务器路径，不在内存存储
 let _modalRefs = [];
+const REF_PREVIEW_CONCURRENCY = 5;
+let _refPreviewActive = 0;
+const _refPreviewQueue = [];
+const _refPreviewRequests = new Map();
+
+function runRefPreviewQueue() {
+  while (_refPreviewActive < REF_PREVIEW_CONCURRENCY && _refPreviewQueue.length) {
+    const item = _refPreviewQueue.shift();
+    _refPreviewActive++;
+    Promise.resolve()
+      .then(item.task)
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        _refPreviewActive--;
+        runRefPreviewQueue();
+      });
+  }
+}
+
+function queueRefPreview(task) {
+  return new Promise((resolve, reject) => {
+    _refPreviewQueue.push({ task, resolve, reject });
+    runRefPreviewQueue();
+  });
+}
+
+function getLocalRefPreview(path) {
+  if (S.persona_ref_previews[path]) {
+    return Promise.resolve(S.persona_ref_previews[path]);
+  }
+  if (_refPreviewRequests.has(path)) {
+    return _refPreviewRequests.get(path);
+  }
+
+  const requestTask = queueRefPreview(async () => {
+    const data = await bridge.apiGet('get_image_b64', { path });
+    if (!data || !data.success || !data.data) {
+      throw new Error(data?.error || 'preview failed');
+    }
+    S.persona_ref_previews[path] = data.data;
+    return data.data;
+  }).finally(() => {
+    _refPreviewRequests.delete(path);
+  });
+
+  _refPreviewRequests.set(path, requestTask);
+  return requestTask;
+}
 
 function openPersonaModal(idx){
   _personaIdx=idx;
@@ -708,40 +761,9 @@ function refPreviewSrc(r) {
 }
 
 async function loadLocalRefPreview(r, img, errDiv) {
-  const url = `/api/plug/astrbot_plugin_aiimg_enhanced/get_image_b64?path=${encodeURIComponent(r)}`;
-  let lastError = null;
-  try {
-    const data = await bridge.apiPost('get_image_b64_post', { path: r });
-    if (data && data.success && data.data) {
-      img.src = data.data;
-      img.style.display = 'block';
-      errDiv.style.display = 'none';
-      return;
-    }
-    lastError = new Error(data?.error || 'bridge POST preview failed');
-  } catch (e) {
-    lastError = e;
-  }
-
-  try {
-    const data = await bridge.apiGet('get_image_b64?path=' + encodeURIComponent(r));
-    if (data && data.success && data.data) {
-      img.src = data.data;
-      img.style.display = 'block';
-      errDiv.style.display = 'none';
-      return;
-    }
-    lastError = new Error(data?.error || 'bridge GET preview failed');
-  } catch (e) {
-    lastError = e;
-  }
-
-  const res = await fetch(url);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success || !data.data) {
-    throw new Error(data.error || lastError?.message || 'preview failed');
-  }
-  img.src = data.data;
+  const src = await getLocalRefPreview(r);
+  if (!img.isConnected) return;
+  img.src = src;
   img.style.display = 'block';
   errDiv.style.display = 'none';
 }
@@ -793,7 +815,9 @@ function renderRefPreviews(refs) {
     } else {
       img.style.display = 'none';
       errDiv.style.display = 'flex';
+      errDiv.textContent = '图片加载中...';
       loadLocalRefPreview(String(r), img, errDiv).catch(e => {
+        if (!errDiv.isConnected) return;
         errDiv.textContent = `图片加载失败：${e}`;
       });
     }
@@ -809,19 +833,18 @@ function renderRefPreviews(refs) {
 }
 
 async function uploadRefFile(file) {
-  const dataUrl = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error(`${file.name} 读取失败`));
-    reader.readAsDataURL(file);
-  });
-  const data = await bridge.apiPost('upload_ref_image_b64', {
-    filename: file.name,
-    data: dataUrl,
-  });
-  if (!data || !data.success || !data.path) throw new Error(data?.error || `${file.name} 上传失败`);
-  S.persona_ref_previews[data.path] = dataUrl;
-  return data.path;
+  const previewUrl = URL.createObjectURL(file);
+  try {
+    const data = await bridge.upload('upload_ref_image', file);
+    if (!data || !data.success || !data.path) {
+      throw new Error(data?.error || `${file.name} 上传失败`);
+    }
+    S.persona_ref_previews[data.path] = previewUrl;
+    return data.path;
+  } catch (e) {
+    URL.revokeObjectURL(previewUrl);
+    throw e;
+  }
 }
 
 function dataUrlToFile(dataUrl, filename) {

@@ -29,18 +29,11 @@ class PagesAPIMixin:
             ("switch_persona", self._pages_switch_persona, ["POST"], "切换人设"),
             ("get_image", self._pages_get_image, ["GET"], "获取本地参考图预览"),
             ("get_image_b64", self._pages_get_image_b64, ["GET"], "获取本地参考图base64（bridge用）"),
-            ("get_image_b64_post", self._pages_get_image_b64_post, ["POST"], "获取本地参考图base64（POST）"),
             (
                 "upload_ref_image",
                 self._pages_upload_ref_image,
                 ["POST"],
                 "上传人设参考图",
-            ),
-            (
-                "upload_ref_image_b64",
-                self._pages_upload_ref_image_b64,
-                ["POST"],
-                "上传人设参考图（base64）",
             ),
 
         ]
@@ -64,12 +57,6 @@ class PagesAPIMixin:
         try:
             payload = dict(self.config) if isinstance(self.config, dict) else {}
             payload["persona_config"] = self.persona_mgr.to_config_dict()
-            # Keep config references as paths. The settings page loads previews
-            # through get_image_b64_post so save_config does not receive preview
-            # data URLs during normal edits.
-            payload["persona_ref_previews"] = await asyncio.to_thread(
-                self._build_persona_ref_previews, payload
-            )
             # AstrBot Chat provider 列表，供前端意图分类下拉框使用
             try:
                 astrbot_providers = [
@@ -82,39 +69,6 @@ class PagesAPIMixin:
             return jsonify({"success": True, "config": payload})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)})
-
-    def _build_persona_ref_previews(self, payload: dict) -> dict:
-        """Return {local_path: data_url} for local persona reference previews.
-
-        This keeps persona_config unchanged so save_config posts paths, not
-        preview data URLs.
-        """
-        PAGE_MAX_PREVIEW = 20 * 1024 * 1024
-        previews = {}
-        persona_cfg = payload.get("persona_config")
-        if not isinstance(persona_cfg, dict):
-            return previews
-
-        def collect(refs: list) -> None:
-            for ref in refs:
-                ref = str(ref or "").strip()
-                if not ref or ref.startswith(("data:image", "http://", "https://")):
-                    continue
-                try:
-                    p = pathlib.Path(ref)
-                    if not p.is_file() or p.stat().st_size > PAGE_MAX_PREVIEW:
-                        continue
-                    mime = mimetypes.guess_type(str(p))[0] or "image/png"
-                    b64 = base64.b64encode(p.read_bytes()).decode()
-                    previews[ref] = f"data:{mime};base64,{b64}"
-                except Exception:
-                    continue
-
-        for profile in persona_cfg.get("profiles") or []:
-            if isinstance(profile, dict):
-                collect(profile.get("persona_ref_image") or [])
-        collect(persona_cfg.get("persona_ref_image") or [])
-        return previews
 
     def _inline_persona_ref_images(self, payload: dict) -> None:
         """把 persona_config 里所有本地路径的参考图转成 base64 data URL。
@@ -319,15 +273,6 @@ class PagesAPIMixin:
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
 
-    async def _pages_get_image_b64_post(self):
-        """POST /astrbot_plugin_aiimg_enhanced/get_image_b64_post  { "path": "..." }"""
-        try:
-            data = await request.get_json(force=True) or {}
-            path = str(data.get("path") or "").strip()
-            return await self._pages_image_b64_response(path)
-        except Exception as e:
-            return jsonify({"success": False, "error": str(e)}), 500
-
     async def _pages_image_b64_response(self, path: str):
         if not path:
             return jsonify({"success": False, "error": "缺少 path 参数"}), 400
@@ -408,47 +353,4 @@ class PagesAPIMixin:
             })
         except Exception as e:
             logger.error("[Pages] upload_ref_image 失败: %s", e, exc_info=True)
-            return jsonify({"success": False, "error": str(e)}), 500
-
-    async def _pages_upload_ref_image_b64(self):
-        """POST /astrbot_plugin_aiimg_enhanced/upload_ref_image_b64
-        JSON: { "filename": "...", "data": "data:image/...;base64,..." }
-        返回: { success, path, filename }
-        """
-        try:
-            data = await request.get_json(force=True) or {}
-            filename = pathlib.Path(str(data.get("filename") or "upload.png")).name
-            data_url = str(data.get("data") or "")
-
-            m = re.match(r"data:(image/[^;]+);base64,(.+)", data_url, re.DOTALL)
-            if not m:
-                return jsonify({"success": False, "error": "无效的图片数据"}), 400
-
-            mime, b64data = m.group(1), m.group(2)
-            ext = pathlib.Path(filename).suffix.lower()
-            if not ext:
-                ext = "." + mime.split("/")[-1].replace("jpeg", "jpg")
-                filename = f"{filename}{ext}"
-            if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-                return jsonify({"success": False, "error": f"不支持的文件格式: {ext}"}), 400
-
-            raw = base64.b64decode(b64data)
-            if len(raw) > 20 * 1024 * 1024:
-                return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
-
-            ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
-            ref_dir.mkdir(parents=True, exist_ok=True)
-
-            safe_name = f"{int(time.time() * 1000)}_{filename}"
-            save_path = ref_dir / safe_name
-            await asyncio.to_thread(save_path.write_bytes, raw)
-            logger.info("[AI绘图站] 参考图已通过 base64 上传 %s", save_path)
-
-            return jsonify({
-                "success": True,
-                "path": str(save_path),
-                "filename": safe_name,
-            })
-        except Exception as e:
-            logger.error("[Pages] upload_ref_image_b64 失败: %s", e, exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500
