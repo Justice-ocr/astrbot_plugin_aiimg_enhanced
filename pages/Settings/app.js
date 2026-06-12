@@ -687,13 +687,22 @@ function delPersona(idx){
 let _personaIdx=-1;
 let _saving = false;
 let _refUploadTask = null;
-// 统一管理弹窗内的参考图列表（含本地路径、URL）
-// base64 在上传时立即通过 upload_ref_image 转为服务器路径，不在内存存储
+// 统一管理弹窗内的参考图列表（含本地路径、URL、兼容旧配置里的 data URL）
 let _modalRefs = [];
 const REF_PREVIEW_CONCURRENCY = 5;
 let _refPreviewActive = 0;
 const _refPreviewQueue = [];
 const _refPreviewRequests = new Map();
+
+const isDataImage = ref => String(ref).startsWith('data:image');
+const isRemoteImageRef = ref => /^https?:\/\//.test(String(ref));
+const modalVisibleRefs = () => _modalRefs.filter(ref => !isDataImage(ref)).join('\n');
+const refDisplayName = (ref, index) =>
+  isDataImage(ref) ? `图片 ${index + 1}` : (String(ref).split(/[\/\\]/).pop() || String(ref)).slice(0, 32);
+
+function syncModalRefsTextarea() {
+  $('modal-refs').value = modalVisibleRefs();
+}
 
 function runRefPreviewQueue() {
   while (_refPreviewActive < REF_PREVIEW_CONCURRENCY && _refPreviewQueue.length) {
@@ -753,16 +762,9 @@ function openPersonaModal(idx){
   $('modal-prompt').value=p.persona_base_prompt||'';
   // _modalRefs 保留所有引用（路径/URL/base64），文本框只显示路径和URL（base64太长不展示）
   _modalRefs = [...(p.persona_ref_image||[])];
-  $('modal-refs').value = _modalRefs.filter(r=>!String(r).startsWith('data:image')).join('\n');
+  syncModalRefsTextarea();
   renderRefPreviews(_modalRefs);
   $('persona-modal').style.display='flex'; $('modal-name').focus();
-}
-
-function refPreviewSrc(r) {
-  if (r.startsWith('data:image')) return r;
-  if (r.startsWith('http://') || r.startsWith('https://')) return r;
-  // 本地绝对路径 → 通过后端 get_image 接口代理返回图片
-  return `/api/plug/astrbot_plugin_aiimg_enhanced/get_image?path=${encodeURIComponent(r)}`;
 }
 
 async function loadLocalRefPreview(r, img, errDiv) {
@@ -773,68 +775,76 @@ async function loadLocalRefPreview(r, img, errDiv) {
   errDiv.style.display = 'none';
 }
 
+function createRefPreviewItem(ref, index) {
+  const value = String(ref);
+  const isInline = isDataImage(value);
+  const isRemote = isRemoteImageRef(value);
+  const name = refDisplayName(value, index);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'ref-image-item';
+  wrap.title = isInline ? name : value;
+
+  const img = document.createElement('img');
+  img.className = 'ref-image';
+  img.alt = name;
+  img.loading = 'lazy';
+
+  const state = document.createElement('div');
+  state.className = 'ref-image-state';
+  state.style.display = 'none';
+
+  const nameDiv = document.createElement('div');
+  nameDiv.className = 'ref-image-name';
+  nameDiv.textContent = name;
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'ref-image-del';
+  delBtn.title = '删除';
+  delBtn.textContent = '删除';
+  delBtn.addEventListener('click', () => {
+    _modalRefs.splice(index, 1);
+    syncModalRefsTextarea();
+    renderRefPreviews(_modalRefs);
+    markDirty();
+  });
+
+  img.onerror = () => {
+    img.style.display = 'none';
+    state.style.display = 'flex';
+    state.classList.add('is-error');
+    state.textContent = '图片加载失败';
+  };
+
+  if (isInline || isRemote) {
+    img.src = value;
+  } else if (S.persona_ref_previews[value]) {
+    img.src = S.persona_ref_previews[value];
+  } else {
+    img.style.display = 'none';
+    state.style.display = 'flex';
+    state.textContent = '图片加载中...';
+    loadLocalRefPreview(value, img, state).catch(e => {
+      if (!state.isConnected) return;
+      state.classList.add('is-error');
+      state.textContent = `图片加载失败：${e}`;
+    });
+  }
+
+  wrap.append(delBtn, img, state, nameDiv);
+  return wrap;
+}
+
 function renderRefPreviews(refs) {
   const el = $('modal-ref-previews');
   if (!el) return;
   el.innerHTML = '';
-  if (!refs || !refs.length) return;
+  if (!refs || !refs.length) {
+    el.innerHTML = '<div class="ref-empty">暂无参考图</div>';
+    return;
+  }
 
-  refs.forEach((r, i) => {
-    const isBase64 = String(r).startsWith('data:image');
-    const isHttp   = String(r).startsWith('http://') || String(r).startsWith('https://');
-    const shortName = isBase64 ? ('图片 ' + (i+1)) : (r.split(/[\/\\]/).pop() || r).slice(0, 24);
-
-    const wrap = document.createElement('div');
-    wrap.className = 'ref-image-item';
-    wrap.title = isBase64 ? shortName : r;
-
-    const img = document.createElement('img');
-    img.className = 'ref-image';
-    img.alt = shortName;
-    img.loading = 'lazy';
-
-    const errDiv = document.createElement('div');
-    errDiv.className = 'ref-image-err';
-    errDiv.style.display = 'none';
-    errDiv.textContent = '图片加载失败';
-
-    const nameDiv = document.createElement('div');
-    nameDiv.className = 'ref-image-name';
-    nameDiv.textContent = shortName;
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'ref-image-del';
-    delBtn.title = '删除';
-    delBtn.textContent = '删除';
-    delBtn.addEventListener('click', () => {
-      _modalRefs.splice(i, 1);
-      $('modal-refs').value = _modalRefs.filter(x => !String(x).startsWith('data:image')).join('\n');
-      renderRefPreviews(_modalRefs);
-      markDirty();
-    });
-
-    if (isBase64 || isHttp) {
-      img.src = refPreviewSrc(String(r));
-    } else if (S.persona_ref_previews && S.persona_ref_previews[String(r)]) {
-      img.src = S.persona_ref_previews[String(r)];
-    } else {
-      img.style.display = 'none';
-      errDiv.style.display = 'flex';
-      errDiv.textContent = '图片加载中...';
-      loadLocalRefPreview(String(r), img, errDiv).catch(e => {
-        if (!errDiv.isConnected) return;
-        errDiv.textContent = `图片加载失败：${e}`;
-      });
-    }
-    img.onerror = () => {
-      img.style.display = 'none';
-      errDiv.style.display = 'flex';
-      errDiv.textContent = '图片加载失败';
-    };
-
-    wrap.append(delBtn, img, errDiv, nameDiv);
-    el.appendChild(wrap);
-  });
+  refs.forEach((ref, index) => el.appendChild(createRefPreviewItem(ref, index)));
 }
 
 async function uploadRefFile(file) {
@@ -850,24 +860,6 @@ async function uploadRefFile(file) {
     URL.revokeObjectURL(previewUrl);
     throw e;
   }
-}
-
-function dataUrlToFile(dataUrl, filename) {
-  const m = String(dataUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-  if (!m) throw new Error('无效的图片数据');
-  const mime = m[1];
-  const ext = (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
-  const bin = atob(m[2]);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new File([bytes], `${filename}.${ext}`, { type: mime });
-}
-
-async function normalizePersonaRefImages() {
-  // Do not upload data URLs from the page before save. In AstrBot Pages this
-  // iframe may not be allowed to fetch plugin endpoints directly; save_config
-  // still has a backend fallback that persists any remaining data URLs.
-  return false;
 }
 
 async function uploadRefImages(files) {
@@ -896,7 +888,7 @@ async function uploadRefImages(files) {
       _modalRefs.push(path);
       done++;
       status.textContent = `上传中 (${done}/${fileArr.length})...`;
-      $('modal-refs').value = _modalRefs.filter(r => !String(r).startsWith('data:image')).join('\n');
+      syncModalRefsTextarea();
       renderRefPreviews(_modalRefs);
     }
   })();
@@ -927,7 +919,7 @@ async function savePersonaModal(){
   const id=$('modal-id').value.trim().replace(/[^a-zA-Z0-9_\-]/g,'_')||`persona_${Date.now()}`;
   const persona_name=$('modal-name').value.trim()||id;
   const persona_base_prompt=$('modal-prompt').value.trim();
-  // _modalRefs 包含本地路径/URL/base64，后端 _save_base64_refs 会把 base64 转存为本地文件
+  // 旧配置可能仍含 data URL；后端会在保存时转存为本地文件。
   const persona_ref_image = _modalRefs.filter(r => Boolean(r));
   const obj={id,persona_name,persona_base_prompt,persona_ref_image};
   if(_personaIdx<0){
@@ -952,9 +944,6 @@ async function saveAll(){
     if (_refUploadTask) {
       $('save-hint').textContent='正在等待参考图上传...';
       await _refUploadTask;
-    }
-    if (await normalizePersonaRefImages()) {
-      $('save-hint').textContent='参考图已转存，正在保存...';
     }
     const res=await bridge.apiPost('save_config',buildPayload());
     if(!res.success)throw new Error(res.error||'保存失败');
@@ -1016,7 +1005,7 @@ async function init(){
     modalRefs.addEventListener('input', () => {
       // 文本框的路径/URL + 内存里的base64合并
       const textPart = modalRefs.value.split('\n').map(s=>s.trim()).filter(Boolean);
-      const b64Part  = _modalRefs.filter(r=>String(r).startsWith('data:image'));
+      const b64Part  = _modalRefs.filter(isDataImage);
       _modalRefs = [...b64Part, ...textPart];
       renderRefPreviews(_modalRefs);
     });
