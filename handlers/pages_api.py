@@ -1,6 +1,7 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
 import base64
+import inspect
 import mimetypes
 import pathlib
 import re
@@ -11,6 +12,15 @@ import time
 from ..core.persona_manager import PersonaManager
 
 class PagesAPIMixin:
+    _REF_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    _REF_IMAGE_MIME_EXTS = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }
+
     def _register_pages_web_api(self) -> None:
         register_web_api = getattr(self.context, "register_web_api", None)
         if not callable(register_web_api):
@@ -272,8 +282,15 @@ class PagesAPIMixin:
 
             filename = pathlib.Path(file.filename or "upload").name
             ext = pathlib.Path(filename).suffix.lower()
-            if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-                return jsonify({"success": False, "error": f"不支持的文件格式: {ext}"}), 400
+            mime = str(getattr(file, "mimetype", "") or getattr(file, "content_type", "") or "").split(";")[0].lower()
+            if ext not in self._REF_IMAGE_EXTS:
+                ext = self._REF_IMAGE_MIME_EXTS.get(mime, "")
+                if not ext:
+                    return jsonify({
+                        "success": False,
+                        "error": f"不支持的文件格式: {pathlib.Path(filename).suffix.lower() or mime or 'unknown'}",
+                    }), 400
+                filename = f"{pathlib.Path(filename).stem or 'upload'}{ext}"
 
             ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
             ref_dir.mkdir(parents=True, exist_ok=True)
@@ -282,6 +299,8 @@ class PagesAPIMixin:
             save_path = ref_dir / safe_name
 
             data = file.read()
+            if inspect.isawaitable(data):
+                data = await data
             if len(data) > 20 * 1024 * 1024:
                 return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
 
