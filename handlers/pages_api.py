@@ -4,11 +4,10 @@ import base64
 import mimetypes
 import pathlib
 import re
-from quart import jsonify, request, send_file
+from quart import jsonify, request
 from astrbot.api import logger
 import asyncio
 import time
-from pathlib import Path
 from ..core.persona_manager import PersonaManager
 
 class PagesAPIMixin:
@@ -27,7 +26,6 @@ class PagesAPIMixin:
             ("save_config", self._pages_save_config, ["POST"], "保存 AI绘图站 插件配置"),
             ("get_persona", self._pages_get_persona, ["GET"], "获取人设信息"),
             ("switch_persona", self._pages_switch_persona, ["POST"], "切换人设"),
-            ("get_image", self._pages_get_image, ["GET"], "获取本地参考图预览"),
             ("get_image_b64", self._pages_get_image_b64, ["GET"], "获取本地参考图base64（bridge用）"),
             (
                 "upload_ref_image",
@@ -69,52 +67,6 @@ class PagesAPIMixin:
             return jsonify({"success": True, "config": payload})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)})
-
-    def _inline_persona_ref_images(self, payload: dict) -> None:
-        """把 persona_config 里所有本地路径的参考图转成 base64 data URL。
-        文件不存在或读取失败则保留原路径（前端会显示占位符）。
-        """
-        PAGE_MAX_INLINE = 2 * 1024 * 1024  # 2MB 以内直接内联 base64，超出保留路径
-        persona_cfg = payload.get("persona_config")
-        if not isinstance(persona_cfg, dict):
-            return
-
-        def inline_refs(refs: list) -> list:
-            result = []
-            for ref in refs:
-                ref = str(ref or "").strip()
-                if not ref:
-                    continue
-                if ref.startswith(("data:image", "http://", "https://")):
-                    result.append(ref)
-                    continue
-                try:
-                    p = pathlib.Path(ref)
-                    if not p.is_file():
-                        result.append(ref)
-                        continue
-                    if p.stat().st_size > PAGE_MAX_INLINE:
-                        result.append(ref)  # 太大，保留路径（前端 bridge fallback 处理）
-                        continue
-                    mime = mimetypes.guess_type(str(p))[0] or "image/png"
-                    b64 = base64.b64encode(p.read_bytes()).decode()
-                    result.append(f"data:{mime};base64,{b64}")
-                except Exception:
-                    result.append(ref)
-            return result
-
-        # 处理各人设的 persona_ref_image
-        for profile in persona_cfg.get("profiles") or []:
-            if isinstance(profile, dict):
-                profile["persona_ref_image"] = inline_refs(
-                    profile.get("persona_ref_image") or []
-                )
-        # 处理全局 persona_ref_image
-        if "persona_ref_image" in persona_cfg:
-            persona_cfg["persona_ref_image"] = inline_refs(
-                persona_cfg.get("persona_ref_image") or []
-            )
-
 
     async def _pages_save_config(self):
         """POST /astrbot_plugin_aiimg_enhanced/save_config"""
@@ -246,21 +198,6 @@ class PagesAPIMixin:
             return jsonify({"success": True, "active": {"id": target.id, "name": target.name}})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)})
-
-
-    async def _pages_get_image(self):
-        """GET /astrbot_plugin_aiimg_enhanced/get_image?path=<abs_path>&token=<token>"""
-        try:
-            path = str(request.args.get("path") or "").strip()
-            if not path:
-                return jsonify({"success": False, "error": "缺少 path 参数"}), 400
-            p, err = self._check_path_safe(path)
-            if err is not None:
-                return err
-            mime = mimetypes.guess_type(str(p))[0] or "image/png"
-            return await send_file(str(p), mimetype=mime)
-        except Exception as e:
-            return jsonify({"success": False, "error": str(e)}), 500
 
 
     async def _pages_get_image_b64(self):
