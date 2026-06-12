@@ -9,12 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced">
-    <img alt="Repository" src="https://img.shields.io/badge/GitHub-Justice--ocr%2Fastrbot__plugin__aiimg__enhanced-24292f?logo=github">
-  </a>
-  <img alt="AstrBot" src="https://img.shields.io/badge/AstrBot-%3E%3D4.16.0%2C%3C5-2f8f83">
-  <img alt="Version" src="https://img.shields.io/badge/version-v4.4.0-cb6545">
-  <img alt="License" src="https://img.shields.io/badge/license-MIT-4a78a8">
+  <strong>AstrBot &gt;= 4.16.0, &lt; 5</strong>
+  · v4.4.0
+  · MIT
+  · <a href="https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced">GitHub 仓库</a>
 </p>
 
 ![AI绘图站功能概览](./docs/assets/readme-banner.jpg)
