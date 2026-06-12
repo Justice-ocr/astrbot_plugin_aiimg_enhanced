@@ -725,12 +725,17 @@ function getLocalRefPreview(path) {
   }
 
   const requestTask = queueRefPreview(async () => {
-    const data = await bridge.apiGet('get_image_b64', { path });
-    if (!data || !data.success || !data.data) {
-      throw new Error(data?.error || 'preview failed');
+    const response = await bridge.apiGet('get_image_b64', { path });
+    // AstrBot v4.25.4 unwraps a top-level `data` response automatically.
+    // Accept that legacy shape as well as the current object response.
+    const imageData = typeof response === 'string'
+      ? response
+      : (response?.image_data || response?.data);
+    if (!imageData || !String(imageData).startsWith('data:image/')) {
+      throw new Error(response?.error || 'preview response contained no image');
     }
-    S.persona_ref_previews[path] = data.data;
-    return data.data;
+    S.persona_ref_previews[path] = imageData;
+    return imageData;
   }).finally(() => {
     _refPreviewRequests.delete(path);
   });

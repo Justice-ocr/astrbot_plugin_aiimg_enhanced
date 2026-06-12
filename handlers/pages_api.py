@@ -265,7 +265,9 @@ class PagesAPIMixin:
 
     async def _pages_get_image_b64(self):
         """GET /astrbot_plugin_aiimg_enhanced/get_image_b64?path=<abs_path>
-        通过 bridge.apiGet 调用，返回 {success, data: "data:image/...;base64,..."} 用于 Pages 预览。
+        通过 bridge.apiGet 调用，返回 {success, image_data: "data:image/...;base64,..."}。
+
+        不使用顶层 data 字段，因为 AstrBot Pages Bridge 会自动解包该字段。
         """
         try:
             path = str(request.args.get("path") or "").strip()
@@ -282,7 +284,10 @@ class PagesAPIMixin:
         mime = mimetypes.guess_type(str(p))[0] or "image/png"
         raw = await asyncio.to_thread(p.read_bytes)
         b64 = base64.b64encode(raw).decode()
-        return jsonify({"success": True, "data": f"data:{mime};base64,{b64}"})
+        return jsonify({
+            "success": True,
+            "image_data": f"data:{mime};base64,{b64}",
+        })
 
     async def _save_base64_refs(self, refs: list) -> list:
         """把 persona_ref_image 列表里的 base64 data URL 转存为本地文件，返回替换后的列表。"""
