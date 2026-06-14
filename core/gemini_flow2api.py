@@ -632,21 +632,38 @@ class GeminiFlow2ApiBackend:
         return self.proxy_url if self.use_proxy and self.proxy_url else None
 
     @staticmethod
-    def _resolution_hint(resolution: str | None) -> str:
-        r = (resolution or "").strip().upper()
+    def _output_hint(
+        *, size: str | None = None, resolution: str | None = None
+    ) -> str:
+        s = (size or "").strip().replace("×", "x")
+        if s:
+            if re.fullmatch(r"\d{2,5}x\d{2,5}", s.lower()):
+                return f" Target size: {s.lower()}."
+            return f" Target size: {s}."
+
+        r = (resolution or "").strip().upper().replace("×", "X")
         if not r:
             return ""
         if r in {"1K", "2K", "4K"}:
             return f" Target resolution: {r}."
         if "X" in r:
-            return f" Target size: {r}."
+            return f" Target size: {r.lower()}."
         return ""
 
-    def _build_user_text(self, prompt: str, *, resolution: str | None) -> str:
-        # 尽量与官方示例保持一致：content 直接使用用户提示词（避免网关对提示词模板敏感导致失败）。
-        # 分辨率提示不强制拼接，以免改变模型行为；需要的话请在 prompt 内自行表达。
+    @staticmethod
+    def _resolution_hint(resolution: str | None) -> str:
+        return GeminiFlow2ApiBackend._output_hint(resolution=resolution)
+
+    def _build_user_text(
+        self,
+        prompt: str,
+        *,
+        size: str | None = None,
+        resolution: str | None = None,
+    ) -> str:
+        # Keep the official Flow2API shape: direct user text plus a compact output hint.
         p = (prompt or "").strip()
-        return p or "a high quality image"
+        return f"{p or 'a high quality image'}{self._output_hint(size=size, resolution=resolution)}"
 
     async def _request_stream_text(self, payload: dict, headers: dict) -> str:
         session = await self._get_session()
@@ -899,7 +916,12 @@ class GeminiFlow2ApiBackend:
         raise RuntimeError("Flow2API 返回的图片引用格式不支持")
 
     async def generate(
-        self, prompt: str, *, resolution: str | None = None, **_
+        self,
+        prompt: str,
+        *,
+        size: str | None = None,
+        resolution: str | None = None,
+        **_,
     ) -> Path:
         if not self.api_url:
             raise RuntimeError("未配置 Flow2API 地址（flow2api.api_url）")
@@ -912,7 +934,7 @@ class GeminiFlow2ApiBackend:
             "Authorization": f"Bearer {key}",
         }
 
-        user_text = self._build_user_text(prompt, resolution=resolution)
+        user_text = self._build_user_text(prompt, size=size, resolution=resolution)
         payload = {
             "model": self.model,
             # Flow2API README 示例：纯文生图时 content 为 string
@@ -924,7 +946,13 @@ class GeminiFlow2ApiBackend:
         return await self._save_from_content(content)
 
     async def edit(
-        self, prompt: str, images: list[bytes], *, resolution: str | None = None, **_
+        self,
+        prompt: str,
+        images: list[bytes],
+        *,
+        size: str | None = None,
+        resolution: str | None = None,
+        **_,
     ) -> Path:
         if not images:
             raise ValueError("至少需要一张图片")
@@ -939,7 +967,7 @@ class GeminiFlow2ApiBackend:
             "Authorization": f"Bearer {key}",
         }
 
-        user_text = self._build_user_text(prompt, resolution=resolution)
+        user_text = self._build_user_text(prompt, size=size, resolution=resolution)
         parts: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
         for b in images:
             mime, _ = guess_image_mime_and_ext(b)

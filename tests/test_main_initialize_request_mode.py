@@ -374,5 +374,43 @@ class MainInitializeRequestModeTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class LLMToolOutputNormalizationTests(unittest.TestCase):
+    def test_ignores_llm_output_when_user_did_not_request_size(self):
+        mod, _logger = _load_module()
+        event = types.SimpleNamespace(message_str="在用这个随便生成一张图")
+
+        output = mod.GiteeAIImagePlugin._normalize_llm_tool_output(
+            "1024x1024",
+            event=event,
+            prompt="清爽治愈的午后插画",
+        )
+
+        self.assertEqual(output, "")
+
+    def test_keeps_llm_output_when_user_requested_size(self):
+        mod, _logger = _load_module()
+        event = types.SimpleNamespace(message_str="随便生成一张 2K 图")
+
+        output = mod.GiteeAIImagePlugin._normalize_llm_tool_output(
+            "2K",
+            event=event,
+            prompt="清爽治愈的午后插画",
+        )
+
+        self.assertEqual(output, "2K")
+
+    def test_normalizes_explicit_pixel_output(self):
+        mod, _logger = _load_module()
+        event = types.SimpleNamespace(message_str="生成 1024×1024 的头像")
+
+        output = mod.GiteeAIImagePlugin._normalize_llm_tool_output(
+            "1024×1024",
+            event=event,
+            prompt="头像",
+        )
+
+        self.assertEqual(output, "1024x1024")
+
+
 if __name__ == "__main__":
     unittest.main()

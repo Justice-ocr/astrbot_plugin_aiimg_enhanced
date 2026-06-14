@@ -92,6 +92,12 @@ _DEFAULT_DRAW_ERROR       = "💥 绘制失败: {error}"
 _DEFAULT_SELFIE_ERROR     = "💥 自拍生成失败: {error}"
 
 _BATCH_COMMAND_PATTERN = re.compile(r"[/!！.。．]批量(?:\s*\d+|\d+)")
+_OUTPUT_SIZE_VALUE_PATTERN = re.compile(
+    r"(?i)^\s*(?:[124]\s*k|\d{2,5}\s*[x×]\s*\d{2,5})\s*$"
+)
+_OUTPUT_SIZE_TOKEN_PATTERN = re.compile(
+    r"(?i)(?<![a-z0-9])(?:[124]\s*k|\d{2,5}\s*[x×]\s*\d{2,5})(?![a-z0-9])"
+)
 _async_pause = asyncio.sleep
 
 @dataclass(slots=True)
@@ -208,6 +214,49 @@ class GiteeAIImagePlugin(
         if len(text) <= limit:
             return text
         return f"{text[: limit - 3].rstrip()}..."
+
+    @staticmethod
+    def _normalize_output_size_value(value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        compact = re.sub(r"\s+", "", text).replace("×", "x")
+        if re.fullmatch(r"(?i)[124]k", compact):
+            return compact.upper()
+        if re.fullmatch(r"\d{2,5}x\d{2,5}", compact):
+            return compact.lower()
+        return text
+
+    @staticmethod
+    def _text_mentions_output_size(value: str) -> bool:
+        return bool(_OUTPUT_SIZE_TOKEN_PATTERN.search(str(value or "")))
+
+    @classmethod
+    def _normalize_llm_tool_output(
+        cls,
+        output: str | None,
+        *,
+        event: AstrMessageEvent | None,
+        prompt: str | None,
+    ) -> str:
+        raw = str(output or "").strip()
+        if not raw:
+            return ""
+        if not _OUTPUT_SIZE_VALUE_PATTERN.fullmatch(raw):
+            logger.info("[aiimg_generate] ignore invalid output hint from LLM: %s", raw)
+            return ""
+
+        user_text = str(getattr(event, "message_str", "") or "").strip()
+        explicit_text = user_text or str(prompt or "").strip()
+        normalized = cls._normalize_output_size_value(raw)
+        if cls._text_mentions_output_size(explicit_text):
+            return normalized
+
+        logger.info(
+            "[aiimg_generate] ignore inferred output=%s because user did not request an output size",
+            normalized,
+        )
+        return ""
 
     @staticmethod
     def _truncate_text(value: Any, *, limit: int = 320) -> str:
@@ -1375,7 +1424,7 @@ class GiteeAIImagePlugin(
             prompt, backend, m, event
         )
 
-        output = (output or "").strip()
+        output = self._normalize_llm_tool_output(output, event=event, prompt=prompt)
         size = output if output and "x" in output else None
         resolution = output if output and size is None else None
 
@@ -1614,7 +1663,7 @@ class GiteeAIImagePlugin(
         resolved_mode = await self._resolve_llm_batch_mode(event, mode, prompt)
         target_backend = self._resolve_target_backend(backend)
 
-        output = (output or "").strip()
+        output = self._normalize_llm_tool_output(output, event=event, prompt=prompt)
         size = output if output and "x" in output else None
         resolution = output if output and size is None else None
 

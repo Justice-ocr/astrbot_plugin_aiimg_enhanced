@@ -177,5 +177,48 @@ class Flow2ApiMediaRefTests(unittest.TestCase):
         self.assertIsNone(ref)
 
 
+class Flow2ApiOutputHintTests(unittest.IsolatedAsyncioTestCase):
+    def _backend_with_payload_capture(self):
+        mod = _load_module()
+        backend = mod.GeminiFlow2ApiBackend(
+            imgr=object(),
+            settings={
+                "api_url": "https://flow.example/v1/chat/completions",
+                "api_keys": ["test-key"],
+                "model": "gemini-image",
+            },
+        )
+        payloads: list[dict] = []
+
+        async def _request_stream_text(payload, headers):
+            payloads.append(payload)
+            return "image-result"
+
+        async def _save_from_content(content):
+            return Path("/tmp/result.png")
+
+        backend._request_stream_text = _request_stream_text
+        backend._save_from_content = _save_from_content
+        return backend, payloads
+
+    async def test_generate_includes_resolution_hint_in_user_text(self):
+        backend, payloads = self._backend_with_payload_capture()
+
+        await backend.generate("draw a city", resolution="4K")
+
+        user_text = payloads[0]["messages"][0]["content"]
+        self.assertIn("draw a city", user_text)
+        self.assertIn("Target resolution: 4K.", user_text)
+
+    async def test_generate_includes_pixel_size_hint_in_user_text(self):
+        backend, payloads = self._backend_with_payload_capture()
+
+        await backend.generate("draw a city", size="2048x2048")
+
+        user_text = payloads[0]["messages"][0]["content"]
+        self.assertIn("draw a city", user_text)
+        self.assertIn("Target size: 2048x2048.", user_text)
+
+
 if __name__ == "__main__":
     unittest.main()
