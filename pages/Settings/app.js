@@ -38,6 +38,35 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const asInt = (v,d) => { const n=parseInt(v); return isNaN(n)?d:n; };
 const asBool = v => typeof v==='boolean'?v: String(v||'').toLowerCase()==='true';
+const OUTPUT_SIZE_OPTIONS = [
+  '', '512x512', '1024x1024', '2048x2048', '4096x4096',
+  '1920x1080', '2560x1440', '3840x2160',
+  '1080x1920', '1440x2560',
+  '1152x896', '768x1024', '1536x2048', '2048x1536',
+  '1024x576', '2048x1152', '576x1024', '1152x2048',
+  '2048x1360', '1360x2048'
+];
+const normalizeOutputSize = value => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const compact = raw.replace(/\s+/g, '').replace(/[×脳]/g, 'x');
+  const upper = compact.toUpperCase();
+  if (upper === '1K') return '1024x1024';
+  if (upper === '2K') return '2048x2048';
+  if (upper === '4K') return '4096x4096';
+  return compact.toLowerCase();
+};
+const sizeOptionsHtml = (value = '', {includeDefault = false} = {}) => {
+  const selected = normalizeOutputSize(value);
+  const known = new Set(OUTPUT_SIZE_OPTIONS);
+  const labels = includeDefault ? ['服务商默认', ...OUTPUT_SIZE_OPTIONS.slice(1)] : OUTPUT_SIZE_OPTIONS.slice(1);
+  const values = includeDefault ? ['', ...OUTPUT_SIZE_OPTIONS.slice(1)] : OUTPUT_SIZE_OPTIONS.slice(1);
+  if (selected && !known.has(selected)) {
+    values.push(selected);
+    labels.push(selected);
+  }
+  return values.map((v, i) => `<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(labels[i])}</option>`).join('');
+};
 
 // ── Bridge ───────────────────────────────────────────────────────────────────
 const bridge = window.AstrBotPluginPage || {
@@ -48,9 +77,9 @@ const bridge = window.AstrBotPluginPage || {
       features: {
         draw:   { enabled:true, llm_tool_enabled:true, default_output:'1024x1024', batch_concurrency:2,
                   chain:[{provider_id:'gitee',output:''}] },
-        edit:   { enabled:true, llm_tool_enabled:true, default_output:'4K', batch_concurrency:2,
+        edit:   { enabled:true, llm_tool_enabled:true, default_output:'4096x4096', batch_concurrency:2,
                   chain:[{provider_id:'gitee_async',output:''}] },
-        selfie: { enabled:true, llm_tool_enabled:true, default_output:'4K',
+        selfie: { enabled:true, llm_tool_enabled:true, default_output:'4096x4096',
                   use_edit_chain_when_empty:true, prompt_prefix:'',
                   chain:[] },
         video:  { enabled:false, llm_tool_enabled:true, send_mode:'auto',
@@ -86,7 +115,7 @@ const bridge = window.AstrBotPluginPage || {
 const P_TEMPLATES = {
   openai_images:          { label:'OpenAI Images', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
   openai_chat:            { label:'OpenAI Chat图', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
-  gemini_native:          { label:'Gemini 原生', api_url:'https://generativelanguage.googleapis.com', api_keys:[], model:'gemini-3-pro-image-preview', timeout:120, use_proxy:false, proxy_url:'', default_resolution:'4K', generate_request_mode:'auto', edit_request_mode:'auto' },
+  gemini_native:          { label:'Gemini 原生', api_url:'https://generativelanguage.googleapis.com', api_keys:[], model:'gemini-3-pro-image-preview', timeout:120, use_proxy:false, proxy_url:'', default_resolution:'4096x4096', generate_request_mode:'auto', edit_request_mode:'auto' },
   flow2api:               { label:'Flow2API', api_url:'', api_keys:[], model:'', timeout:120, use_proxy:false, proxy_url:'', generate_request_mode:'auto', edit_request_mode:'auto' },
   vertex_ai_anonymous:    { label:'Vertex AI 匿名', model:'gemini-3-pro-image-preview', timeout:300, max_retries:10, proxy_url:'', generate_request_mode:'auto', edit_request_mode:'auto' },
   grok_images:            { label:'Grok Images', base_url:'https://api.x.ai/v1', api_keys:[], model:'', timeout:120, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
@@ -141,6 +170,13 @@ function markClean(msg='配置已同步') {
 }
 
 // ── Tab切换 ──────────────────────────────────────────────────────────────────
+function initOutputSizeSelects() {
+  ['feat-draw-output', 'feat-edit-output', 'feat-selfie-output'].forEach(id => {
+    const el = $(id);
+    if (el) el.innerHTML = sizeOptionsHtml(el.value, {includeDefault:true});
+  });
+}
+
 function initTabs() {
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -180,7 +216,7 @@ function renderChain(containerId, chainKey, hasOutput=true) {
           <option value="">-- 选择服务商 --</option>
           ${providerIds.map(id => `<option value="${esc(id)}" ${id===item.provider_id?'selected':''}>${esc(id)}</option>`).join('')}
         </select>
-        ${hasOutput ? `<input type="text" class="inp chain-output" placeholder="输出尺寸（留空默认）" value="${esc(item.output||'')}" data-chain="${chainKey}" data-idx="${idx}" title="覆盖输出尺寸，如 4K 或 1024x1024，留空使用功能默认值"/>` : ''}
+        ${hasOutput ? `<select class="sel chain-output" data-chain="${chainKey}" data-idx="${idx}" title="覆盖输出尺寸，留空使用功能默认值">${sizeOptionsHtml(item.output, {includeDefault:true})}</select>` : ''}
         <div class="chain-btns">
           ${idx>0 ? `<button class="chain-btn" data-chain="${chainKey}" data-act="up" data-idx="${idx}" title="上移">↑</button>` : ''}
           ${idx<chain.length-1 ? `<button class="chain-btn" data-chain="${chainKey}" data-act="down" data-idx="${idx}" title="下移">↓</button>` : ''}
@@ -208,9 +244,9 @@ function renderChain(containerId, chainKey, hasOutput=true) {
     });
   });
   el.querySelectorAll('.chain-output').forEach(inp => {
-    inp.addEventListener('input', () => {
+    inp.addEventListener('change', () => {
       const {chain: k, idx} = inp.dataset;
-      S.chains[k][parseInt(idx)].output = inp.value.trim();
+      S.chains[k][parseInt(idx)].output = normalizeOutputSize(inp.value);
       markDirty();
     });
   });
@@ -262,17 +298,17 @@ function applyConfig(cfg) {
 
   setCk('feat-draw-enabled', asBool(draw.enabled!==false));
   setCk('feat-draw-llm', asBool(draw.llm_tool_enabled!==false));
-  setSel('feat-draw-output', draw.default_output||'');
+  setSel('feat-draw-output', normalizeOutputSize(draw.default_output));
   setVal('feat-draw-batch', draw.batch_concurrency??2);
 
   setCk('feat-edit-enabled', asBool(edit.enabled!==false));
   setCk('feat-edit-llm', asBool(edit.llm_tool_enabled!==false));
-  setSel('feat-edit-output', edit.default_output||'');
+  setSel('feat-edit-output', normalizeOutputSize(edit.default_output));
   setVal('feat-edit-batch', edit.batch_concurrency??2);
 
   setCk('feat-selfie-enabled', asBool(selfie.enabled!==false));
   setCk('feat-selfie-llm', asBool(selfie.llm_tool_enabled!==false));
-  setSel('feat-selfie-output', selfie.default_output||'');
+  setSel('feat-selfie-output', normalizeOutputSize(selfie.default_output));
   setCk('feat-selfie-fallback', asBool(selfie.use_edit_chain_when_empty!==false));
   setTa('feat-selfie-prefix', selfie.prompt_prefix||'');
 
@@ -286,7 +322,7 @@ function applyConfig(cfg) {
   // chain
   const parseChain = arr => (Array.isArray(arr)?arr:[]).map(item => ({
     provider_id: String(item.provider_id||''),
-    output: String(item.output||''),
+    output: normalizeOutputSize(item.output),
   }));
   S.chains.draw   = parseChain(draw.chain);
   S.chains.edit   = parseChain(edit.chain);
@@ -374,26 +410,26 @@ function buildPayload() {
 
   const chainToSave = (key, hasOutput=true) =>
     (S.chains[key]||[]).filter(i=>i.provider_id).map(i =>
-      hasOutput ? {provider_id:i.provider_id, output:i.output||''} : {provider_id:i.provider_id}
+      hasOutput ? {provider_id:i.provider_id, output:normalizeOutputSize(i.output)} : {provider_id:i.provider_id}
     );
 
   return {
     features:{
       draw:{
         enabled:getCk('feat-draw-enabled'), llm_tool_enabled:getCk('feat-draw-llm'),
-        default_output:getVal('feat-draw-output'), batch_concurrency:getInt('feat-draw-batch',2),
+        default_output:normalizeOutputSize(getVal('feat-draw-output')), batch_concurrency:getInt('feat-draw-batch',2),
         chain:chainToSave('draw',true),
         presets:S.draw_presets.filter(p=>p.name).map(p=>`${p.name}:${p.prompt}`),
       },
       edit:{
         enabled:getCk('feat-edit-enabled'), llm_tool_enabled:getCk('feat-edit-llm'),
-        default_output:getVal('feat-edit-output'), batch_concurrency:getInt('feat-edit-batch',2),
+        default_output:normalizeOutputSize(getVal('feat-edit-output')), batch_concurrency:getInt('feat-edit-batch',2),
         chain:chainToSave('edit',true),
         presets:S.edit_presets.filter(p=>p.name).map(p=>`${p.name}:${p.prompt}`),
       },
       selfie:{
         enabled:getCk('feat-selfie-enabled'), llm_tool_enabled:getCk('feat-selfie-llm'),
-        default_output:getVal('feat-selfie-output'),
+        default_output:normalizeOutputSize(getVal('feat-selfie-output')),
         use_edit_chain_when_empty:getCk('feat-selfie-fallback'),
         prompt_prefix:getTa('feat-selfie-prefix'),
         chain:chainToSave('selfie',true),
@@ -484,6 +520,7 @@ function buildProviderForm(p) {
   const fld=(id,label,t='text',val='',hint='')=>`<div class="pform-group"><label class="pform-label">${label}${hint?`<span class="hint">${hint}</span>`:''}</label><input type="${t}" class="inp full" id="pf-${id}" value="${esc(String(val??''))}"/></div>`;
   const fldTA=(id,label,val='',hint='')=>`<div class="pform-group pform-full"><label class="pform-label">${label}${hint?`<span class="hint">${hint}</span>`:''}</label><textarea class="ta" id="pf-${id}" rows="3">${esc(Array.isArray(val)?val.join('\n'):String(val??''))}</textarea></div>`;
   const fldSel=(id,label,opts,val='')=>`<div class="pform-group"><label class="pform-label">${label}</label><select class="sel" id="pf-${id}">${opts.map(o=>`<option value="${o}" ${o===val?'selected':''}>${o}</option>`).join('')}</select></div>`;
+  const fldSizeSel=(id,label,val='')=>`<div class="pform-group"><label class="pform-label">${label}</label><select class="sel" id="pf-${id}">${sizeOptionsHtml(val)}</select></div>`;
   const fldCk=(id,label,val=false)=>`<div class="pform-group" style="flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" class="toggle" id="pf-${id}" ${val?'checked':''}/>  <label class="pform-label" for="pf-${id}" style="margin:0">${label}</label></div>`;
   const modes=['auto','stream','non_stream'];
   const rows=[`<input type="hidden" id="pf-__type" value="${esc(type)}"/>`,`<div class="pform-grid">`,
@@ -505,8 +542,8 @@ function buildProviderForm(p) {
     const hint = isGrok ? '总请求次数（grok_images专用语义，2=最多2次）' : '额外重试次数（0=不重试共1次，2=最多3次）';
     rows.push(fld('max_retries','最大重试次数','number',p.max_retries??2,hint));
   }
-  if(hasField('default_size'))   rows.push(fld('default_size','默认输出尺寸','text',p.default_size||'4096x4096'));
-  if(hasField('default_resolution'))rows.push(fldSel('default_resolution','默认分辨率',['1K','2K','4K'],p.default_resolution||'4K'));
+  if(hasField('default_size'))   rows.push(fldSizeSel('default_size','默认输出尺寸',p.default_size||'4096x4096'));
+  if(hasField('default_resolution'))rows.push(fldSizeSel('default_resolution','默认分辨率',p.default_resolution||'4096x4096'));
   if(hasField('generate_request_mode'))rows.push(fldSel('generate_request_mode','文生图请求模式',modes,p.generate_request_mode||'auto'));
   if(hasField('edit_request_mode'))    rows.push(fldSel('edit_request_mode','改图请求模式',modes,p.edit_request_mode||'auto'));
   if(hasField('supports_edit'))rows.push(fldCk('supports_edit','支持改图',p.supports_edit!==false));
@@ -566,8 +603,8 @@ function readProviderForm() {
   if (has('timeout'))           result.timeout           = gNum('timeout', 120);
   if (has('timeout_seconds'))   result.timeout_seconds   = gNum('timeout_seconds', 180);
   if (has('max_retries'))       result.max_retries       = gNum('max_retries', 2);
-  if (has('default_size'))      result.default_size      = g('default_size');
-  if (has('default_resolution'))result.default_resolution= g('default_resolution');
+  if (has('default_size'))      result.default_size      = normalizeOutputSize(g('default_size'));
+  if (has('default_resolution'))result.default_resolution= normalizeOutputSize(g('default_resolution'));
   if (has('supports_edit'))     result.supports_edit     = gCk('supports_edit');
   if (has('generate_request_mode')) result.generate_request_mode = g('generate_request_mode');
   if (has('edit_request_mode'))     result.edit_request_mode     = g('edit_request_mode');
@@ -981,6 +1018,7 @@ async function saveAll(){
 
 // ── 初始化 ────────────────────────────────────────────────────────────────────
 async function init(){
+  initOutputSizeSelects();
   initTabs();
   document.querySelectorAll('input:not([type=checkbox]):not([type=hidden]),textarea,select').forEach(el=>{
     el.addEventListener('input',markDirty); el.addEventListener('change',markDirty);

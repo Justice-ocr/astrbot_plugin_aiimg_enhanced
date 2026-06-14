@@ -242,9 +242,10 @@ class VertexAIAnonymousBackend:
         aspect_ratio = size_to_aspect_ratio(size)
         if aspect_ratio:
             image_config["aspectRatio"] = aspect_ratio
-        if resolution and str(resolution).strip().upper() in {"1K", "2K", "4K"}:
+        image_size = self._normalize_image_size(size=size, resolution=resolution)
+        if image_size:
             if "gemini-3" in self.settings.model.lower():
-                image_config["imageSize"] = str(resolution).strip().upper()
+                image_config["imageSize"] = image_size
         context["generationConfig"]["imageConfig"] = image_config
 
         if self.settings.system_prompt:
@@ -257,6 +258,25 @@ class VertexAIAnonymousBackend:
             "operationName": DEFAULT_OPERATION_NAME,
             "variables": context,
         }
+
+    @staticmethod
+    def _normalize_image_size(
+        *, size: str | None = None, resolution: str | None = None
+    ) -> str | None:
+        raw = str(resolution or "").strip().upper().replace("×", "X")
+        if not raw:
+            raw = str(size or "").strip().upper().replace("×", "X")
+        if not raw:
+            return None
+        if raw in {"1K", "2K", "4K"}:
+            return raw
+        if raw == "1024X1024":
+            return "1K"
+        if raw == "2048X2048":
+            return "2K"
+        if raw == "4096X4096":
+            return "4K"
+        return None
 
     async def _call_api(
         self, body: dict[str, Any]

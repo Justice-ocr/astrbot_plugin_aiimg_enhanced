@@ -665,8 +665,7 @@ class ProviderRegistry:
                 system_prompt=str(conf.get("system_prompt") or "").strip() or None,
                 query_signature=str(conf.get("query_signature") or "").strip()
                 or "2/l8eCsMMY49imcDQ/lwwXyL8cYtTjxZBF2dNqy69LodY=",
-                graphql_api_key=str(conf.get("graphql_api_key") or "").strip()
-                or "AIzaSyCI-zsRP85UVOi0DjtiCwWBwQ1djDy741g",
+                graphql_api_key=str(conf.get("graphql_api_key") or "").strip(),
             )
             return VertexAIAnonymousBackend(imgr=self._imgr, settings=settings)
 

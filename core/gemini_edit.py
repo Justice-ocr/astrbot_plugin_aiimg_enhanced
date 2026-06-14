@@ -111,6 +111,19 @@ class GeminiEditBackend:
             return "4K"
         return None
 
+    @classmethod
+    def _normalize_resolution(cls, value: str | None) -> str | None:
+        converted = cls._size_to_resolution(value)
+        if converted:
+            return converted
+        text = str(value or "").strip()
+        if not text:
+            return None
+        upper = text.upper()
+        if upper in {"1K", "2K", "4K"}:
+            return upper
+        return text
+
     @staticmethod
     def _collect_text_parts(data: dict) -> list[str]:
         texts: list[str] = []
@@ -313,7 +326,11 @@ class GeminiEditBackend:
     ) -> dict:
         api_key = await self._next_key()
         url = self._build_url()
-        image_size = str(resolution or self.resolution or "4K").strip() or "4K"
+        image_size = (
+            self._normalize_resolution(resolution)
+            or self._normalize_resolution(self.resolution)
+            or "4K"
+        )
 
         payload = {
             "contents": [{"role": "user", "parts": parts}],
@@ -475,19 +492,30 @@ class GeminiEditBackend:
         return "; ".join(parts)
 
     async def generate(
-        self, prompt: str, *, resolution: str | None = None, **_
+        self,
+        prompt: str,
+        *,
+        size: str | None = None,
+        resolution: str | None = None,
+        **_,
     ) -> Path:
         t_start = time.perf_counter()
+        final_resolution = (
+            self._normalize_resolution(resolution)
+            or self._size_to_resolution(size)
+            or self._normalize_resolution(self.resolution)
+            or "4K"
+        )
         parts = [
             {
                 "text": (
-                    f"Generate a high quality {resolution or self.resolution} resolution image. "
+                    f"Generate a high quality {final_resolution} resolution image. "
                     f"Follow this instruction: {prompt}. "
                     "Output the image directly."
                 )
             }
         ]
-        data = await self._request(parts, resolution=resolution)
+        data = await self._request(parts, resolution=final_resolution)
         all_images = await self._extract_images_with_fallback(data)
         if not all_images:
             reason = self._build_no_image_reason(data)
@@ -565,9 +593,9 @@ class GeminiEditBackend:
         t_start = time.perf_counter()
 
         final_resolution = (
-            str(
-                resolution or self._size_to_resolution(size) or self.resolution or "4K"
-            ).strip()
+            self._normalize_resolution(resolution)
+            or self._size_to_resolution(size)
+            or self._normalize_resolution(self.resolution)
             or "4K"
         )
         logger.info(
