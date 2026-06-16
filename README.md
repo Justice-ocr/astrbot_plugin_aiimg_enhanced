@@ -92,11 +92,11 @@ flowchart LR
 
 1. 点击 **新建人设**。
 2. 填写人设 ID、显示名称和人物描述。
-3. 上传 JPG、PNG、WebP 或 GIF 参考图，单张不超过 20 MB。
+3. 在右侧参考图栏顶部上传 JPG、PNG、WebP 或 GIF，单张不超过 20 MB。
 4. 保存人设，再点击页面左下角 **保存更改**。
 5. 在聊天中发送 `/人设`，使用 `/切换人设 名称` 切换。
 
-参考图按原比例预览，并通过插件接口按需加载；页面同时最多加载 5 张，避免大量参考图阻塞配置初始化。
+参考图会显示在右侧面板，按原比例预览，并通过插件接口按需加载；页面同时最多加载 5 张，避免大量参考图阻塞配置初始化。上传后配置里只保存服务端路径，不再把大段 base64 图片塞进 `save_config`，因此打开配置页和保存配置都会更轻。
 
 > 参考图中的稳定特征应清晰可见。建议使用光线自然、无遮挡、主体明确的图片，不要混用外观差异过大的角色。
 
@@ -112,6 +112,22 @@ flowchart LR
 | 高级配置 | 防抖、缓存、网络安全与兼容选项 |
 
 配置保存后会立即刷新插件运行状态，通常无需重启 AstrBot。
+
+## 维护结构
+
+当前代码将高频变动逻辑拆成了几个独立单元：
+
+| 文件 | 责任 |
+| --- | --- |
+| `pages/Settings/app.js` | Settings 页面状态、表单读写、保存和渲染编排 |
+| `pages/Settings/output_sizes.js` | 分辨率选项加载、归一化和下拉框渲染 |
+| `pages/Settings/persona_refs.js` | 人设参考图上传、预览、并发加载和清空操作 |
+| `pages/Settings/provider_catalog.js` | 服务商类型推断、模板默认值、展示名称和视频服务商分类 |
+| `pages/Settings/provider_form.js` | 服务商弹窗表单生成、字段读取和尺寸字段归一化 |
+| `core/pages_config_service.py` | 配置页 payload 合并、provider 清洗和变更标记 |
+| `core/persona_ref_service.py` | 参考图格式检测、保存、base64 转存和安全预览 |
+
+修改 UI 或页面 API 时，优先在对应模块内调整，并补充 `tests/test_settings_*`、`tests/test_pages_config_service.py` 或 `tests/test_persona_ref_service.py` 的回归测试。
 
 ## 常用指令
 
@@ -143,6 +159,7 @@ flowchart LR
 - 使用 JPG、JPEG、PNG、WebP 或 GIF，单张不超过 20 MB。
 - 从 AstrBot 插件详情页进入配置，不要单独打开 `pages/Settings/index.html` 静态文件。
 - 检查反向代理是否允许 POST 请求体，并适当提高请求体大小限制。
+- 如果 multipart 上传被 Pages Bridge 或代理拦截，页面会自动回退到 base64 上传接口，仍然只在配置中保留服务端图片路径。
 
 ### 参考图路径存在但预览失败
 

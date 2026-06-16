@@ -1,123 +1,23 @@
-'use strict';
+import { loadOutputSizeData, normalizeOutputSize, sizeOptionsHtml } from './output_sizes.js';
+import { createPersonaRefController } from './persona_refs.js';
+import {
+  inferProviderType,
+  PROVIDER_NAMES,
+  PROVIDER_TEMPLATES,
+  VIDEO_PROVIDER_TYPES,
+} from './provider_catalog.js';
+import {
+  buildProviderForm as buildProviderFormHtml,
+  readProviderForm as readProviderFormValues,
+} from './provider_form.js';
 
-// ── Provider类型推断 ─────────────────────────────────────────────────────────
-function inferProviderType(p) {
-  if (!p || typeof p !== 'object') return 'openai_images';
-  if ('poll_interval' in p || 'poll_timeout' in p) return 'gitee_async';
-  if ('cookie_list' in p || 'apikey' in p) return 'jimeng';
-  if ('recaptcha_base_api' in p || 'graphql_api_key' in p) return 'vertex_ai_anonymous';
-  if ('server_url' in p && 'empty_response_retry' in p) return 'grok_video';
-  if ('full_generate_url' in p) return 'openai_full_url_images';
-  if ('num_inference_steps' in p && 'negative_prompt' in p) return 'gitee_images';
-  const bu = String(p.base_url || p.api_url || '');
-  if (bu.includes('generativelanguage.googleapis.com')) return 'gemini_native';
-  // grok_video: server_url 字段是独有标志
-  if ('server_url' in p && 'api_key' in p) return 'grok_video';
-  if ('server_url' in p) return 'grok_video';
-  // grok2api_video 必须在 x.ai 通用判断之前：base_url含x.ai + api_keys + 无use_proxy + 无generate_path
-  if (bu.includes('x.ai') && 'api_keys' in p && !('use_proxy' in p) && !('generate_path' in p)) return 'grok2api_video';
-  // grok_chat/grok_images
-  if (bu.includes('x.ai')) return ('use_proxy' in p && !('supports_edit' in p) && !(p.api_keys && p.api_keys.length)) ? 'grok_chat' : 'grok_images';
-  if (bu.includes('gitee.com')) return 'gitee_images';
-  const m = String(p.model || '');
-  if (m.startsWith('gemini')) return 'gemini_openai_images';
-  if ('supports_edit' in p) return 'openai_images';
-  // flow2api_video: api_url + 无base_url + 无generate_path + 有model
-  // flow2api_video: api_url + api_keys/api_key + 无 base_url + 无 generate_path
-  if ('api_url' in p && !('base_url' in p) && !('generate_path' in p) && !('num_inference_steps' in p) && !('cookie_list' in p)) {
-    // 视频：有 model 但无 generate_request_mode
-    if ('model' in p && !('generate_request_mode' in p) && !('edit_request_mode' in p)) return 'flow2api_video';
-    return 'flow2api';
-  }
-  if ('api_url' in p) return 'flow2api';
-  return 'openai_images';
-}
+'use strict';
 
 // ── 工具 ─────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const asInt = (v,d) => { const n=parseInt(v); return isNaN(n)?d:n; };
 const asBool = v => typeof v==='boolean'?v: String(v||'').toLowerCase()==='true';
-const OUTPUT_SIZE_SOURCE_URL = new URL('./output_sizes.json', import.meta.url);
-const OUTPUT_SIZE_FALLBACK = {
-  groups: [
-    { label: '\u65b9\u56fe', sizes: [
-      { value: '256x256', label: '256x256' },
-      { value: '512x512', label: '512x512' },
-      { value: '1024x1024', label: '1024x1024' },
-      { value: '2048x2048', label: '2048x2048' },
-      { value: '4096x4096', label: '4096x4096' },
-    ]},
-    { label: '\u6a2a\u5c4f', sizes: [
-      { value: '1024x576', label: '1024x576' },
-      { value: '2048x1152', label: '2048x1152' },
-      { value: '2560x1440', label: '2560x1440' },
-      { value: '2048x1360', label: '2048x1360' },
-      { value: '2048x1536', label: '2048x1536' },
-    ]},
-    { label: '\u7ad6\u5c4f', sizes: [
-      { value: '576x1024', label: '576x1024' },
-      { value: '768x1024', label: '768x1024' },
-      { value: '1152x2048', label: '1152x2048' },
-      { value: '1440x2560', label: '1440x2560' },
-      { value: '1360x2048', label: '1360x2048' },
-      { value: '1536x2048', label: '1536x2048' },
-    ]},
-  ],
-};
-let OUTPUT_SIZE_DATA = OUTPUT_SIZE_FALLBACK;
-const normalizeOutputSize = value => {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const compact = raw.replace(/\s+/g, '').replace(/[\u00d7\u8133]/g, 'x');
-  const upper = compact.toUpperCase();
-  if (upper === '1K') return '1024x1024';
-  if (upper === '2K') return '2048x2048';
-  if (upper === '4K') return '4096x4096';
-  return compact.toLowerCase();
-};
-const is16AlignedSize = value => {
-  const match = /^(\d+)x(\d+)$/.exec(String(value || '').trim());
-  if (!match) return false;
-  return parseInt(match[1], 10) % 16 === 0 && parseInt(match[2], 10) % 16 === 0;
-};
-const loadOutputSizeData = async () => {
-  try {
-    const resp = await fetch(OUTPUT_SIZE_SOURCE_URL, { cache: 'no-store' });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    if (!data || !Array.isArray(data.groups)) throw new Error('invalid output size data');
-    OUTPUT_SIZE_DATA = data;
-  } catch (e) {
-    console.warn('[Settings] using fallback output sizes', e);
-    OUTPUT_SIZE_DATA = OUTPUT_SIZE_FALLBACK;
-  }
-};
-const allOutputSizeEntries = () => {
-  const groups = Array.isArray(OUTPUT_SIZE_DATA.groups) ? OUTPUT_SIZE_DATA.groups : [];
-  return groups.flatMap(group => Array.isArray(group.sizes) ? group.sizes : []);
-};
-const allOutputSizeValues = () => allOutputSizeEntries().map(item => normalizeOutputSize(item.value)).filter(v => v && is16AlignedSize(v));
-const sizeOptionsHtml = (value = '', {includeDefault = false} = {}) => {
-  const selected = normalizeOutputSize(value);
-  const groups = Array.isArray(OUTPUT_SIZE_DATA.groups) ? OUTPUT_SIZE_DATA.groups : [];
-  const normalizeItem = item => {
-    const v = normalizeOutputSize(item?.value);
-    return v && is16AlignedSize(v) ? { value: v, label: String(item?.label || v) } : null;
-  };
-  const groupHtml = groups.map(group => {
-    const items = Array.isArray(group.sizes) ? group.sizes.map(normalizeItem).filter(Boolean) : [];
-    if (!items.length) return '';
-    return `<optgroup label="${esc(String(group.label || ''))}">${items.map(item => `<option value="${esc(item.value)}" ${item.value===selected?'selected':''}>${esc(item.label)}</option>`).join('')}</optgroup>`;
-  }).join('');
-  const known = new Set(allOutputSizeValues());
-  const defaultOption = includeDefault ? `<option value="" ${selected===''?'selected':''}>\u670d\u52a1\u5546\u9ed8\u8ba4</option>` : '';
-  const extraOption = selected && !known.has(selected) && is16AlignedSize(selected)
-    ? `<option value="${esc(selected)}" selected>${esc(selected)}</option>`
-    : '';
-  return defaultOption + groupHtml + extraOption;
-};
-
 const bridge = window.AstrBotPluginPage || {
   ready: async () => ({}),
   apiGet: async (name) => {
@@ -160,37 +60,6 @@ const bridge = window.AstrBotPluginPage || {
   },
 };
 
-// ── P_TEMPLATES ───────────────────────────────────────────────────────────────
-const P_TEMPLATES = {
-  openai_images:          { label:'OpenAI Images', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
-  openai_chat:            { label:'OpenAI Chat图', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
-  gemini_native:          { label:'Gemini 原生', api_url:'https://generativelanguage.googleapis.com', api_keys:[], model:'gemini-3-pro-image-preview', timeout:120, use_proxy:false, proxy_url:'', default_resolution:'4096x4096', generate_request_mode:'auto', edit_request_mode:'auto' },
-  flow2api:               { label:'Flow2API', api_url:'', api_keys:[], model:'', timeout:120, use_proxy:false, proxy_url:'', generate_request_mode:'auto', edit_request_mode:'auto' },
-  vertex_ai_anonymous:    { label:'Vertex AI 匿名', model:'gemini-3-pro-image-preview', timeout:300, max_retries:10, proxy_url:'', generate_request_mode:'auto', edit_request_mode:'auto' },
-  grok_images:            { label:'Grok Images', base_url:'https://api.x.ai/v1', api_keys:[], model:'', timeout:120, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
-  grok_chat:              { label:'Grok Chat图', base_url:'https://api.x.ai/v1', api_keys:[], model:'', timeout:120, proxy_url:'', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
-  grok2api_images:        { label:'Grok2API Images', base_url:'', api_keys:[], model:'', timeout:120, default_size:'4096x4096', generate_request_mode:'auto', edit_request_mode:'auto' },
-  gemini_openai_images:   { label:'Gemini Images', base_url:'', api_keys:[], model:'', timeout:120, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
-  gemini_openai_chat:     { label:'Gemini Chat图', base_url:'', api_keys:[], model:'', timeout:120, proxy_url:'', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
-  gitee_images:           { label:'Gitee Images', base_url:'https://ai.gitee.com/v1', api_keys:[], model:'z-image-turbo', timeout:300, max_retries:2, default_size:'1024x1024', num_inference_steps:9, negative_prompt:'', generate_request_mode:'auto', edit_request_mode:'auto' },
-  gitee_async:            { label:'Gitee 异步改图', base_url:'https://ai.gitee.com/v1', api_keys:[], model:'Qwen-Image-Edit-2511', num_inference_steps:4, guidance_scale:1.0, poll_interval:5, poll_timeout:300, generate_request_mode:'auto', edit_request_mode:'auto' },
-  jimeng:                 { label:'即梦', api_url:'', apikey:'', cookie_list:[], default_style:'真实', default_ratio:'1:1', default_model:'Seedream 4.0', timeout:120 },
-  grok_video:             { label:'Grok 视频', server_url:'https://api.x.ai', api_key:'', model:'grok-imagine-0.9', timeout_seconds:180, max_retries:2, empty_response_retry:2, retry_delay:2, presets:[] },
-  grok2api_video:         { label:'Grok2API 视频', base_url:'https://api.x.ai', api_keys:[], model:'grok-imagine-1.0-video', timeout:300, max_retries:2 },
-  flow2api_video:         { label:'Flow2API 视频', api_url:'', api_keys:[], model:'', timeout:300, use_proxy:false, proxy_url:'' },
-  custom_video:           { label:'自定义视频', base_url:'', generate_path:'/v1/chat/completions', poll_path:'', api_keys:[], model:'', timeout:300, max_retries:0, poll_interval:5, poll_timeout:300, response_url_path:'', task_id_path:'', status_path:'', done_statuses:'succeeded,completed,done,finished,success', fail_statuses:'failed,error,cancelled', extra_body:'', request_mode:'auto', image_field:'image', proxy_url:'' },
-  modelscope_openai_images:{ label:'魔搭 Images', base_url:'', api_keys:[], model:'', timeout:120, proxy_url:'', default_size:'1024x1024', supports_edit:false, generate_request_mode:'auto', edit_request_mode:'auto' },
-  openai_full_url_images: { label:'OpenAI ImagesURL', full_generate_url:'', full_edit_url:'', api_keys:[], model:'', timeout:120, default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
-};
-const P_NAMES = {
-  openai_images:'OpenAI Images', openai_chat:'OpenAI Chat图', gemini_native:'Gemini 原生',
-  flow2api:'Flow2API', vertex_ai_anonymous:'Vertex AI 匿名', grok_images:'Grok Images',
-  grok_chat:'Grok Chat图', grok2api_images:'Grok2API Images', gemini_openai_images:'Gemini Images',
-  gemini_openai_chat:'Gemini Chat图', gitee_images:'Gitee Images', gitee_async:'Gitee 异步改图',
-  jimeng:'即梦', grok_video:'Grok 视频', grok2api_video:'Grok2API 视频', flow2api_video:'Flow2API 视频', custom_video:'自定义视频',
-  modelscope_openai_images:'魔搭 Images', openai_full_url_images:'OpenAI ImagesURL',
-};
-
 // ── 状态 ─────────────────────────────────────────────────────────────────────
 let S = {
   features:{}, storage:{}, debounce_interval:10,
@@ -205,6 +74,13 @@ let S = {
   draw_presets:[], edit_presets:[], video_presets:[],
   dirty:false,
 };
+const personaRefs = createPersonaRefController({
+  $,
+  bridge,
+  previewCache: S.persona_ref_previews,
+  markDirty,
+  showToast,
+});
 
 function showToast(msg, type='ok') {
   const el=$('toast'); el.textContent=msg; el.className=`toast ${type}`; el.style.display='block';
@@ -237,10 +113,6 @@ function initTabs() {
     });
   });
 }
-
-// ── 链路选择器 ───────────────────────────────────────────────────────────────
-// 视频服务商类型集合
-const VIDEO_PROVIDER_TYPES = new Set(['grok_video', 'grok2api_video', 'flow2api_video', 'custom_video']);
 
 // chain是 [{provider_id, output?}] 的数组，第一个是主用，后续是备用
 function renderChain(containerId, chainKey, hasOutput=true) {
@@ -429,7 +301,7 @@ function applyConfig(cfg) {
   const pc=cfg.persona_config||{};
   S.persona_config.active_persona_id = pc.active_persona_id||'default';
   S.persona_config.profiles = Array.isArray(pc.profiles)?pc.profiles:[];
-  S.persona_ref_previews = {};
+  Object.keys(S.persona_ref_previews).forEach(key => delete S.persona_ref_previews[key]);
   renderPersonas();
 
   // presets
@@ -533,7 +405,7 @@ function renderProviders() {
     const type=p.__type||'?';
     const div=document.createElement('div'); div.className='provider-item';
     div.innerHTML=`
-      <span class="provider-tag">${esc(P_NAMES[type]||type)}</span>
+      <span class="provider-tag">${esc(PROVIDER_NAMES[type]||type)}</span>
       <div class="provider-info">
         <div class="pid">${esc(p.id||'(未命名)')}</div>
         <div class="pmeta">${esc(p.label||'')}${p.model?' · '+esc(p.model):''}${(p.base_url||p.api_url)?' · '+(p.base_url||p.api_url).slice(0,40):''}</div>
@@ -559,135 +431,11 @@ function openProviderModal(idx) {
   _provIdx=idx;
   const isNew=idx<0;
   $('modal-provider-title').textContent=isNew?'新建服务商':'编辑服务商';
-  const p=isNew?{id:'',__type:$('provider-template-sel').value,...P_TEMPLATES[$('provider-template-sel').value]}:S.providers[idx];
-  $('provider-modal-body').innerHTML=buildProviderForm(p);
+  const templateKey = $('provider-template-sel').value;
+  const p=isNew?{id:'',__type:templateKey,...PROVIDER_TEMPLATES[templateKey]}:S.providers[idx];
+  $('provider-modal-body').innerHTML=buildProviderFormHtml(p);
   $('provider-modal').style.display='flex';
 }
-function buildProviderForm(p) {
-  const type=p.__type||'openai_images';
-  const hasField=k=>P_TEMPLATES[type]&&(k in P_TEMPLATES[type]||k==='id'||k==='__type');
-  const fld=(id,label,t='text',val='',hint='')=>`<div class="pform-group"><label class="pform-label">${label}${hint?`<span class="hint">${hint}</span>`:''}</label><input type="${t}" class="inp full" id="pf-${id}" value="${esc(String(val??''))}"/></div>`;
-  const fldTA=(id,label,val='',hint='')=>`<div class="pform-group pform-full"><label class="pform-label">${label}${hint?`<span class="hint">${hint}</span>`:''}</label><textarea class="ta" id="pf-${id}" rows="3">${esc(Array.isArray(val)?val.join('\n'):String(val??''))}</textarea></div>`;
-  const fldSel=(id,label,opts,val='')=>`<div class="pform-group"><label class="pform-label">${label}</label><select class="sel" id="pf-${id}">${opts.map(o=>`<option value="${o}" ${o===val?'selected':''}>${o}</option>`).join('')}</select></div>`;
-  const fldSizeSel=(id,label,val='')=>`<div class="pform-group"><label class="pform-label">${label}</label><select class="sel" id="pf-${id}">${sizeOptionsHtml(val)}</select></div>`;
-  const fldCk=(id,label,val=false)=>`<div class="pform-group" style="flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" class="toggle" id="pf-${id}" ${val?'checked':''}/>  <label class="pform-label" for="pf-${id}" style="margin:0">${label}</label></div>`;
-  const modes=['auto','stream','non_stream'];
-  const rows=[`<input type="hidden" id="pf-__type" value="${esc(type)}"/>`,`<div class="pform-grid">`,
-    fld('id','服务商 ID (唯一)','text',p.id||'','英文/数字/下划线'), fld('label','显示名称（可选）','text',p.label||'')];
-  if(hasField('api_url'))  rows.push(fld('api_url','API URL','text',p.api_url||''));
-  if(hasField('base_url')) rows.push(fld('base_url','Base URL','text',p.base_url||''));
-  if(hasField('full_generate_url')) rows.push(fld('full_generate_url','文生图完整 URL','text',p.full_generate_url||''));
-  if(hasField('full_edit_url'))     rows.push(fld('full_edit_url','改图完整 URL','text',p.full_edit_url||''));
-  if(hasField('model'))  rows.push(fld('model','模型名称','text',p.model||''));
-  if(hasField('apikey')) rows.push(fld('apikey','API Key','text',p.apikey||''));
-  rows.push('</div>');
-  if(hasField('api_keys'))   rows.push(fldTA('api_keys','API Key 池（每行一个）',p.api_keys||[]));
-  if(hasField('cookie_list'))rows.push(fldTA('cookie_list','cookie_list（每行一条）',p.cookie_list||[]));
-  rows.push('<div class="pform-grid">');
-  if(hasField('timeout'))        rows.push(fld('timeout','超时(秒)','number',p.timeout??120));
-  if(hasField('timeout_seconds'))rows.push(fld('timeout_seconds','超时(秒)','number',p.timeout_seconds??180));
-  if(hasField('max_retries')) {
-    const isGrok = type==='grok_images';
-    const hint = isGrok ? '总请求次数（grok_images专用语义，2=最多2次）' : '额外重试次数（0=不重试共1次，2=最多3次）';
-    rows.push(fld('max_retries','最大重试次数','number',p.max_retries??2,hint));
-  }
-  if(hasField('default_size'))   rows.push(fldSizeSel('default_size','默认输出尺寸',p.default_size||'4096x4096'));
-  if(hasField('default_resolution'))rows.push(fldSizeSel('default_resolution','默认分辨率',p.default_resolution||'4096x4096'));
-  if(hasField('generate_request_mode'))rows.push(fldSel('generate_request_mode','文生图请求模式',modes,p.generate_request_mode||'auto'));
-  if(hasField('edit_request_mode'))    rows.push(fldSel('edit_request_mode','改图请求模式',modes,p.edit_request_mode||'auto'));
-  if(hasField('supports_edit'))rows.push(fldCk('supports_edit','支持改图',p.supports_edit!==false));
-  if(hasField('use_proxy'))    rows.push(fldCk('use_proxy','启用代理',p.use_proxy||false));
-  if(hasField('num_inference_steps'))rows.push(fld('num_inference_steps','推理步数','number',p.num_inference_steps??9));
-  if(hasField('guidance_scale'))     rows.push(fld('guidance_scale','引导系数','number',p.guidance_scale??1.0));
-  if(hasField('poll_interval'))      rows.push(fld('poll_interval','轮询间隔(秒)','number',p.poll_interval??5));
-  if(hasField('poll_timeout'))       rows.push(fld('poll_timeout','轮询超时(秒)','number',p.poll_timeout??300));
-  if(hasField('default_style'))rows.push(fld('default_style','默认风格','text',p.default_style||'真实'));
-  if(hasField('default_ratio'))rows.push(fld('default_ratio','默认比例','text',p.default_ratio||'1:1'));
-  if(hasField('default_model'))rows.push(fld('default_model','默认模型','text',p.default_model||'Seedream 4.0'));
-  if(hasField('api_key'))      rows.push(fld('api_key','API Key','text',p.api_key||''));
-  if(hasField('empty_response_retry'))rows.push(fld('empty_response_retry','无视频URL重试次数','number',p.empty_response_retry??2));
-  if(hasField('retry_delay'))         rows.push(fld('retry_delay','重试间隔(秒)','number',p.retry_delay??2));
-  rows.push('</div>');
-  if(hasField('proxy_url'))      rows.push(fldTA('proxy_url','代理地址（可选）',p.proxy_url||'').replace('rows="3"','rows="1"'));
-  if(hasField('negative_prompt'))rows.push(fldTA('negative_prompt','负面提示词',p.negative_prompt||''));
-  if(hasField('system_prompt'))  rows.push(fldTA('system_prompt','系统提示词（可选）',p.system_prompt||''));
-  // grok_video 专有字段
-  if(hasField('presets'))        rows.push(fldTA('presets','预设提示词（每行格式: 名称:英文提示词）',p.presets||[],'如 电影感:cinematic lighting, epic'));
-  // grok2api_video 专有字段（base_url+api_keys+model，复用已有通用字段，无需额外渲染）
-  // custom_video 专有字段
-  if(hasField('generate_path'))   rows.push(fld('generate_path','生成接口路径','text',p.generate_path||'/v1/chat/completions'));
-  if(hasField('poll_path'))       rows.push(fld('poll_path','轮询路径（为空不轮询）','text',p.poll_path||'','如 /v1/tasks/{task_id}'));
-  if(hasField('response_url_path')) rows.push(fld('response_url_path','视频URL路径','text',p.response_url_path||'','如 data.0.url'));
-  if(hasField('task_id_path'))    rows.push(fld('task_id_path','task_id路径','text',p.task_id_path||'','如 id'));
-  if(hasField('status_path'))     rows.push(fld('status_path','状态字段路径','text',p.status_path||'','如 status'));
-  if(hasField('done_statuses'))   rows.push(fld('done_statuses','完成状态值（逗号分隔）','text',p.done_statuses||'succeeded,completed,done,finished,success'));
-  if(hasField('fail_statuses'))   rows.push(fld('fail_statuses','失败状态值（逗号分隔）','text',p.fail_statuses||'failed,error,cancelled'));
-  if(hasField('image_field'))     rows.push(fld('image_field','图片字段名','text',p.image_field||'image'));
-  if(hasField('request_mode'))    rows.push(fldSel('request_mode','请求模式',['auto','json','multipart'],p.request_mode||'auto'));
-  if(hasField('extra_body'))      rows.push(fldTA('extra_body','额外请求体（JSON，可选）',p.extra_body||''));
-  return rows.join('');
-}
-function readProviderForm() {
-  const type = $('pf-__type')?.value || 'openai_images';
-  const tpl  = P_TEMPLATES[type] || {};
-  const has  = k => k in tpl || k === 'id' || k === 'label' || k === '__type';
-
-  const g    = id => $(`pf-${id}`)?.value?.trim() ?? '';
-  const gCk  = id => !!$(`pf-${id}`)?.checked;
-  const gList= id => ($(`pf-${id}`)?.value||'').split('\n').map(s=>s.trim()).filter(Boolean);
-  const gNum = (id,d) => { const v=parseFloat($(`pf-${id}`)?.value); return isNaN(v)?d:v; };
-
-  // 从模板默认值出发，只读取该类型有的字段
-  const result = { __type: type, __template_key: type, id: g('id'), label: g('label') };
-
-  if (has('api_url'))           result.api_url           = g('api_url');
-  if (has('base_url'))          result.base_url          = g('base_url');
-  if (has('full_generate_url')) result.full_generate_url = g('full_generate_url');
-  if (has('full_edit_url'))     result.full_edit_url     = g('full_edit_url');
-  if (has('model'))             result.model             = g('model');
-  if (has('api_keys'))          result.api_keys          = gList('api_keys');
-  if (has('apikey'))            result.apikey            = g('apikey');
-  if (has('api_key'))           result.api_key           = g('api_key');
-  if (has('cookie_list'))       result.cookie_list       = gList('cookie_list');
-  if (has('timeout'))           result.timeout           = gNum('timeout', 120);
-  if (has('timeout_seconds'))   result.timeout_seconds   = gNum('timeout_seconds', 180);
-  if (has('max_retries'))       result.max_retries       = gNum('max_retries', 2);
-  if (has('default_size'))      result.default_size      = normalizeOutputSize(g('default_size'));
-  if (has('default_resolution'))result.default_resolution= normalizeOutputSize(g('default_resolution'));
-  if (has('supports_edit'))     result.supports_edit     = gCk('supports_edit');
-  if (has('generate_request_mode')) result.generate_request_mode = g('generate_request_mode');
-  if (has('edit_request_mode'))     result.edit_request_mode     = g('edit_request_mode');
-  if (has('use_proxy'))         result.use_proxy         = gCk('use_proxy');
-  if (has('proxy_url'))         result.proxy_url         = g('proxy_url');
-  if (has('num_inference_steps'))result.num_inference_steps = gNum('num_inference_steps', 9);
-  if (has('guidance_scale'))    result.guidance_scale    = gNum('guidance_scale', 1.0);
-  if (has('poll_interval'))     result.poll_interval     = gNum('poll_interval', 5);
-  if (has('poll_timeout'))      result.poll_timeout      = gNum('poll_timeout', 300);
-  if (has('default_style'))     result.default_style     = g('default_style');
-  if (has('default_ratio'))     result.default_ratio     = g('default_ratio');
-  if (has('default_model'))     result.default_model     = g('default_model');
-  if (has('negative_prompt'))   result.negative_prompt   = g('negative_prompt');
-  if (has('system_prompt'))     result.system_prompt     = g('system_prompt');
-  if (has('empty_response_retry')) result.empty_response_retry = gNum('empty_response_retry', 2);
-  if (has('retry_delay'))       result.retry_delay       = gNum('retry_delay', 2);
-  // grok_video 专有字段
-  if (has('presets'))           result.presets = g('presets').split('\n').map(s=>s.trim()).filter(Boolean);
-  // custom_video 专有字段
-  if (has('generate_path'))     result.generate_path     = g('generate_path');
-  if (has('poll_path'))         result.poll_path         = g('poll_path');
-  if (has('response_url_path')) result.response_url_path = g('response_url_path');
-  if (has('task_id_path'))      result.task_id_path      = g('task_id_path');
-  if (has('status_path'))       result.status_path       = g('status_path');
-  if (has('done_statuses'))     result.done_statuses     = g('done_statuses');
-  if (has('fail_statuses'))     result.fail_statuses     = g('fail_statuses');
-  if (has('image_field'))       result.image_field       = g('image_field');
-  if (has('request_mode'))      result.request_mode      = g('request_mode');
-  if (has('extra_body'))        result.extra_body        = g('extra_body');
-
-  return result;
-}
-
-// ── 预设渲染 ──────────────────────────────────────────────────────────────────
 function renderPresets(containerId, list, key) {
   const el=$(containerId); if(!el)return;
   if(!list.length){el.innerHTML='<div class="preset-empty">暂无预设</div>';return;}
@@ -772,72 +520,6 @@ function delPersona(idx){
 }
 let _personaIdx=-1;
 let _saving = false;
-let _refUploadTask = null;
-// 统一管理弹窗内的参考图列表（含本地路径、URL、兼容旧配置里的 data URL）
-let _modalRefs = [];
-const REF_PREVIEW_CONCURRENCY = 5;
-let _refPreviewActive = 0;
-const _refPreviewQueue = [];
-const _refPreviewRequests = new Map();
-
-const isDataImage = ref => String(ref).startsWith('data:image');
-const isRemoteImageRef = ref => /^https?:\/\//.test(String(ref));
-const modalVisibleRefs = () => _modalRefs.filter(ref => !isDataImage(ref)).join('\n');
-const refDisplayName = (ref, index) =>
-  isDataImage(ref) ? `图片 ${index + 1}` : (String(ref).split(/[\/\\]/).pop() || String(ref)).slice(0, 32);
-
-function syncModalRefsTextarea() {
-  $('modal-refs').value = modalVisibleRefs();
-}
-
-function runRefPreviewQueue() {
-  while (_refPreviewActive < REF_PREVIEW_CONCURRENCY && _refPreviewQueue.length) {
-    const item = _refPreviewQueue.shift();
-    _refPreviewActive++;
-    Promise.resolve()
-      .then(item.task)
-      .then(item.resolve, item.reject)
-      .finally(() => {
-        _refPreviewActive--;
-        runRefPreviewQueue();
-      });
-  }
-}
-
-function queueRefPreview(task) {
-  return new Promise((resolve, reject) => {
-    _refPreviewQueue.push({ task, resolve, reject });
-    runRefPreviewQueue();
-  });
-}
-
-function getLocalRefPreview(path) {
-  if (S.persona_ref_previews[path]) {
-    return Promise.resolve(S.persona_ref_previews[path]);
-  }
-  if (_refPreviewRequests.has(path)) {
-    return _refPreviewRequests.get(path);
-  }
-
-  const requestTask = queueRefPreview(async () => {
-    const response = await bridge.apiGet('get_image_b64', { path });
-    // AstrBot v4.25.4 unwraps a top-level `data` response automatically.
-    // Accept that legacy shape as well as the current object response.
-    const imageData = typeof response === 'string'
-      ? response
-      : (response?.image_data || response?.data);
-    if (!imageData || !String(imageData).startsWith('data:image/')) {
-      throw new Error(response?.error || 'preview response contained no image');
-    }
-    S.persona_ref_previews[path] = imageData;
-    return imageData;
-  }).finally(() => {
-    _refPreviewRequests.delete(path);
-  });
-
-  _refPreviewRequests.set(path, requestTask);
-  return requestTask;
-}
 
 function openPersonaModal(idx){
   _personaIdx=idx;
@@ -846,189 +528,22 @@ function openPersonaModal(idx){
   const p=isNew?{id:'',persona_name:'',persona_base_prompt:'',persona_ref_image:[]}:S.persona_config.profiles[idx];
   $('modal-id').value=p.id||''; $('modal-name').value=p.persona_name||'';
   $('modal-prompt').value=p.persona_base_prompt||'';
-  // _modalRefs 保留所有引用（路径/URL/base64），文本框只显示路径和URL（base64太长不展示）
-  _modalRefs = [...(p.persona_ref_image||[])];
-  syncModalRefsTextarea();
-  renderRefPreviews(_modalRefs);
+  personaRefs.setRefs(p.persona_ref_image || []);
   $('persona-modal').style.display='flex'; $('modal-name').focus();
 }
 
-async function loadLocalRefPreview(r, img, errDiv) {
-  const src = await getLocalRefPreview(r);
-  if (!img.isConnected) return;
-  img.src = src;
-  img.style.display = 'block';
-  errDiv.style.display = 'none';
-}
-
-function createRefPreviewItem(ref, index) {
-  const value = String(ref);
-  const isInline = isDataImage(value);
-  const isRemote = isRemoteImageRef(value);
-  const name = refDisplayName(value, index);
-
-  const wrap = document.createElement('div');
-  wrap.className = 'ref-image-item';
-  wrap.title = isInline ? name : value;
-
-  const img = document.createElement('img');
-  img.className = 'ref-image';
-  img.alt = name;
-  img.loading = 'lazy';
-
-  const state = document.createElement('div');
-  state.className = 'ref-image-state';
-  state.style.display = 'none';
-
-  const nameDiv = document.createElement('div');
-  nameDiv.className = 'ref-image-name';
-  nameDiv.textContent = name;
-
-  const delBtn = document.createElement('button');
-  delBtn.className = 'ref-image-del';
-  delBtn.title = '删除';
-  delBtn.textContent = '删除';
-  delBtn.addEventListener('click', () => {
-    _modalRefs.splice(index, 1);
-    syncModalRefsTextarea();
-    renderRefPreviews(_modalRefs);
-    markDirty();
-  });
-
-  img.onerror = () => {
-    img.style.display = 'none';
-    state.style.display = 'flex';
-    state.classList.add('is-error');
-    state.textContent = '图片加载失败';
-  };
-
-  if (isInline || isRemote) {
-    img.src = value;
-  } else if (S.persona_ref_previews[value]) {
-    img.src = S.persona_ref_previews[value];
-  } else {
-    img.style.display = 'none';
-    state.style.display = 'flex';
-    state.textContent = '图片加载中...';
-    loadLocalRefPreview(value, img, state).catch(e => {
-      if (!state.isConnected) return;
-      state.classList.add('is-error');
-      state.textContent = `图片加载失败：${e}`;
-    });
-  }
-
-  wrap.append(delBtn, img, state, nameDiv);
-  return wrap;
-}
-
-function renderRefPreviews(refs) {
-  const el = $('modal-ref-previews');
-  if (!el) return;
-  el.innerHTML = '';
-  if (!refs || !refs.length) {
-    el.innerHTML = '<div class="ref-empty">暂无参考图</div>';
-    return;
-  }
-
-  refs.forEach((ref, index) => el.appendChild(createRefPreviewItem(ref, index)));
-}
-
-async function uploadRefFile(file) {
-  const previewUrl = URL.createObjectURL(file);
-  try {
-    const data = await bridge.upload('upload_ref_image', file);
-    if (!data || !data.success || !data.path) {
-      throw new Error(data?.error || `${file.name} 上传失败`);
-    }
-    S.persona_ref_previews[data.path] = previewUrl;
-    return data.path;
-  } catch (multipartError) {
-    try {
-      const dataUrl = await readFileAsDataURL(file);
-      const data = await bridge.apiPost('upload_ref_image_b64', {
-        filename: file.name,
-        data: dataUrl,
-      });
-      if (!data || !data.success || !data.path) {
-        throw new Error(data?.error || `${file.name} 上传失败`);
-      }
-      S.persona_ref_previews[data.path] = previewUrl;
-      return data.path;
-    } catch (fallbackError) {
-      URL.revokeObjectURL(previewUrl);
-      throw new Error(`${multipartError}; fallback: ${fallbackError}`);
-    }
-  }
-}
-
-function readFileAsDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error(`${file.name} 读取失败`));
-    reader.readAsDataURL(file);
-  });
-}
-
-async function uploadRefImages(files) {
-  // Upload immediately and keep only server paths in config. Sending large base64
-  // data URLs through save_config can make Quart time out while reading JSON.
-  const btn = $('modal-upload-btn');
-  const status = $('modal-upload-status');
-  if (!files || !files.length) return;
-
-  const fileArr = Array.from(files);
-  const oversized = fileArr.filter(f => f.size > 20 * 1024 * 1024);
-  if (oversized.length) {
-    status.textContent = `✗ ${oversized.map(f=>f.name).join(', ')} 超过 20MB`;
-    status.className = 'upload-status err';
-    return;
-  }
-
-  btn.disabled = true;
-  status.textContent = `上传中 (0/${fileArr.length})...`;
-  status.className = 'upload-status uploading';
-
-  const task = (async () => {
-    let done = 0;
-    for (const file of fileArr) {
-      const path = await uploadRefFile(file);
-      _modalRefs.push(path);
-      done++;
-      status.textContent = `上传中 (${done}/${fileArr.length})...`;
-      syncModalRefsTextarea();
-      renderRefPreviews(_modalRefs);
-    }
-  })();
-  _refUploadTask = task;
-  try {
-    await task;
-    status.textContent = `✓ 已添加 ${fileArr.length} 张图片`;
-    status.className = 'upload-status ok';
-    markDirty();
-    setTimeout(() => { status.textContent=''; status.className='upload-status'; }, 2000);
-  } catch (e) {
-    status.textContent = `✗ ${e}`;
-    status.className = 'upload-status err';
-  } finally {
-    if (_refUploadTask === task) _refUploadTask = null;
-    btn.disabled = false;
-  }
-}
 async function savePersonaModal(){
-  if (_refUploadTask) {
-    try {
-      await _refUploadTask;
-    } catch (e) {
-      showToast(`参考图上传失败：${e}`, 'err');
-      return;
-    }
+  try {
+    await personaRefs.waitForUpload();
+  } catch (e) {
+    showToast(`参考图上传失败：${e}`, 'err');
+    return;
   }
   const id=$('modal-id').value.trim().replace(/[^a-zA-Z0-9_\-]/g,'_')||`persona_${Date.now()}`;
   const persona_name=$('modal-name').value.trim()||id;
   const persona_base_prompt=$('modal-prompt').value.trim();
   // 旧配置可能仍含 data URL；后端会在保存时转存为本地文件。
-  const persona_ref_image = _modalRefs.filter(r => Boolean(r));
+  const persona_ref_image = personaRefs.refs();
   const obj={id,persona_name,persona_base_prompt,persona_ref_image};
   if(_personaIdx<0){
     S.persona_config.profiles.push(obj);
@@ -1049,10 +564,8 @@ async function saveAll(){
   $('btn-save').disabled=true; $('btn-save').textContent='保存中...';
   $('save-hint').textContent='正在保存...'; $('save-hint').className='save-hint saving';
   try{
-    if (_refUploadTask) {
-      $('save-hint').textContent='正在等待参考图上传...';
-      await _refUploadTask;
-    }
+    $('save-hint').textContent='正在等待参考图上传...';
+    await personaRefs.waitForUpload();
     const res=await bridge.apiPost('save_config',buildPayload());
     if(!res.success)throw new Error(res.error||'保存失败');
     markClean('配置已保存 ✓');showToast('✅ 配置已保存');
@@ -1087,7 +600,7 @@ async function init(){
   $('btn-provider-modal-close').addEventListener('click',()=>$('provider-modal').style.display='none');
   $('btn-provider-modal-cancel').addEventListener('click',()=>$('provider-modal').style.display='none');
   $('btn-provider-modal-ok').addEventListener('click',()=>{
-    const p=readProviderForm();
+    const p=readProviderFormValues($);
     if(!p.id){showToast('请填写服务商 ID','err');return;}
     if(_provIdx<0)S.providers.push(p); else S.providers[_provIdx]=p;
     renderProviders();renderAllChains();updateStats();markDirty();
@@ -1097,29 +610,7 @@ async function init(){
   $('btn-modal-close').addEventListener('click',()=>$('persona-modal').style.display='none');
   $('btn-modal-cancel').addEventListener('click',()=>$('persona-modal').style.display='none');
   $('btn-modal-ok').addEventListener('click',savePersonaModal);
-  // 上传按钮
-  const uploadBtn = $('modal-upload-btn');
-  const fileInput = $('modal-file-input');
-  if (uploadBtn && fileInput) {
-    uploadBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files && fileInput.files.length) {
-        uploadRefImages(fileInput.files);
-        fileInput.value = ''; // 允许重复上传同名文件
-      }
-    });
-  }
-  // 文本框变化时刷新预览
-  const modalRefs = $('modal-refs');
-  if (modalRefs) {
-    modalRefs.addEventListener('input', () => {
-      // 文本框的路径/URL + 内存里的base64合并
-      const textPart = modalRefs.value.split('\n').map(s=>s.trim()).filter(Boolean);
-      const b64Part  = _modalRefs.filter(isDataImage);
-      _modalRefs = [...b64Part, ...textPart];
-      renderRefPreviews(_modalRefs);
-    });
-  }
+  personaRefs.bind();
   const addPreset=(arr,key,cid)=>{arr.push({name:'',prompt:''});renderPresets(cid,arr,key);updateStats();markDirty();};
   $('btn-add-draw-preset').addEventListener('click',()=>addPreset(S.draw_presets,'draw','draw-presets-list'));
   $('btn-add-edit-preset').addEventListener('click',()=>addPreset(S.edit_presets,'edit','edit-presets-list'));

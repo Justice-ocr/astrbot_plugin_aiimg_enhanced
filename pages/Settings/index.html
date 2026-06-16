@@ -269,14 +269,17 @@
           <label class="field-label">参考图路径 / URL <span class="hint">每行一个</span></label>
           <textarea class="ta" id="modal-refs" rows="6" placeholder="/data/.../ref.jpg&#10;https://example.com/photo.jpg"></textarea>
         </div>
-        <div class="upload-row">
-          <button class="btn-upload" id="modal-upload-btn" type="button">📁 上传图片</button>
-          <span class="upload-status" id="modal-upload-status"></span>
-          <input type="file" id="modal-file-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none"/>
-        </div>
       </div>
       <div class="persona-ref-panel">
-        <label class="field-label">参考图</label>
+        <div class="persona-ref-toolbar">
+          <label class="field-label">参考图</label>
+          <div class="upload-row">
+            <button class="btn-upload" id="modal-upload-btn" type="button">📁 上传图片</button>
+            <button class="btn-ghost btn-mini" id="modal-clear-refs-btn" type="button">清空</button>
+            <span class="upload-status" id="modal-upload-status"></span>
+            <input type="file" id="modal-file-input" accept="image/jpeg,image/png,image/webp,image/gif" multiple style="display:none"/>
+          </div>
+        </div>
         <div id="modal-ref-previews" class="ref-previews"></div>
       </div>
     </div>

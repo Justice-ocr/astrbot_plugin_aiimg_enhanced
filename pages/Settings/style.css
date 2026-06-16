@@ -384,6 +384,17 @@ code{font-family:var(--mono);font-size:12px;background:var(--code-soft);padding:
   overflow:hidden;
   padding-left:2px;
 }
+.persona-ref-toolbar{
+  position:sticky;
+  top:0;
+  z-index:1;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:0 0 10px;
+  background:var(--surface);
+}
 .modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid var(--border);background:#faf2e8}
 
 .pform-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
@@ -391,7 +402,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--code-soft);padding:
 .pform-group{display:flex;flex-direction:column;gap:5px}
 .pform-label{font-size:13px;color:var(--text-muted);font-weight:650}
 
-.upload-row{display:flex;align-items:center;gap:10px;margin-bottom:2px;flex-wrap:wrap}
+.upload-row{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:2px;flex-wrap:wrap;min-width:0}
 .btn-upload{
   background:#fffaf4;
   color:var(--accent);
@@ -403,7 +414,8 @@ code{font-family:var(--mono);font-size:12px;background:var(--code-soft);padding:
 }
 .btn-upload:hover{background:var(--accent-soft);border-style:solid}
 .btn-upload:disabled{opacity:.55;cursor:not-allowed}
-.upload-status{font-size:13px;color:var(--text-faint)}
+.btn-mini{padding:8px 10px;font-size:13px}
+.upload-status{font-size:13px;color:var(--text-faint);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .upload-status.uploading{color:var(--accent)}
 .upload-status.ok{color:var(--success)}
 .upload-status.err{color:var(--danger)}

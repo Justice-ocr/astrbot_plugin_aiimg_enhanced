@@ -1,19 +1,18 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
-import base64
 import inspect
-import mimetypes
 import pathlib
-import re
 from quart import jsonify, request
 from astrbot.api import logger
-import asyncio
-import time
 from ..core.persona_manager import PersonaManager
-from ..core.image_format import decode_base64_image_payload
+from ..core.pages_config_service import PagesConfigService
+from ..core.persona_ref_service import PersonaRefService
 
 class PagesAPIMixin:
     _REF_IMAGE_MAX_BYTES = 20 * 1024 * 1024
+
+    def _persona_ref_service(self) -> PersonaRefService:
+        return PersonaRefService(self.data_dir)
 
     def _register_pages_web_api(self) -> None:
         register_web_api = getattr(self.context, "register_web_api", None)
@@ -48,18 +47,6 @@ class PagesAPIMixin:
         for name, handler, methods, desc in routes:
             register_web_api(f"/{_pid}/{name}", handler, methods, desc)
 
-
-    def _check_path_safe(self, path: str):
-        """检查路径合法性，返回 (Path, None) 或 (None, error_response_tuple)。"""
-        p = pathlib.Path(path)
-        try:
-            p.resolve().relative_to(pathlib.Path(self.data_dir).resolve())
-        except ValueError:
-            return None, (jsonify({"success": False, "error": "禁止访问"}), 403)
-        if not p.is_file():
-            return None, (jsonify({"success": False, "error": "文件不存在"}), 404)
-        return p, None
-
     async def _pages_get_config(self):
         """GET /astrbot_plugin_aiimg_enhanced/get_config"""
         try:
@@ -88,70 +75,24 @@ class PagesAPIMixin:
             if not isinstance(self.config, dict):
                 self.config = {}
 
-            # 深度合并：features 用逐子项 update，避免覆盖 chain/gitee_task_types 等前端未展示的字段
-            if "features" in data and isinstance(data["features"], dict):
-                cfg_feats = self.config.setdefault("features", {})
-                for feat_key, feat_val in data["features"].items():
-                    if isinstance(feat_val, dict) and isinstance(cfg_feats.get(feat_key), dict):
-                        cfg_feats[feat_key].update(feat_val)
-                    else:
-                        cfg_feats[feat_key] = feat_val
-
-            # 标量 / 简单字段直接覆盖
-            for key in ("storage", "debounce_interval", "max_user_concurrency",
-                        "max_user_video_concurrency", "network", "reply_config"):
-                if key in data:
-                    self.config[key] = data[key]
-
-            # providers: 把前端的 __type 转换为 __template_key（registry所需），再保存
-            providers_changed = False
-            if "providers" in data and isinstance(data["providers"], list):
-                clean_providers = []
-                for p in data["providers"]:
-                    if isinstance(p, dict):
-                        cleaned = {k: v for k, v in p.items() if k != "__type"}
-                        if "__template_key" not in cleaned and "__type" in p:
-                            cleaned["__template_key"] = p["__type"]
-                        clean_providers.append(cleaned)
-                self.config["providers"] = clean_providers
-                providers_changed = True
+            apply_result = PagesConfigService(self.config).apply_payload(data)
 
             # persona_config：先把 base64 参考图转存为本地文件，再替换
             if "persona_config" in data:
                 pc = data["persona_config"]
                 if isinstance(pc, dict):
+                    ref_service = self._persona_ref_service()
                     for profile in pc.get("profiles") or []:
                         if isinstance(profile, dict):
-                            profile["persona_ref_image"] = await self._save_base64_refs(
+                            profile["persona_ref_image"] = await ref_service.save_base64_refs(
                                 profile.get("persona_ref_image") or []
                             )
                 self.config["persona_config"] = pc
                 self.persona_mgr = PersonaManager(self.config, self.data_dir)
 
             # providers有变化时热重载 registry（draw/edit同一引用，自动生效）
-            if providers_changed:
-                # 精确清理：只清掉配置发生变化或被删除的 provider 的 backend 缓存
-                # 保留未变更的 backend 实例，避免重建连接池
-                new_providers = {
-                    str(p.get("id") or "").strip(): p
-                    for p in (self.config.get("providers") or [])
-                    if isinstance(p, dict) and str(p.get("id") or "").strip()
-                }
-                old_provider_ids = set(self.registry._providers.keys())
-                for pid in list(old_provider_ids):
-                    old_conf = self.registry._providers.get(pid)
-                    new_conf = new_providers.get(pid)
-                    if new_conf is None or old_conf != new_conf:
-                        # 删除或配置有变化 → 清对应 backend 缓存
-                        self.registry._backends.pop(pid, None)
-                        self.registry._video_backends.pop(pid, None)
-                # 新增的 provider 不需要提前清，懒加载即可
-                self.registry._providers.clear()
-                self.registry._load_providers()
-                logger.info("[AI绘图站] Registry 已热重载，providers=%s",
-                            list(self.registry._providers.keys()))
-                # 服务商列表变了，同步更新工具描述
-                self._update_llm_tool_descriptions()
+            if apply_result.providers_changed:
+                self._reload_registry_after_provider_change()
 
             # 对齐 omnidraw：先写 JSON 持久化，再同步到 native config
             self._safe_update_config()
@@ -225,47 +166,16 @@ class PagesAPIMixin:
     async def _pages_image_b64_response(self, path: str):
         if not path:
             return jsonify({"success": False, "error": "缺少 path 参数"}), 400
-        p, err = self._check_path_safe(path)
-        if err is not None:
-            return err
-        mime = mimetypes.guess_type(str(p))[0] or "image/png"
-        raw = await asyncio.to_thread(p.read_bytes)
-        b64 = base64.b64encode(raw).decode()
+        try:
+            image_data = await self._persona_ref_service().preview_data_url(path)
+        except ValueError:
+            return jsonify({"success": False, "error": "禁止访问"}), 403
+        except FileNotFoundError:
+            return jsonify({"success": False, "error": "文件不存在"}), 404
         return jsonify({
             "success": True,
-            "image_data": f"data:{mime};base64,{b64}",
+            "image_data": image_data,
         })
-
-    async def _save_base64_refs(self, refs: list) -> list:
-        """把 persona_ref_image 列表里的 base64 data URL 转存为本地文件，返回替换后的列表。"""
-        ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
-        ref_dir.mkdir(parents=True, exist_ok=True)
-        result = []
-        for ref in refs:
-            ref = str(ref or "").strip()
-            if not ref:
-                continue
-            if ref.startswith("data:image"):
-                try:
-                    raw = decode_base64_image_payload(ref)
-                    if len(raw) > self._REF_IMAGE_MAX_BYTES:
-                        logger.warning("[AI绘图站] base64参考图超过20MB，跳过")
-                        continue
-                    detected = self._detect_ref_image(raw)
-                    if detected is None:
-                        logger.warning("[AI绘图站] base64参考图格式无效，跳过")
-                        continue
-                    _mime, ext = detected
-                    fname = self._build_ref_filename("reference", ext)
-                    save_path = ref_dir / fname
-                    await asyncio.to_thread(save_path.write_bytes, raw)
-                    result.append(str(save_path))
-                    logger.info("[AI绘图站] base64参考图已转存: %s", save_path)
-                except Exception as e:
-                    logger.warning("[AI绘图站] base64参考图转存失败: %s", e)
-            else:
-                result.append(ref)
-        return result
 
 
     async def _pages_upload_ref_image(self):
@@ -283,26 +193,16 @@ class PagesAPIMixin:
             data = file.read()
             if inspect.isawaitable(data):
                 data = await data
-            if len(data) > self._REF_IMAGE_MAX_BYTES:
-                return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
-            detected = self._detect_ref_image(data)
-            if detected is None:
-                return jsonify({"success": False, "error": "文件不是受支持的图片格式"}), 400
-            _mime, ext = detected
-
-            ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
-            ref_dir.mkdir(parents=True, exist_ok=True)
-            safe_name = self._build_ref_filename(filename, ext)
-            save_path = ref_dir / safe_name
-
-            await asyncio.to_thread(save_path.write_bytes, data)
+            save_path, safe_name = await self._persona_ref_service().save_image_bytes(filename, data)
             logger.info("[AI绘图站] 参考图已上传: %s", save_path)
 
             return jsonify({
                 "success": True,
-                "path": str(save_path),
+                "path": save_path,
                 "filename": safe_name,
             })
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
         except Exception as e:
             logger.error("[Pages] upload_ref_image 失败: %s", e, exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500
@@ -316,48 +216,33 @@ class PagesAPIMixin:
             filename = pathlib.Path(str(data.get("filename") or "upload")).name
             data_url = str(data.get("data") or "")
 
-            m = re.match(r"data:(image/[^;]+);base64,(.+)", data_url, re.DOTALL)
-            if not m:
-                return jsonify({"success": False, "error": "无效的图片数据"}), 400
-
-            raw = decode_base64_image_payload(data_url)
-            if len(raw) > self._REF_IMAGE_MAX_BYTES:
-                return jsonify({"success": False, "error": "文件大小超过 20MB 限制"}), 400
-            detected = self._detect_ref_image(raw)
-            if detected is None:
-                return jsonify({"success": False, "error": "图片数据格式无效"}), 400
-            _mime, ext = detected
-
-            ref_dir = pathlib.Path(self.data_dir) / "persona_refs"
-            ref_dir.mkdir(parents=True, exist_ok=True)
-            safe_name = self._build_ref_filename(filename, ext)
-            save_path = ref_dir / safe_name
-            await asyncio.to_thread(save_path.write_bytes, raw)
+            save_path, safe_name = await self._persona_ref_service().save_data_url(filename, data_url)
             logger.info("[AI绘图站] 参考图已通过 base64 fallback 上传: %s", save_path)
 
             return jsonify({
                 "success": True,
-                "path": str(save_path),
+                "path": save_path,
                 "filename": safe_name,
             })
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
         except Exception as e:
             logger.error("[Pages] upload_ref_image_b64 失败: %s", e, exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @staticmethod
-    def _build_ref_filename(filename: str, ext: str) -> str:
-        stem = pathlib.Path(filename or "upload").stem.strip() or "upload"
-        stem = re.sub(r"[^\w.-]+", "_", stem).strip("._") or "upload"
-        return f"{time.time_ns()}_{stem[:80]}.{ext}"
-
-    @staticmethod
-    def _detect_ref_image(data: bytes) -> tuple[str, str] | None:
-        if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
-            return "image/jpeg", "jpg"
-        if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
-            return "image/png", "png"
-        if len(data) >= 6 and data[:6] in {b"GIF87a", b"GIF89a"}:
-            return "image/gif", "gif"
-        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-            return "image/webp", "webp"
-        return None
+    def _reload_registry_after_provider_change(self) -> None:
+        new_providers = PagesConfigService.provider_configs_by_id(
+            self.config.get("providers") or []
+        )
+        old_provider_ids = set(self.registry._providers.keys())
+        for pid in list(old_provider_ids):
+            old_conf = self.registry._providers.get(pid)
+            new_conf = new_providers.get(pid)
+            if new_conf is None or old_conf != new_conf:
+                self.registry._backends.pop(pid, None)
+                self.registry._video_backends.pop(pid, None)
+        self.registry._providers.clear()
+        self.registry._load_providers()
+        logger.info("[AI绘图站] Registry 已热重载，providers=%s",
+                    list(self.registry._providers.keys()))
+        self._update_llm_tool_descriptions()

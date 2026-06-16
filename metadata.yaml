@@ -10,12 +10,3 @@ astrbot_version: ">=4.16.0,<5"
 support_platforms:
   - aiocqhttp
 repo: https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced
-
-
-
-
-
-
-
-
-

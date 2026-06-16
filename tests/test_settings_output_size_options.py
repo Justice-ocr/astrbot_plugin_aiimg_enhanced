@@ -64,10 +64,13 @@ def test_static_feature_selects_are_populated_from_javascript_only():
 
 def test_settings_javascript_loads_single_size_source_and_renders_groups():
     app_js = (ROOT / "pages" / "Settings" / "app.js").read_text(encoding="utf-8")
+    output_sizes_js = (ROOT / "pages" / "Settings" / "output_sizes.js").read_text(encoding="utf-8")
 
-    assert "output_sizes.json" in app_js
+    assert "output_sizes.json" not in app_js
+    assert "output_sizes.json" in output_sizes_js
+    assert "from './output_sizes.js'" in app_js
     assert "OUTPUT_SIZE_OPTIONS = [" not in app_js
-    assert "<optgroup" in app_js
+    assert "<optgroup" in output_sizes_js
 
 
 def test_common_monitor_sizes_are_available_in_schema_options():
