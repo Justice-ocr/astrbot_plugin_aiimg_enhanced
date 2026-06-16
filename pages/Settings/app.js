@@ -38,37 +38,86 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const asInt = (v,d) => { const n=parseInt(v); return isNaN(n)?d:n; };
 const asBool = v => typeof v==='boolean'?v: String(v||'').toLowerCase()==='true';
-const OUTPUT_SIZE_OPTIONS = [
-  '', '512x512', '1024x1024', '2048x2048', '4096x4096',
-  '1920x1080', '2560x1440', '3840x2160',
-  '1080x1920', '1440x2560',
-  '1152x896', '768x1024', '1536x2048', '2048x1536',
-  '1024x576', '2048x1152', '576x1024', '1152x2048',
-  '2048x1360', '1360x2048'
-];
+const OUTPUT_SIZE_SOURCE_URL = new URL('./output_sizes.json', import.meta.url);
+const OUTPUT_SIZE_FALLBACK = {
+  groups: [
+    { label: '\u65b9\u56fe', sizes: [
+      { value: '256x256', label: '256x256' },
+      { value: '512x512', label: '512x512' },
+      { value: '1024x1024', label: '1024x1024' },
+      { value: '2048x2048', label: '2048x2048' },
+      { value: '4096x4096', label: '4096x4096' },
+    ]},
+    { label: '\u6a2a\u5c4f', sizes: [
+      { value: '1024x576', label: '1024x576' },
+      { value: '2048x1152', label: '2048x1152' },
+      { value: '2560x1440', label: '2560x1440' },
+      { value: '2048x1360', label: '2048x1360' },
+      { value: '2048x1536', label: '2048x1536' },
+    ]},
+    { label: '\u7ad6\u5c4f', sizes: [
+      { value: '576x1024', label: '576x1024' },
+      { value: '768x1024', label: '768x1024' },
+      { value: '1152x2048', label: '1152x2048' },
+      { value: '1440x2560', label: '1440x2560' },
+      { value: '1360x2048', label: '1360x2048' },
+      { value: '1536x2048', label: '1536x2048' },
+    ]},
+  ],
+};
+let OUTPUT_SIZE_DATA = OUTPUT_SIZE_FALLBACK;
 const normalizeOutputSize = value => {
   const raw = String(value || '').trim();
   if (!raw) return '';
-  const compact = raw.replace(/\s+/g, '').replace(/[×脳]/g, 'x');
+  const compact = raw.replace(/\s+/g, '').replace(/[\u00d7\u8133]/g, 'x');
   const upper = compact.toUpperCase();
   if (upper === '1K') return '1024x1024';
   if (upper === '2K') return '2048x2048';
   if (upper === '4K') return '4096x4096';
   return compact.toLowerCase();
 };
+const is16AlignedSize = value => {
+  const match = /^(\d+)x(\d+)$/.exec(String(value || '').trim());
+  if (!match) return false;
+  return parseInt(match[1], 10) % 16 === 0 && parseInt(match[2], 10) % 16 === 0;
+};
+const loadOutputSizeData = async () => {
+  try {
+    const resp = await fetch(OUTPUT_SIZE_SOURCE_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.groups)) throw new Error('invalid output size data');
+    OUTPUT_SIZE_DATA = data;
+  } catch (e) {
+    console.warn('[Settings] using fallback output sizes', e);
+    OUTPUT_SIZE_DATA = OUTPUT_SIZE_FALLBACK;
+  }
+};
+const allOutputSizeEntries = () => {
+  const groups = Array.isArray(OUTPUT_SIZE_DATA.groups) ? OUTPUT_SIZE_DATA.groups : [];
+  return groups.flatMap(group => Array.isArray(group.sizes) ? group.sizes : []);
+};
+const allOutputSizeValues = () => allOutputSizeEntries().map(item => normalizeOutputSize(item.value)).filter(v => v && is16AlignedSize(v));
 const sizeOptionsHtml = (value = '', {includeDefault = false} = {}) => {
   const selected = normalizeOutputSize(value);
-  const known = new Set(OUTPUT_SIZE_OPTIONS);
-  const labels = includeDefault ? ['服务商默认', ...OUTPUT_SIZE_OPTIONS.slice(1)] : OUTPUT_SIZE_OPTIONS.slice(1);
-  const values = includeDefault ? ['', ...OUTPUT_SIZE_OPTIONS.slice(1)] : OUTPUT_SIZE_OPTIONS.slice(1);
-  if (selected && !known.has(selected)) {
-    values.push(selected);
-    labels.push(selected);
-  }
-  return values.map((v, i) => `<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(labels[i])}</option>`).join('');
+  const groups = Array.isArray(OUTPUT_SIZE_DATA.groups) ? OUTPUT_SIZE_DATA.groups : [];
+  const normalizeItem = item => {
+    const v = normalizeOutputSize(item?.value);
+    return v && is16AlignedSize(v) ? { value: v, label: String(item?.label || v) } : null;
+  };
+  const groupHtml = groups.map(group => {
+    const items = Array.isArray(group.sizes) ? group.sizes.map(normalizeItem).filter(Boolean) : [];
+    if (!items.length) return '';
+    return `<optgroup label="${esc(String(group.label || ''))}">${items.map(item => `<option value="${esc(item.value)}" ${item.value===selected?'selected':''}>${esc(item.label)}</option>`).join('')}</optgroup>`;
+  }).join('');
+  const known = new Set(allOutputSizeValues());
+  const defaultOption = includeDefault ? `<option value="" ${selected===''?'selected':''}>\u670d\u52a1\u5546\u9ed8\u8ba4</option>` : '';
+  const extraOption = selected && !known.has(selected) && is16AlignedSize(selected)
+    ? `<option value="${esc(selected)}" selected>${esc(selected)}</option>`
+    : '';
+  return defaultOption + groupHtml + extraOption;
 };
 
-// ── Bridge ───────────────────────────────────────────────────────────────────
 const bridge = window.AstrBotPluginPage || {
   ready: async () => ({}),
   apiGet: async (name) => {
@@ -1018,6 +1067,7 @@ async function saveAll(){
 
 // ── 初始化 ────────────────────────────────────────────────────────────────────
 async function init(){
+  await loadOutputSizeData();
   initOutputSizeSelects();
   initTabs();
   document.querySelectorAll('input:not([type=checkbox]):not([type=hidden]),textarea,select').forEach(el=>{

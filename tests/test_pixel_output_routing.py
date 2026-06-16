@@ -80,6 +80,13 @@ def _load_vertex_module():
     return _load_core_module("vertex_ai_anonymous_backend")
 
 
+def _load_openai_compat_module():
+    _install_package_stubs()
+    _load_core_module("image_format")
+    _load_core_module("gitee_sizes")
+    return _load_core_module("openai_compat_backend")
+
+
 class GeminiPixelOutputRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_generate_converts_pixel_size_to_gemini_resolution(self):
         mod = _load_gemini_module()
@@ -136,6 +143,34 @@ class GeminiPixelOutputRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(seen["resolution"], "4K")
         self.assertIn("4K resolution image", seen["parts"][0]["text"])
+
+
+class SizeCompatibilityTests(unittest.TestCase):
+    def test_gitee_supported_sizes_are_16_aligned(self):
+        _install_package_stubs()
+        mod = _load_core_module("gitee_sizes")
+
+        for size in mod.GITEE_SUPPORTED_SIZES:
+            width, height = [int(part) for part in size.split("x", 1)]
+            self.assertEqual(width % 16, 0, size)
+            self.assertEqual(height % 16, 0, size)
+
+    def test_openai_compat_falls_back_to_same_ratio_allowed_size(self):
+        mod = _load_openai_compat_module()
+        backend = mod.OpenAICompatBackend(
+            imgr=object(),
+            base_url="https://example.com/v1",
+            api_keys=["key"],
+            default_model="model",
+            default_size="1024x1024",
+            allowed_sizes=["1024x1024", "2048x1152", "576x1024"],
+        )
+
+        final_size, raw_size, fallback_used = backend._resolve_size("3840x2160", None)
+
+        self.assertEqual(raw_size, "3840x2160")
+        self.assertEqual(final_size, "2048x1152")
+        self.assertTrue(fallback_used)
 
 
 class VertexPixelOutputRoutingTests(unittest.TestCase):
