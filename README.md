@@ -57,6 +57,34 @@ https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced
 
 服务商 ID 是链路和临时指定服务商时使用的短名称，例如 `openai`、`gemini`。
 
+#### 服务商模板与端点适配
+
+多数模板只需要填写服务商根地址或 `/v1` 地址，插件会按模板自动拼接实际请求端点；只有 `OpenAI ImagesURL` 和 `自定义视频` 需要直接填写完整接口地址或路径。
+
+| 服务商模板 | 适配接口 | 地址字段怎么填 | 实际请求端点 / 备注 |
+| --- | --- | --- | --- |
+| OpenAI Images | OpenAI Images API | `Base URL` 填根地址或 `/v1`，例如 `https://api.openai.com/v1`；也可粘贴 `/v1/images/generations`，保存后会自动归一化 | 文生图走 `/images/generations`，改图走 `/images/edits` |
+| OpenAI Chat图 | OpenAI Chat Completions 多模态出图 | `Base URL` 填根地址或 `/v1`；如果网关只给 `/v1/chat/completions`，也可以直接粘贴 | 主请求走 `/chat/completions`，改图不兼容时会尝试 Images API 兜底 |
+| Gemini 原生 | Google Gemini 原生 `generateContent` | `API URL` 填 `https://generativelanguage.googleapis.com`、`.../v1beta` 或 `.../v1beta/models`，模型名单独填到 `Model` | 最终请求 `.../v1beta/models/{model}:generateContent`；不要把模型名和 `:generateContent` 混到模型字段里 |
+| Flow2API | Flow2API / Gemini 代理的 OpenAI Chat Completions | `API URL` 填服务根地址、`/v1` 或完整 `/v1/chat/completions` | 插件会归一化到 `/v1/chat/completions`，适合只提供 OpenAI 兼容聊天端点的 Gemini 代理 |
+| Vertex AI 匿名 | Google Cloud Console 匿名 GraphQL | 通常保持默认；需要代理时填 `Proxy URL`，高级字段用于覆盖 reCAPTCHA、GraphQL API Key 或 Vertex Base API | 请求 `.../v3/entityServices/AiplatformEntityService/schemas/AIPLATFORM_GRAPHQL:batchGraphql` |
+| Grok Images | xAI Images API | `Base URL` 默认 `https://api.x.ai/v1`；也可填 `https://api.x.ai` | 文生图走 `/v1/images/generations`，改图走 `/v1/images/edits` |
+| Grok Chat图 | xAI Chat Completions 出图 | `Base URL` 默认 `https://api.x.ai/v1` | 请求 `/chat/completions`；适合 chat 形态的 grok imagine 网关 |
+| Grok2API Images | Grok2API Images 兼容接口 | `Base URL` 填部署根地址或 `/v1` | 文生图走 `/images/generations`，改图优先走 `/images/edits`，兼容部分实现的编辑入参差异 |
+| Gemini Images | Gemini 的 OpenAI Images 兼容网关 | `Base URL` 填代理提供的 OpenAI 兼容根地址或 `/v1` | 文生图走 `/images/generations`，改图走 `/images/edits` |
+| Gemini Chat图 | Gemini 的 OpenAI Chat 兼容网关 | `Base URL` 填代理提供的根地址、`/v1` 或 `/v1/chat/completions` | 请求 `/chat/completions`，适合只暴露聊天接口的 Gemini 网关 |
+| Gitee Images | Gitee AI 同步 Images 接口 | `Base URL` 默认 `https://ai.gitee.com/v1` | 文生图走 `/images/generations`；当前模板默认不启用改图 |
+| Gitee 异步改图 | Gitee AI 异步改图接口 | `Base URL` 默认 `https://ai.gitee.com/v1` | 创建任务走 `/async/images/edits`，轮询走 `/task/{task_id}` |
+| 即梦 | 即梦代理接口 | `API URL` 填代理提供的完整生成接口地址 | 插件直接 GET 这个地址，并附带 apikey、cookie、模型、比例等参数 |
+| Grok 视频 | xAI Chat Completions 视频接口 | `Server URL` 默认 `https://api.x.ai` | 请求 `/v1/chat/completions`，从响应文本中提取视频 URL |
+| Grok2API 视频 | Grok2API 视频接口 | `Base URL` 填部署根地址或 `/v1` | 请求 `/v1/videos` |
+| Flow2API 视频 | Flow2API 视频代理 | `API URL` 填服务根地址、`/v1` 或完整 `/v1/chat/completions` | 插件会归一化到 `/v1/chat/completions`，从流式或非流式响应中提取视频 URL |
+| 自定义视频 | 任意视频生成 / 轮询接口 | `Base URL` 填服务根地址；`Generate Path` 填生成路径，`Poll Path` 填轮询路径，可用 `{task_id}` 占位 | 生成请求为 `Base URL + Generate Path`；配置 `Poll Path` 后按 `Base URL + Poll Path` 轮询 |
+| 魔搭 Images | 魔搭 OpenAI Images 兼容接口 | `Base URL` 填魔搭或代理提供的 OpenAI 兼容根地址或 `/v1` | 文生图走 `/images/generations`；当前模板默认不启用改图 |
+| OpenAI ImagesURL | 完整 URL 直连模式 | `Full Generate URL` 填完整文生图接口，`Full Edit URL` 填完整改图接口；可用于 `/v1/images/generations`、`/v1/images/edits` 或 `/v1/responses` 类网关 | 插件不会再自动拼接路径，直接向填写的完整 URL 发请求 |
+
+如果你拿到的是类似 `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent` 的 Gemini 原生端点，建议选择 **Gemini 原生**：`API URL` 填 `https://generativelanguage.googleapis.com` 或 `https://generativelanguage.googleapis.com/v1beta/models`，`Model` 填 `gemini-3.1-flash-image-preview`。如果服务商只提供 OpenAI 兼容的 `/v1/chat/completions`，则选择 **Gemini Chat图** 或 **Flow2API**。
+
 ### 3. 配置功能链路
 
 进入 **功能开关**，把刚创建的服务商加入文生图、改图、自拍或视频链路，然后点击左下角 **保存更改**。
