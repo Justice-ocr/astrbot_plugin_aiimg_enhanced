@@ -8,7 +8,7 @@
 - 支持最多三张独立参考图，并将像素输出配置转换为 xAI 的 `aspect_ratio` 与 `1k/2k`。
 - 默认模型更新为 `grok-imagine-image-quality`，旧的 `grok-imagine-1.0` / `grok-imagine-1.0-edit` 配置会自动迁移。
 - Grok Images 的重试次数恢复为统一语义：`0` 表示只请求一次，`2` 表示失败后最多额外重试两次。
-- xAI 返回 `upstream_unavailable` 时会继续按上游故障重试；质量模型持续不可用时自动降级到 `grok-imagine-image`。
+- xAI 返回 `upstream_unavailable` 时会继续按上游故障重试，并保留原模型不做自动降级。
 
 ### 文档与插件信息
 

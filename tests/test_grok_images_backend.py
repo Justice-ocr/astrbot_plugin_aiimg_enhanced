@@ -226,7 +226,7 @@ class GrokImagesBackendTests(unittest.IsolatedAsyncioTestCase):
             "grok-imagine-image-quality",
         )
 
-    async def test_edit_falls_back_when_quality_upstream_is_unavailable(self):
+    async def test_edit_does_not_change_model_when_upstream_is_unavailable(self):
         mod = _load_module()
         unavailable = _FakeResponse(
             status=400,
@@ -240,16 +240,17 @@ class GrokImagesBackendTests(unittest.IsolatedAsyncioTestCase):
         backend, imgr, session = _make_backend(
             mod,
             default_model="grok-imagine-image-quality",
-            responses=[unavailable, _FakeResponse()],
+            responses=[unavailable],
         )
 
-        await backend.edit("make it cinematic", [PNG_BYTES])
+        with self.assertRaisesRegex(RuntimeError, "HTTP 400.*upstream_unavailable"):
+            await backend.edit("make it cinematic", [PNG_BYTES])
 
-        self.assertEqual(imgr.saved, RESULT_BYTES)
-        self.assertEqual(len(session.requests), 2)
+        self.assertIsNone(imgr.saved)
+        self.assertEqual(len(session.requests), 1)
         self.assertEqual(
             [request[1]["json"]["model"] for request in session.requests],
-            ["grok-imagine-image-quality", "grok-imagine-image"],
+            ["grok-imagine-image-quality"],
         )
 
 

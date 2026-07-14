@@ -39,12 +39,6 @@ _LEGACY_MODEL_ALIASES = {
     "grok-imagine-1.0": "grok-imagine-image-quality",
     "grok-imagine-1.0-edit": "grok-imagine-image-quality",
 }
-_QUALITY_MODEL_ALIASES = {
-    "grok-imagine-image-quality",
-    "grok-imagine-image-quality-20260403",
-    "grok-imagine-image-quality-latest",
-    "grok-imagine-image-pro",
-}
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -254,13 +248,6 @@ def _normalize_resolution(value: str | None) -> str | None:
 def _normalize_model_name(value: str | None) -> str:
     raw = str(value or "").strip()
     return _LEGACY_MODEL_ALIASES.get(raw.lower(), raw)
-
-
-def _fallback_model_name(value: str | None) -> str | None:
-    model = _normalize_model_name(value)
-    if model.lower() in _QUALITY_MODEL_ALIASES:
-        return "grok-imagine-image"
-    return None
 
 
 def _is_upstream_unavailable_error(status: int, detail: str) -> bool:
@@ -487,24 +474,6 @@ class GrokImagesBackend:
                             )
                             await asyncio.sleep(self._retry_delay_seconds(attempt))
                             continue
-                        fallback_model = (
-                            _fallback_model_name(final_model)
-                            if upstream_unavailable
-                            else None
-                        )
-                        if fallback_model:
-                            logger.warning(
-                                "[GrokImages][generate] model=%s unavailable; fallback to %s",
-                                final_model,
-                                fallback_model,
-                            )
-                            return await self.generate(
-                                prompt,
-                                model=fallback_model,
-                                size=size,
-                                resolution=resolution,
-                                extra_body=extra_body,
-                            )
                         raise RuntimeError(f"HTTP {resp.status}: {last_error}")
                     data = _parse_sse_or_json(raw_content)
                     results = _parse_image_api_response(data)
@@ -641,25 +610,6 @@ class GrokImagesBackend:
                             )
                             await asyncio.sleep(self._retry_delay_seconds(attempt))
                             continue
-                        fallback_model = (
-                            _fallback_model_name(final_model)
-                            if upstream_unavailable
-                            else None
-                        )
-                        if fallback_model:
-                            logger.warning(
-                                "[GrokImages][edit] model=%s unavailable; fallback to %s",
-                                final_model,
-                                fallback_model,
-                            )
-                            return await self.edit(
-                                prompt,
-                                images,
-                                model=fallback_model,
-                                size=size,
-                                resolution=resolution,
-                                extra_body=extra_body,
-                            )
                         raise RuntimeError(f"HTTP {resp.status}: {last_error}")
                     data = _parse_sse_or_json(raw_content)
                     results = _parse_image_api_response(data)
