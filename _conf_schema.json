@@ -884,7 +884,7 @@
           },
           "supports_edit": {
             "type": "bool",
-            "description": "支持改图 (images.edit)",
+            "description": "支持改图 (/v1/images/edits)",
             "default": true
           },
           "generate_request_mode": {
@@ -1147,8 +1147,8 @@
       },
       "grok_images": {
         "name": "Grok（Images）",
-        "description": "xAI 预设的 Images 模板（底层等同 OpenAI Images）。",
-        "hint": "第三方网关也可直接使用 OpenAI Images 模板。",
+        "description": "xAI 官方 Images API 模板，生图与改图均使用 JSON 请求。",
+        "hint": "官方地址使用 https://api.x.ai/v1；第三方 OpenAI 兼容网关请使用 OpenAI Images 或 Grok2API Images 模板。",
         "items": {
           "id": {
             "type": "string",
@@ -1174,34 +1174,12 @@
           "model": {
             "type": "string",
             "description": "模型名称",
-            "default": ""
+            "default": "grok-imagine-image-quality"
           },
           "supports_edit": {
             "type": "bool",
             "description": "支持改图 (images.edit)",
             "default": true
-          },
-          "generate_request_mode": {
-            "type": "string",
-            "description": "文生图请求模式",
-            "options": [
-              "auto",
-              "stream",
-              "non_stream"
-            ],
-            "hint": "auto 由当前后端自己决定；stream 强制优先走流式；non_stream 强制直接走非流式。不支持双路径的后端会自动忽略。",
-            "default": "auto"
-          },
-          "edit_request_mode": {
-            "type": "string",
-            "description": "改图请求模式",
-            "options": [
-              "auto",
-              "stream",
-              "non_stream"
-            ],
-            "hint": "auto 由当前后端自己决定；stream 强制优先走流式；non_stream 强制直接走非流式。不支持双路径的后端会自动忽略。",
-            "default": "auto"
           },
           "timeout": {
             "type": "int",
@@ -1220,8 +1198,8 @@
           },
           "default_size": {
             "type": "string",
-            "description": "默认输出尺寸",
-            "default": "4096x4096",
+            "description": "默认输出尺寸（自动转换为 xAI 比例和 1k/2k）",
+            "default": "2048x2048",
             "options": [
               "256x256",
               "512x512",

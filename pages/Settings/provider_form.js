@@ -45,8 +45,7 @@ export function buildProviderForm(p) {
   if (hasField('timeout')) rows.push(buildField('timeout', '超时(秒)', 'number', p.timeout ?? 120));
   if (hasField('timeout_seconds')) rows.push(buildField('timeout_seconds', '超时(秒)', 'number', p.timeout_seconds ?? 180));
   if (hasField('max_retries')) {
-    const isGrok = type === 'grok_images';
-    const hint = isGrok ? '总请求次数（grok_images专用语义：=最多4次）' : '额外重试次数（=不重试共1次，2=最多3次）';
+    const hint = '额外重试次数（=不重试共1次，2=最多3次）';
     rows.push(buildField('max_retries', '最多重试次数', 'number', p.max_retries ?? 2, hint));
   }
   if (hasField('default_size')) rows.push(buildSizeField('default_size', '默认输出尺寸', p.default_size || '4096x4096'));

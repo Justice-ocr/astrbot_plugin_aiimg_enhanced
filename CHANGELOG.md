@@ -2,6 +2,13 @@
 
 ## [未发布]
 
+### Grok Images 修复
+
+- 对齐 xAI 官方 Images API：改图改用 `application/json`，单图使用 `image`，多图使用 `images`，不再发送 multipart `image[]`。
+- 支持最多三张独立参考图，并将像素输出配置转换为 xAI 的 `aspect_ratio` 与 `1k/2k`。
+- 默认模型更新为 `grok-imagine-image-quality`，旧的 `grok-imagine-1.0` / `grok-imagine-1.0-edit` 配置会自动迁移。
+- Grok Images 的重试次数恢复为统一语义：`0` 表示只请求一次，`2` 表示失败后最多额外重试两次。
+
 ### 文档与插件信息
 
 - 重写 README，增加品牌横幅、快速安装、首次配置、人设参考图、指令说明和常见问题。

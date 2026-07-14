@@ -12,12 +12,33 @@ import aiohttp
 
 from astrbot.api import logger
 
+from .gitee_sizes import size_to_ratio
 from .image_format import guess_image_mime_and_ext
-from .openai_compat_backend import _build_collage, resolution_to_size
 
 _IMAGE_RESPONSE_FORMAT_CANDIDATES = ("b64_json", "url", None)
 _RETRYABLE_HTTP_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 _BASE64_PREFIX_RE = re.compile(r"^(?:b64|base64)\s*:\s*", re.IGNORECASE)
+_PIXEL_SIZE_RE = re.compile(r"^(\d{2,5})x(\d{2,5})$", re.IGNORECASE)
+_XAI_ASPECT_RATIOS = {
+    "1:1",
+    "3:4",
+    "4:3",
+    "9:16",
+    "16:9",
+    "2:3",
+    "3:2",
+    "9:19.5",
+    "19.5:9",
+    "9:20",
+    "20:9",
+    "1:2",
+    "2:1",
+    "auto",
+}
+_LEGACY_MODEL_ALIASES = {
+    "grok-imagine-1.0": "grok-imagine-image-quality",
+    "grok-imagine-1.0-edit": "grok-imagine-image-quality",
+}
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -215,15 +236,83 @@ def _is_response_format_related_error(error_message: str) -> bool:
     )
 
 
-def _is_size_related_error(error_message: str) -> bool:
-    err = str(error_message or "").lower()
-    if not err:
-        return False
-    if "invalid_size" in err or "size must be" in err:
-        return True
-    return "size" in err and (
-        "invalid" in err or "unsupported" in err or "unknown" in err or "must be" in err
+def _normalize_resolution(value: str | None) -> str | None:
+    raw = str(value or "").strip().lower()
+    if raw in {"1k", "1024"}:
+        return "1k"
+    if raw in {"2k", "2048", "4k", "4096"}:
+        return "2k"
+    return None
+
+
+def _normalize_model_name(value: str | None) -> str:
+    raw = str(value or "").strip()
+    return _LEGACY_MODEL_ALIASES.get(raw.lower(), raw)
+
+
+def _pixel_size_resolution(value: str | None) -> str | None:
+    match = _PIXEL_SIZE_RE.fullmatch(str(value or "").strip())
+    if not match:
+        return None
+    longest_edge = max(int(match.group(1)), int(match.group(2)))
+    return "1k" if longest_edge <= 1024 else "2k"
+
+
+def _resolve_xai_output_params(
+    *,
+    size: str | None,
+    resolution: str | None,
+    default_size: str | None,
+) -> dict[str, str]:
+    raw_size = str(size or "").strip()
+    raw_resolution = str(resolution or "").strip()
+    fallback_size = str(default_size or "").strip()
+    explicit_output = raw_size or raw_resolution
+    pixel_source = next(
+        (
+            value
+            for value in (raw_size, raw_resolution)
+            if _PIXEL_SIZE_RE.fullmatch(value)
+        ),
+        "",
     )
+    if not explicit_output and _PIXEL_SIZE_RE.fullmatch(fallback_size):
+        pixel_source = fallback_size
+
+    params: dict[str, str] = {}
+    aspect_ratio = size_to_ratio(pixel_source) if pixel_source else None
+    if aspect_ratio in _XAI_ASPECT_RATIOS:
+        params["aspect_ratio"] = aspect_ratio
+
+    final_resolution = (
+        _normalize_resolution(raw_resolution)
+        or _normalize_resolution(raw_size)
+        or _pixel_size_resolution(pixel_source)
+    )
+    if final_resolution:
+        params["resolution"] = final_resolution
+    return params
+
+
+def _image_data_uri(image: bytes) -> str:
+    mime, _ext = guess_image_mime_and_ext(image)
+    encoded = base64.b64encode(image).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _merge_extra_payload(
+    payload: dict[str, Any],
+    *sources: dict | None,
+    protected: set[str] | None = None,
+) -> dict[str, Any]:
+    blocked = protected or set()
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            if str(key) not in blocked:
+                payload[str(key)] = value
+    return payload
 
 
 class GrokImagesBackend:
@@ -236,7 +325,7 @@ class GrokImagesBackend:
         timeout: int = 120,
         max_retries: int = 2,
         default_model: str = "",
-        default_size: str = "4096x4096",
+        default_size: str = "2048x2048",
         supports_edit: bool = True,
         extra_body: dict | None = None,
         proxy_url: str | None = None,
@@ -246,8 +335,8 @@ class GrokImagesBackend:
         self.api_key = _pick_first_api_key(api_keys)
         self.timeout = max(1, min(int(timeout) if timeout is not None else 120, 3600))
         self.max_retries = max(0, min(int(max_retries) if max_retries is not None else 2, 10))
-        self.default_model = str(default_model or "").strip()
-        self.default_size = str(default_size or "4096x4096").strip()
+        self.default_model = _normalize_model_name(default_model)
+        self.default_size = str(default_size or "2048x2048").strip()
         self.supports_edit = bool(supports_edit)
         self.extra_body = extra_body or {}
         self.proxy_url = str(proxy_url or "").strip() or None
@@ -275,16 +364,6 @@ class GrokImagesBackend:
     def _retry_delay_seconds(attempt_index: int) -> float:
         return min(1.5 * (2**attempt_index), 4.0)
 
-    def _coerce_form_value(self, value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, (str, int, float, bool)):
-            return str(value)
-        try:
-            return json.dumps(value, ensure_ascii=False)
-        except Exception:
-            return str(value)
-
     async def _save_first_result(
         self, results: list[tuple[str | None, bytes | None]]
     ) -> Path:
@@ -309,12 +388,13 @@ class GrokImagesBackend:
         if not self.base_url:
             raise RuntimeError("未配置 base_url")
 
-        final_model = str(model or self.default_model or "grok-imagine-1.0").strip()
-        final_size = (
-            str(size or "").strip()
-            or (resolution_to_size(str(resolution or "")) or "").strip()
-            or str(resolution or "").strip()
-            or self.default_size
+        final_model = _normalize_model_name(
+            model or self.default_model or "grok-imagine-image-quality"
+        )
+        output_params = _resolve_xai_output_params(
+            size=size,
+            resolution=resolution,
+            default_size=self.default_size,
         )
         api_url = f"{self.base_url}/v1/images/generations"
         session = await self._ensure_session()
@@ -325,17 +405,18 @@ class GrokImagesBackend:
                 "model": final_model,
                 "prompt": (prompt or "").strip() or "a high quality image",
                 "n": 1,
+                **output_params,
             }
             if response_format:
                 payload["response_format"] = response_format
-            if final_size:
-                payload["size"] = final_size
-            if isinstance(self.extra_body, dict) and self.extra_body:
-                payload.update(self.extra_body)
-            if isinstance(extra_body, dict) and extra_body:
-                payload.update(extra_body)
+            _merge_extra_payload(
+                payload,
+                self.extra_body,
+                extra_body,
+                protected={"model", "prompt", "n", "response_format", "size"},
+            )
 
-            for attempt in range(self.max_retries):
+            for attempt in range(self.max_retries + 1):
                 try:
                     t0 = time.perf_counter()
                     async with session.post(
@@ -361,7 +442,7 @@ class GrokImagesBackend:
                             break
                         if (
                             resp.status in _RETRYABLE_HTTP_STATUS_CODES
-                            and attempt < self.max_retries - 1
+                            and attempt < self.max_retries
                         ):
                             await asyncio.sleep(self._retry_delay_seconds(attempt))
                             continue
@@ -379,14 +460,14 @@ class GrokImagesBackend:
                     raise RuntimeError(last_error)
                 except (asyncio.TimeoutError, aiohttp.ClientError) as e:
                     last_error = str(e) or "请求超时"
-                    if attempt < self.max_retries - 1:
+                    if attempt < self.max_retries:
                         await asyncio.sleep(self._retry_delay_seconds(attempt))
                         continue
                 except json.JSONDecodeError:
                     last_error = "API 响应格式异常（非 JSON/SSE）"
                 except Exception as e:
                     last_error = str(e)
-                    if attempt < self.max_retries - 1:
+                    if attempt < self.max_retries:
                         await asyncio.sleep(self._retry_delay_seconds(attempt))
                         continue
                     if response_format and _is_response_format_related_error(
@@ -411,127 +492,109 @@ class GrokImagesBackend:
             raise RuntimeError("该后端不支持改图/图生图")
         if not images:
             raise ValueError("至少需要一张图片")
+        if len(images) > 3:
+            raise ValueError("xAI Grok 改图最多支持三张输入图片")
         if not self.base_url:
             raise RuntimeError("未配置 base_url")
 
-        final_model = str(
-            model or self.default_model or "grok-imagine-1.0-edit"
-        ).strip()
-        resolved_size = (
-            str(size or "").strip()
-            or (resolution_to_size(str(resolution or "")) or "").strip()
-            or str(resolution or "").strip()
-            or self.default_size
+        final_model = _normalize_model_name(
+            model or self.default_model or "grok-imagine-image-quality"
         )
-
-        packed = _build_collage(images) if len(images) > 1 else images[0]
-        mime, ext = guess_image_mime_and_ext(packed)
+        output_params = _resolve_xai_output_params(
+            size=size,
+            resolution=resolution,
+            default_size=self.default_size,
+        )
         api_url = f"{self.base_url}/v1/images/edits"
         session = await self._ensure_session()
-
-        size_attempts: list[str | None] = [resolved_size] if resolved_size else [None]
-        if resolved_size:
-            size_attempts.append(None)
         last_error = ""
 
-        for current_size in size_attempts:
-            for response_format in _IMAGE_RESPONSE_FORMAT_CANDIDATES:
-                for attempt in range(self.max_retries):
-                    form = aiohttp.FormData()
-                    form.add_field("model", final_model)
-                    form.add_field(
-                        "prompt", (prompt or "").strip() or "Edit this image"
-                    )
-                    form.add_field("n", "1")
-                    if response_format:
-                        form.add_field("response_format", response_format)
-                    if current_size:
-                        form.add_field("size", current_size)
-                    form.add_field(
-                        "image[]", packed, filename=f"image.{ext}", content_type=mime
-                    )
+        image_inputs = [{"url": _image_data_uri(image)} for image in images]
+        for response_format in _IMAGE_RESPONSE_FORMAT_CANDIDATES:
+            payload: dict[str, Any] = {
+                "model": final_model,
+                "prompt": (prompt or "").strip() or "Edit this image",
+                "n": 1,
+                "resolution": output_params.get("resolution", "2k"),
+            }
+            if len(image_inputs) == 1:
+                payload["image"] = image_inputs[0]
+            else:
+                payload["images"] = image_inputs
+                if output_params.get("aspect_ratio"):
+                    payload["aspect_ratio"] = output_params["aspect_ratio"]
+            if response_format:
+                payload["response_format"] = response_format
+            _merge_extra_payload(
+                payload,
+                self.extra_body,
+                extra_body,
+                protected={
+                    "model",
+                    "prompt",
+                    "n",
+                    "response_format",
+                    "size",
+                    "image",
+                    "images",
+                },
+            )
 
-                    for source in (self.extra_body, extra_body):
-                        if not isinstance(source, dict):
-                            continue
-                        for key, value in source.items():
-                            if key in {
-                                "model",
-                                "prompt",
-                                "n",
-                                "size",
-                                "response_format",
-                                "image",
-                                "image[]",
-                            }:
-                                continue
-                            form.add_field(str(key), self._coerce_form_value(value))
-
-                    try:
-                        t0 = time.perf_counter()
-                        async with session.post(
-                            api_url,
-                            headers=self._headers(),
-                            data=form,
-                            timeout=aiohttp.ClientTimeout(total=self.timeout),
-                            proxy=self.proxy_url,
-                        ) as resp:
-                            raw_content = await resp.read()
-                        if resp.status != 200:
-                            text = raw_content.decode("utf-8", errors="replace")
-                            detail = _extract_api_error_message(text)
-                            last_error = detail or f"HTTP {resp.status}"
-                            if current_size and _is_size_related_error(detail):
-                                logger.warning(
-                                    "[GrokImages][edit] size=%s rejected: %s",
-                                    current_size,
-                                    detail[:160],
-                                )
-                                break
-                            if response_format and _is_response_format_related_error(
-                                detail
-                            ):
-                                logger.warning(
-                                    "[GrokImages][edit] response_format=%s rejected: %s",
-                                    response_format,
-                                    detail[:160],
-                                )
-                                break
-                            if (
-                                resp.status in _RETRYABLE_HTTP_STATUS_CODES
-                                and attempt < self.max_retries - 1
-                            ):
-                                await asyncio.sleep(self._retry_delay_seconds(attempt))
-                                continue
-                            raise RuntimeError(last_error)
-                        data = _parse_sse_or_json(raw_content)
-                        results = _parse_image_api_response(data)
-                        if results:
-                            logger.info(
-                                "[GrokImages][edit] success in %.2fs size=%s format=%s",
-                                time.perf_counter() - t0,
-                                current_size or "default",
-                                response_format or "default",
+            for attempt in range(self.max_retries + 1):
+                try:
+                    t0 = time.perf_counter()
+                    async with session.post(
+                        api_url,
+                        headers={**self._headers(), "Content-Type": "application/json"},
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=self.timeout),
+                        proxy=self.proxy_url,
+                    ) as resp:
+                        raw_content = await resp.read()
+                    if resp.status != 200:
+                        text = raw_content.decode("utf-8", errors="replace")
+                        detail = _extract_api_error_message(text)
+                        last_error = detail or f"HTTP {resp.status}"
+                        if response_format and _is_response_format_related_error(detail):
+                            logger.warning(
+                                "[GrokImages][edit] response_format=%s rejected: %s",
+                                response_format,
+                                detail[:160],
                             )
-                            return await self._save_first_result(results)
-                        last_error = "未能从响应中提取图片"
-                        raise RuntimeError(last_error)
-                    except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-                        last_error = str(e) or "请求超时"
-                        if attempt < self.max_retries - 1:
-                            await asyncio.sleep(self._retry_delay_seconds(attempt))
-                            continue
-                    except json.JSONDecodeError:
-                        last_error = "API 响应格式异常（非 JSON/SSE）"
-                    except Exception as e:
-                        last_error = str(e)
-                        if attempt < self.max_retries - 1:
-                            await asyncio.sleep(self._retry_delay_seconds(attempt))
-                            continue
-                        if response_format and _is_response_format_related_error(
-                            last_error
-                        ):
                             break
-                        raise
+                        if (
+                            resp.status in _RETRYABLE_HTTP_STATUS_CODES
+                            and attempt < self.max_retries
+                        ):
+                            await asyncio.sleep(self._retry_delay_seconds(attempt))
+                            continue
+                        raise RuntimeError(last_error)
+                    data = _parse_sse_or_json(raw_content)
+                    results = _parse_image_api_response(data)
+                    if results:
+                        logger.info(
+                            "[GrokImages][edit] success in %.2fs images=%s format=%s",
+                            time.perf_counter() - t0,
+                            len(image_inputs),
+                            response_format or "default",
+                        )
+                        return await self._save_first_result(results)
+                    last_error = "未能从响应中提取图片"
+                    raise RuntimeError(last_error)
+                except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                    last_error = str(e) or "请求超时"
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(self._retry_delay_seconds(attempt))
+                        continue
+                except json.JSONDecodeError:
+                    last_error = "API 响应格式异常（非 JSON/SSE）"
+                except Exception as e:
+                    last_error = str(e)
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(self._retry_delay_seconds(attempt))
+                        continue
+                    if response_format and _is_response_format_related_error(last_error):
+                        break
+                    raise
 
         raise RuntimeError(last_error or "Grok 改图请求失败")

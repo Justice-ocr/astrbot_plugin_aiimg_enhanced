@@ -68,7 +68,7 @@ https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced
 | Gemini 原生 | Google Gemini 原生 `generateContent` | `API URL` 填 `https://generativelanguage.googleapis.com`、`.../v1beta` 或 `.../v1beta/models`，模型名单独填到 `Model` | 最终请求 `.../v1beta/models/{model}:generateContent`；不要把模型名和 `:generateContent` 混到模型字段里 |
 | Flow2API | Flow2API / Gemini 代理的 OpenAI Chat Completions | `API URL` 填服务根地址、`/v1` 或完整 `/v1/chat/completions` | 插件会归一化到 `/v1/chat/completions`，适合只提供 OpenAI 兼容聊天端点的 Gemini 代理 |
 | Vertex AI 匿名 | Google Cloud Console 匿名 GraphQL | 通常保持默认；需要代理时填 `Proxy URL`，高级字段用于覆盖 reCAPTCHA、GraphQL API Key 或 Vertex Base API | 请求 `.../v3/entityServices/AiplatformEntityService/schemas/AIPLATFORM_GRAPHQL:batchGraphql` |
-| Grok Images | xAI Images API | `Base URL` 默认 `https://api.x.ai/v1`；也可填 `https://api.x.ai` | 文生图走 `/v1/images/generations`，改图走 `/v1/images/edits` |
+| Grok Images | xAI Images API | `Base URL` 默认 `https://api.x.ai/v1`；模型使用 `grok-imagine-image-quality` 或 `grok-imagine-image` | 文生图走 `/v1/images/generations`；改图按 xAI JSON 协议走 `/v1/images/edits`，支持最多三张独立参考图；像素尺寸会转换为 `aspect_ratio` 与 `1k/2k` |
 | Grok Chat图 | xAI Chat Completions 出图 | `Base URL` 默认 `https://api.x.ai/v1` | 请求 `/chat/completions`；适合 chat 形态的 grok imagine 网关 |
 | Grok2API Images | Grok2API Images 兼容接口 | `Base URL` 填部署根地址或 `/v1` | 文生图走 `/images/generations`，改图优先走 `/images/edits`，兼容部分实现的编辑入参差异 |
 | Gemini Images | Gemini 的 OpenAI Images 兼容网关 | `Base URL` 填代理提供的 OpenAI 兼容根地址或 `/v1` | 文生图走 `/images/generations`，改图走 `/images/edits` |
