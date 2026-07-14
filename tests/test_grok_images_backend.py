@@ -41,11 +41,12 @@ class _DummyImageManager:
 
 
 class _FakeResponse:
-    status = 200
-
-    def __init__(self):
-        encoded = base64.b64encode(RESULT_BYTES).decode("ascii")
-        self._body = json.dumps({"data": [{"b64_json": encoded}]}).encode("utf-8")
+    def __init__(self, *, status=200, body=None):
+        self.status = status
+        if body is None:
+            encoded = base64.b64encode(RESULT_BYTES).decode("ascii")
+            body = {"data": [{"b64_json": encoded}]}
+        self._body = json.dumps(body).encode("utf-8")
 
     async def __aenter__(self):
         return self
@@ -60,11 +61,14 @@ class _FakeResponse:
 class _FakeSession:
     closed = False
 
-    def __init__(self):
+    def __init__(self, responses=None):
         self.requests = []
+        self.responses = list(responses or [])
 
     def post(self, url, **kwargs):
         self.requests.append((url, kwargs))
+        if self.responses:
+            return self.responses.pop(0)
         return _FakeResponse()
 
     async def close(self):
@@ -121,16 +125,24 @@ def _load_module():
     return _load_core_module("grok_images_backend")
 
 
-def _make_backend(mod, *, default_size="2048x2048"):
+def _make_backend(
+    mod,
+    *,
+    default_size="2048x2048",
+    default_model="",
+    max_retries=0,
+    responses=None,
+):
     imgr = _DummyImageManager()
     backend = mod.GrokImagesBackend(
         imgr=imgr,
         base_url="https://api.x.ai/v1",
         api_keys=["test-key"],
-        max_retries=0,
+        max_retries=max_retries,
+        default_model=default_model,
         default_size=default_size,
     )
-    session = _FakeSession()
+    session = _FakeSession(responses)
     backend._session = session
     return backend, imgr, session
 
@@ -212,6 +224,32 @@ class GrokImagesBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             session.requests[0][1]["json"]["model"],
             "grok-imagine-image-quality",
+        )
+
+    async def test_edit_falls_back_when_quality_upstream_is_unavailable(self):
+        mod = _load_module()
+        unavailable = _FakeResponse(
+            status=400,
+            body={
+                "error": {
+                    "message": "上游服务暂不可用",
+                    "code": "upstream_unavailable",
+                }
+            },
+        )
+        backend, imgr, session = _make_backend(
+            mod,
+            default_model="grok-imagine-image-quality",
+            responses=[unavailable, _FakeResponse()],
+        )
+
+        await backend.edit("make it cinematic", [PNG_BYTES])
+
+        self.assertEqual(imgr.saved, RESULT_BYTES)
+        self.assertEqual(len(session.requests), 2)
+        self.assertEqual(
+            [request[1]["json"]["model"] for request in session.requests],
+            ["grok-imagine-image-quality", "grok-imagine-image"],
         )
 
 
