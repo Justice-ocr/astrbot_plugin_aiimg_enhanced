@@ -537,12 +537,11 @@ class GrokImagesBackend:
         session = await self._ensure_session()
         last_error = ""
 
-        image_inputs = [{"url": _image_data_uri(image)} for image in images]
-        for response_format in _IMAGE_RESPONSE_FORMAT_CANDIDATES:
+        image_inputs = [_image_data_uri(image) for image in images]
+        for response_format in ("url", "b64_json", None):
             payload: dict[str, Any] = {
                 "model": final_model,
                 "prompt": (prompt or "").strip() or "Edit this image",
-                "n": 1,
                 "resolution": output_params.get("resolution", "2k"),
             }
             if len(image_inputs) == 1:

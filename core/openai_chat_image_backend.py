@@ -1291,6 +1291,8 @@ class OpenAIChatImageBackend:
     def _needs_images_api_fallback(exc: Exception) -> bool:
         text = f"{exc!r} {exc}".lower()
         markers = (
+            "模型不支持文本对话",
+            "不支持文本对话",
             "unsupported protocol scheme",
             "unsupported url scheme",
             "get file base64 from url",
@@ -1325,6 +1327,31 @@ class OpenAIChatImageBackend:
         extra_body: dict | None,
     ) -> Path:
         full_edit_url, full_generate_url = self._build_images_api_endpoints()
+        if model.lower().startswith("grok-imagine-"):
+            from .grok_images_backend import GrokImagesBackend
+
+            helper = GrokImagesBackend(
+                imgr=self.imgr,
+                base_url=self.base_url,
+                api_keys=[key],
+                timeout=self.timeout,
+                max_retries=self.max_retries,
+                default_model=model,
+                supports_edit=True,
+                extra_body=extra_body or None,
+                proxy_url=self.proxy_url,
+            )
+            try:
+                return await helper.edit(
+                    prompt,
+                    images,
+                    model=model,
+                    size=size,
+                    resolution=resolution,
+                )
+            finally:
+                await helper.close()
+
         helper = OpenAIFullURLBackend(
             imgr=self.imgr,
             full_generate_url=full_generate_url,
@@ -1680,7 +1707,6 @@ class OpenAIChatImageBackend:
         final_model = str(model or self.default_model or "").strip()
         if not final_model:
             raise RuntimeError("未配置 model")
-
         eb = {}
         eb.update(self.extra_body)
         eb.update(extra_body or {})
@@ -1815,12 +1841,26 @@ class OpenAIChatImageBackend:
             raise ValueError("至少需要一张图片")
 
         key = self._next_key()
-        client = self._get_client(key)
 
         final_model = str(model or self.default_model or "").strip()
         if not final_model:
             raise RuntimeError("未配置 model")
+        if final_model.lower() == "grok-imagine-image-edit":
+            logger.info(
+                "[OpenAIChatImage][edit] model=%s 为 Images API 改图模型，直接请求 /images/edits",
+                final_model,
+            )
+            return await self._edit_via_images_api(
+                key=key,
+                prompt=prompt,
+                images=images,
+                model=final_model,
+                size=size,
+                resolution=resolution,
+                extra_body={**self.extra_body, **(extra_body or {})},
+            )
 
+        client = self._get_client(key)
         eb = {}
         eb.update(self.extra_body)
         eb.update(extra_body or {})

@@ -539,16 +539,12 @@ class OpenAIChatGenerateFallbackTests(unittest.IsolatedAsyncioTestCase):
     async def test_edit_uses_images_api_fallback_before_file_service(self):
         mod = _load_module()
         imgr = _DummyImageManager()
-        client = _DummyClient(
-            [
-                RuntimeError("image_url is required for image edits"),
-            ]
-        )
+        client = _DummyClient([])
         backend = mod.OpenAIChatImageBackend(
             imgr=imgr,
             base_url="https://api.example.com/v1",
             api_keys=["test-key"],
-            default_model="gemini-3.1-flash-image-preview-4k",
+            default_model="grok-imagine-image-edit",
         )
         backend._get_client = lambda key: client
 
@@ -564,6 +560,35 @@ class OpenAIChatGenerateFallbackTests(unittest.IsolatedAsyncioTestCase):
         backend._stream_chat_completion = _stream_stub
         backend._edit_via_images_api = _images_stub
         backend._register_input_image_urls = _register_stub
+
+        png_bytes = b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2ioAAAAASUVORK5CYII="
+        )
+        out_path = await backend.edit("改成赛博朋克", [png_bytes])
+
+        self.assertEqual(out_path, Path("/tmp/from-images-api.png"))
+        self.assertEqual(len(client.chat.completions.calls), 0)
+
+    async def test_edit_routes_chinese_non_chat_error_to_images_api(self):
+        mod = _load_module()
+        imgr = _DummyImageManager()
+        client = _DummyClient([RuntimeError("模型不支持文本对话")])
+        backend = mod.OpenAIChatImageBackend(
+            imgr=imgr,
+            base_url="https://api.example.com/v1",
+            api_keys=["test-key"],
+            default_model="gateway-image-model",
+        )
+        backend._get_client = lambda key: client
+
+        async def _stream_stub(**kwargs):
+            return [], [], ""
+
+        async def _images_stub(**kwargs):
+            return Path("/tmp/from-images-api.png")
+
+        backend._stream_chat_completion = _stream_stub
+        backend._edit_via_images_api = _images_stub
 
         png_bytes = b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2ioAAAAASUVORK5CYII="

@@ -178,9 +178,11 @@ class GrokImagesBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(url, "https://api.x.ai/v1/images/edits")
         self.assertEqual(request["headers"]["Content-Type"], "application/json")
         payload = request["json"]
+        self.assertEqual(payload["response_format"], "url")
+        self.assertNotIn("n", payload)
         self.assertIn("image", payload)
         self.assertNotIn("images", payload)
-        self.assertTrue(payload["image"]["url"].startswith("data:image/png;base64,"))
+        self.assertTrue(payload["image"].startswith("data:image/png;base64,"))
         self.assertEqual(payload["resolution"], "2k")
         self.assertNotIn("aspect_ratio", payload)
         self.assertNotIn("size", payload)
@@ -200,7 +202,21 @@ class GrokImagesBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("image", payload)
         self.assertEqual(len(payload["images"]), 2)
         self.assertEqual(payload["aspect_ratio"], "16:9")
-        self.assertNotEqual(payload["images"][0]["url"], payload["images"][1]["url"])
+        self.assertTrue(payload["images"][0].startswith("data:image/png;base64,"))
+        self.assertNotEqual(payload["images"][0], payload["images"][1])
+
+    async def test_edit_keeps_configured_edit_model(self):
+        mod = _load_module()
+        backend, _imgr, session = _make_backend(
+            mod, default_model="grok-imagine-image-edit"
+        )
+
+        await backend.edit("make it cinematic", [PNG_BYTES])
+
+        self.assertEqual(
+            session.requests[0][1]["json"]["model"],
+            "grok-imagine-image-edit",
+        )
 
     async def test_edit_rejects_more_than_three_images(self):
         mod = _load_module()
