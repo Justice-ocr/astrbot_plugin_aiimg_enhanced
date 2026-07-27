@@ -4,6 +4,7 @@
 
 ### Grok Images 修复
 
+- 新增 `Grok Images 改图` 服务商模板；`Grok Chat图` / `OpenAI Chat图` 中配置 `grok-imagine-image-edit` 的旧服务商会自动迁移到该模板后端。
 - 对照 nova-image-studio 修正 `grok-imagine-image-edit` 的 JSON 图片字段为 data URL 字符串，并优先请求 URL 格式结果；该模型会直接走 `/v1/images/edits`，CCODE 返回“模型不支持文本对话”的其他图片模型也会切换到该端点，且全程保留原模型不降级。
 - 对齐 xAI 官方 Images API：改图改用 `application/json`，单图使用 `image`，多图使用 `images`，不再发送 multipart `image[]`。
 - 支持最多三张独立参考图，并将像素输出配置转换为 xAI 的 `aspect_ratio` 与 `1k/2k`。

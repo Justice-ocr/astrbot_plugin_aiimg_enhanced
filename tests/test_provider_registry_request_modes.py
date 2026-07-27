@@ -131,6 +131,57 @@ def _load_module():
 
 
 class ProviderRegistryRequestModeTests(unittest.TestCase):
+    def test_grok_images_edit_template_builds_images_backend(self):
+        mod = _load_module()
+        registry = mod.ProviderRegistry(
+            config={
+                "providers": [
+                    {
+                        "id": "ccode-grok-edit",
+                        "__template_key": "grok_images_edit",
+                        "base_url": "http://pro.ccode.vip/v1",
+                        "api_keys": ["test-key"],
+                        "model": "grok-imagine-image-edit",
+                    }
+                ]
+            },
+            imgr=object(),
+            data_dir=Path("/tmp"),
+        )
+
+        backend = registry.get_backend("ccode-grok-edit")
+
+        self.assertEqual(registry.validate(), [])
+        self.assertEqual(backend.kwargs["default_model"], "grok-imagine-image-edit")
+        self.assertTrue(backend.kwargs["supports_edit"])
+
+    def test_grok_edit_model_migrates_chat_template_to_images_edit(self):
+        mod = _load_module()
+        registry = mod.ProviderRegistry(
+            config={
+                "providers": [
+                    {
+                        "id": "ccode-grok-edit",
+                        "__template_key": "grok_chat",
+                        "base_url": "http://pro.ccode.vip/v1",
+                        "api_keys": ["test-key"],
+                        "model": "grok-imagine-image-edit",
+                    }
+                ]
+            },
+            imgr=object(),
+            data_dir=Path("/tmp"),
+        )
+
+        provider = registry.get("ccode-grok-edit")
+        backend = registry.get_backend("ccode-grok-edit")
+
+        self.assertEqual(provider["__template_key"], "grok_images_edit")
+        self.assertEqual(backend.kwargs["base_url"], "http://pro.ccode.vip/v1")
+        self.assertEqual(
+            backend.kwargs["default_model"], "grok-imagine-image-edit"
+        )
+
     def test_registry_keeps_legacy_generate_flag_when_new_mode_is_auto(self):
         mod = _load_module()
         registry = mod.ProviderRegistry(

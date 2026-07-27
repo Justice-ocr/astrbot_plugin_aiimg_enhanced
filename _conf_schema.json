@@ -1227,6 +1227,79 @@
           }
         }
       },
+      "grok_images_edit": {
+        "name": "Grok Images 改图",
+        "description": "适配 grok-imagine-image-edit 的 Images Edit API 模板。",
+        "hint": "CCODE 等网关填写 OpenAI 兼容 Base URL；直接请求 /images/edits，不走 Chat Completions。",
+        "items": {
+          "id": {
+            "type": "string",
+            "description": "服务商 ID（唯一）",
+            "default": "grok_images_edit"
+          },
+          "label": {
+            "type": "string",
+            "description": "显示名称（可选）",
+            "default": ""
+          },
+          "base_url": {
+            "type": "string",
+            "description": "Base URL",
+            "default": "https://api.x.ai/v1"
+          },
+          "api_keys": {
+            "type": "list",
+            "description": "API Key 池",
+            "default": [],
+            "obvious_hint": true
+          },
+          "model": {
+            "type": "string",
+            "description": "改图模型名称",
+            "default": "grok-imagine-image-edit"
+          },
+          "supports_edit": {
+            "type": "bool",
+            "description": "支持改图 (images.edit)",
+            "default": true
+          },
+          "timeout": {
+            "type": "int",
+            "description": "超时(秒)",
+            "default": 120
+          },
+          "max_retries": {
+            "type": "int",
+            "description": "最大重试次数",
+            "default": 2
+          },
+          "proxy_url": {
+            "type": "string",
+            "description": "代理地址（可选）",
+            "default": ""
+          },
+          "default_size": {
+            "type": "string",
+            "description": "默认输出尺寸（自动转换为比例和 1k/2k）",
+            "default": "2048x2048",
+            "options": [
+              "512x512",
+              "1024x1024",
+              "2048x2048",
+              "1024x576",
+              "2048x1152",
+              "576x1024",
+              "1152x2048"
+            ]
+          },
+          "extra_body": {
+            "type": "object",
+            "description": "额外请求体（高级）",
+            "items": {},
+            "default": {}
+          }
+        }
+      },
       "grok_chat": {
         "name": "Grok（Chat 出图）",
         "description": "xAI 预设的 Chat 出图模板（底层等同 OpenAI Chat 图）。",

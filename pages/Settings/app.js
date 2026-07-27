@@ -290,6 +290,10 @@ function applyConfig(cfg) {
 
   // providers：优先从 __template_key 读取类型，再用字段特征推断
   S.providers = (Array.isArray(cfg.providers)?cfg.providers:[]).map(p => {
+    const isGrokEdit = String(p.model || '').toLowerCase() === 'grok-imagine-image-edit';
+    if(isGrokEdit && ['grok_chat','openai_chat'].includes(p.__type || p.__template_key)) {
+      return { ...p, __type:'grok_images_edit', __template_key:'grok_images_edit' };
+    }
     if(p.__type) return p;
     if(p.__template_key) return { ...p, __type: p.__template_key };
     const t=inferProviderType(p);

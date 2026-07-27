@@ -280,12 +280,17 @@ class GrokProviderConfigTests(unittest.TestCase):
         self.assertNotIn("generate_request_mode", items)
         self.assertNotIn("edit_request_mode", items)
 
+        edit_items = schema["providers"]["templates"]["grok_images_edit"]["items"]
+        self.assertEqual(edit_items["model"]["default"], "grok-imagine-image-edit")
+        self.assertEqual(edit_items["default_size"]["default"], "2048x2048")
+
     def test_settings_catalog_uses_current_xai_defaults(self):
         source = (ROOT / "pages" / "Settings" / "provider_catalog.js").read_text(
             encoding="utf-8"
         )
 
         self.assertIn("model:'grok-imagine-image-quality'", source)
+        self.assertIn("model:'grok-imagine-image-edit'", source)
         self.assertIn("default_size:'2048x2048'", source)
 
 

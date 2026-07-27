@@ -1,5 +1,6 @@
 function inferProviderType(p) {
   if (!p || typeof p !== 'object') return 'openai_images';
+  if (String(p.model || '').toLowerCase() === 'grok-imagine-image-edit') return 'grok_images_edit';
   if ('poll_interval' in p || 'poll_timeout' in p) return 'gitee_async';
   if ('cookie_list' in p || 'apikey' in p) return 'jimeng';
   if ('recaptcha_base_api' in p || 'graphql_api_key' in p) return 'vertex_ai_anonymous';
@@ -31,6 +32,7 @@ const PROVIDER_TEMPLATES = {
   flow2api:               { label:'Flow2API', api_url:'', api_keys:[], model:'', timeout:120, use_proxy:false, proxy_url:'', generate_request_mode:'auto', edit_request_mode:'auto' },
   vertex_ai_anonymous:    { label:'Vertex AI 匿名', model:'gemini-3-pro-image-preview', timeout:300, max_retries:10, proxy_url:'', generate_request_mode:'auto', edit_request_mode:'auto' },
   grok_images:            { label:'Grok Images', base_url:'https://api.x.ai/v1', api_keys:[], model:'grok-imagine-image-quality', timeout:120, max_retries:2, proxy_url:'', default_size:'2048x2048', supports_edit:true },
+  grok_images_edit:       { label:'Grok Images 改图', base_url:'https://api.x.ai/v1', api_keys:[], model:'grok-imagine-image-edit', timeout:120, max_retries:2, proxy_url:'', default_size:'2048x2048', supports_edit:true },
   grok_chat:              { label:'Grok Chat图', base_url:'https://api.x.ai/v1', api_keys:[], model:'', timeout:120, proxy_url:'', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
   grok2api_images:        { label:'Grok2API Images', base_url:'', api_keys:[], model:'', timeout:120, default_size:'4096x4096', generate_request_mode:'auto', edit_request_mode:'auto' },
   gemini_openai_images:   { label:'Gemini Images', base_url:'', api_keys:[], model:'', timeout:120, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
@@ -53,6 +55,7 @@ const PROVIDER_NAMES = {
   flow2api:'Flow2API',
   vertex_ai_anonymous:'Vertex AI 匿名',
   grok_images:'Grok Images',
+  grok_images_edit:'Grok Images 改图',
   grok_chat:'Grok Chat图',
   grok2api_images:'Grok2API Images',
   gemini_openai_images:'Gemini Images',

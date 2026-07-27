@@ -220,6 +220,18 @@ class ProviderRegistry:
                 continue
             normalized = dict(item)
             template_key = self._resolve_template_key(normalized)
+            model = str(normalized.get("model") or "").strip().lower()
+            if (
+                template_key in {"grok_chat", "openai_chat"}
+                and model == "grok-imagine-image-edit"
+            ):
+                logger.info(
+                    "[ProviderRegistry] provider=%s model=%s 使用 Images API，模板从 %s 迁移为 grok_images_edit",
+                    provider_id,
+                    model,
+                    template_key,
+                )
+                template_key = "grok_images_edit"
             if template_key:
                 normalized["__template_key"] = template_key
             self._providers[provider_id] = normalized
@@ -350,6 +362,7 @@ class ProviderRegistry:
             if template_key in {
                 "openai_images",
                 "grok_images",
+                "grok_images_edit",
                 "gitee_images",
                 "gemini_openai_images",
                 "modelscope_openai_images",
@@ -496,7 +509,7 @@ class ProviderRegistry:
             }
             return GeminiFlow2ApiBackend(imgr=self._imgr, settings=settings)
 
-        if template_key == "grok_images":
+        if template_key in {"grok_images", "grok_images_edit"}:
             return GrokImagesBackend(
                 imgr=self._imgr,
                 base_url=str(conf.get("base_url") or "https://api.x.ai/v1").strip(),
