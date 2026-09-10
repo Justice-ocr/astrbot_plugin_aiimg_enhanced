@@ -21,6 +21,7 @@ import aiofiles
 import httpx
 
 from astrbot.api import logger
+from .task_manager import update_task_state
 
 from .net_safety import URLFetchPolicy, collect_trusted_origins, ensure_url_allowed, read_network_policy
 
@@ -117,6 +118,7 @@ class VideoManager:
         return u
 
     async def download_video(self, url: str, *, timeout_seconds: int = 300) -> Path:
+        update_task_state("downloading")
         if not url:
             raise ValueError("缺少视频 URL")
 

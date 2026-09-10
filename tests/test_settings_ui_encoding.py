@@ -5,6 +5,8 @@ ROOT = Path(__file__).resolve().parents[1]
 UI_FILES = [
     ROOT / "pages" / "Settings" / "index.html",
     ROOT / "pages" / "Settings" / "app.js",
+    ROOT / "pages" / "Settings" / "operations.js",
+    ROOT / "pages" / "Settings" / "persona_refs.js",
     ROOT / "pages" / "Settings" / "output_sizes.js",
     ROOT / "pages" / "Settings" / "provider_catalog.js",
     ROOT / "pages" / "Settings" / "provider_form.js",

@@ -7,6 +7,7 @@ const refDisplayName = (ref, index) =>
 
 export function createPersonaRefController({ $, bridge, previewCache, markDirty, showToast }) {
   let refs = [];
+  let roles = {};
   let uploadTask = null;
   let previewActive = 0;
   const previewQueue = [];
@@ -100,6 +101,7 @@ export function createPersonaRefController({ $, bridge, previewCache, markDirty,
     delBtn.title = '删除';
     delBtn.textContent = '删除';
     delBtn.addEventListener('click', () => {
+      delete roles[value];
       refs.splice(index, 1);
       syncTextarea();
       renderRefPreviews();
@@ -128,7 +130,22 @@ export function createPersonaRefController({ $, bridge, previewCache, markDirty,
       });
     }
 
-    wrap.append(delBtn, img, state, nameDiv);
+    const roleSelect = document.createElement('select');
+    roleSelect.className = 'sel ref-role';
+    roleSelect.setAttribute('aria-label', `参考图 ${index + 1} 角色`);
+    for (const [key, label] of Object.entries({
+      identity: '身份', clothing: '服装', pose: '姿势', scene: '场景',
+    })) {
+      const option = document.createElement('option');
+      option.value = key; option.textContent = label;
+      roleSelect.append(option);
+    }
+    roleSelect.value = roles[value] || 'identity';
+    roleSelect.addEventListener('change', () => {
+      roles[value] = roleSelect.value;
+      markDirty();
+    });
+    wrap.append(delBtn, img, state, nameDiv, roleSelect);
     return wrap;
   };
 
@@ -260,13 +277,17 @@ export function createPersonaRefController({ $, bridge, previewCache, markDirty,
 
   return {
     bind,
-    setRefs(nextRefs) {
+    setRefs(nextRefs, nextRoles = {}) {
       refs = [...(nextRefs || [])];
+      roles = { ...nextRoles };
       syncTextarea();
       renderRefPreviews();
     },
     refs() {
       return refs.filter(Boolean);
+    },
+    roles() {
+      return Object.fromEntries(refs.map(ref => [ref, roles[ref] || 'identity']));
     },
     async waitForUpload() {
       if (uploadTask) await uploadTask;

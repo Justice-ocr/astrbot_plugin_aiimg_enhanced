@@ -20,6 +20,7 @@ class PersonaProfile:
     name: str
     base_prompt: str
     ref_images: list[str] = field(default_factory=list)
+    ref_roles: dict[str, str] = field(default_factory=dict)
 
 
 class PersonaManager:
@@ -64,7 +65,15 @@ class PersonaManager:
             pid = self._normalize_id(raw.get("id", ""), name, idx, used_ids)
             base_prompt = str(raw.get("persona_base_prompt") or raw.get("base_prompt") or "").strip()
             ref_images = self._resolve_ref_images(raw.get("persona_ref_image") or raw.get("ref_images") or [])
-            profiles.append(PersonaProfile(id=pid, name=name, base_prompt=base_prompt, ref_images=ref_images))
+            roles = {}
+            raw_roles = raw.get("persona_ref_roles") or {}
+            if isinstance(raw_roles, dict):
+                for path, role in raw_roles.items():
+                    if isinstance(role, str) and role in {"identity", "clothing", "pose", "scene"}:
+                        for resolved in self._resolve_ref_images([path]):
+                            roles[resolved] = role
+            profiles.append(PersonaProfile(id=pid, name=name, base_prompt=base_prompt,
+                                           ref_images=ref_images, ref_roles=roles))
 
         if not profiles:
             profiles.append(PersonaProfile(
@@ -214,6 +223,7 @@ class PersonaManager:
                 "persona_name": p.name,
                 "persona_base_prompt": p.base_prompt,
                 "persona_ref_image": list(p.ref_images),
+                "persona_ref_roles": {ref: p.ref_roles.get(ref, "identity") for ref in p.ref_images},
             })
         return {
             "active_persona_id": self._active_id,

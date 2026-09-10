@@ -12,6 +12,7 @@ Gitee AI 图像生成插件
 
 import asyncio
 import base64
+import copy
 import io
 import json
 import math
@@ -66,6 +67,9 @@ from .core.gitee_sizes import (
 )
 from .core.image_format import decode_base64_image_payload, guess_image_mime_and_ext
 from .core.image_manager import ImageManager
+from .core.image_history import ImageHistory
+from .core.session_personas import SessionPersonas
+from .core.task_manager import TaskManager, managed_task, STATUS_LABELS
 from .core.nanobanana import NanoBananaService
 from .core.persona_manager import PersonaManager, PersonaProfile
 from .core.provider_registry import ProviderRegistry
@@ -148,6 +152,9 @@ class GiteeAIImagePlugin(
         self.data_dir = StarTools.get_data_dir("astrbot_plugin_aiimg_enhanced")
         self._last_image_by_user: dict[str, Path] = {}
         self._last_image_task_meta_cache: dict[str, dict[str, Any]] = {}
+        self.image_history = ImageHistory(Path(self.data_dir))
+        self.session_personas = SessionPersonas(self.data_dir)
+        self.tasks = TaskManager()
         # 持久化：AstrBot原生config对象（可能有save_config方法）
         self._native_config = config if hasattr(config, "save_config") else None
         # 持久化：自管理的JSON文件路径（兜底）
@@ -340,6 +347,7 @@ class GiteeAIImagePlugin(
             "continue_with": str(meta.get("continue_with") or mode).strip() or mode,
             "follow_up": bool(meta.get("follow_up", False)),
             "backend": str(meta.get("backend") or "").strip(),
+            "persona_id": str(meta.get("persona_id") or "").strip(),
             "created_at": created_at,
         }
         return normalized
@@ -439,6 +447,9 @@ class GiteeAIImagePlugin(
         if last_meta is None:
             return None
         if str(last_meta.get("continue_with") or "") != "selfie_ref":
+            return None
+        persona = await self._get_event_persona(event, snapshot=True)
+        if last_meta.get("persona_id") and last_meta["persona_id"] != persona.id:
             return None
 
         created_at = float(last_meta.get("created_at") or 0)
@@ -684,6 +695,96 @@ class GiteeAIImagePlugin(
             return
         self._last_image_by_user[user_id] = Path(image_path)
 
+    async def _history_scope(self, event: AstrMessageEvent) -> str:
+        pinned = getattr(event, "_aiimg_history_scope", None)
+        if pinned:
+            return pinned
+        origin = str(getattr(event, "unified_msg_origin", "") or "")
+        sender = str(event.get_sender_id() or "")
+        if not origin or not sender:
+            raise ValueError("无法确认当前会话，不能访问图片历史。")
+        conversation = await self._resolve_plugin_conversation(event)
+        cid = str(getattr(conversation, "cid", "") or "")
+        scope = json.dumps(
+            [origin, self._get_event_self_id(event), sender, cid],
+            ensure_ascii=False,
+        )
+        event._aiimg_history_scope = scope
+        event._aiimg_history_conversation_title = str(getattr(conversation, "title", "") or "")
+        return scope
+
+    async def _persona_scope(self, event: AstrMessageEvent) -> str:
+        origin, bot, _sender, cid = json.loads(await self._history_scope(event))
+        return json.dumps([origin, bot, cid], ensure_ascii=False)
+
+    async def _get_event_persona(self, event: AstrMessageEvent, *, snapshot=False) -> PersonaProfile:
+        pinned = getattr(event, "_aiimg_persona", None)
+        if pinned is not None:
+            return pinned
+        selected = await self.session_personas.get(await self._persona_scope(event))
+        persona = self.persona_mgr.get_persona(selected) if selected else None
+        persona = persona or self.persona_mgr.active
+        if snapshot:
+            persona = copy.deepcopy(persona)
+            event._aiimg_persona = persona
+        return persona
+
+    async def _capture_history_scope(self, event: AstrMessageEvent) -> None:
+        try:
+            await self._history_scope(event)
+        except Exception as exc:
+            logger.warning("[history] 无法确认生成会话: %s", exc)
+
+    async def _record_image_history(
+        self, event: AstrMessageEvent, path: Path, metadata: dict | None = None
+    ) -> None:
+        try:
+            scope = await self._history_scope(event)
+            resolved = Path(path).resolve()
+            if not any(resolved.is_relative_to((Path(self.data_dir) / directory).resolve())
+                       for directory in ("images", "history_images")):
+                raise ValueError("Only generated images can be recorded")
+            meta = dict(metadata or {})
+            meta.setdefault("user_prompt", str(getattr(event, "message_str", "") or "")[:2000])
+            meta.setdefault("conversation_title", getattr(event, "_aiimg_history_conversation_title", ""))
+            await self.image_history.add(scope, resolved, meta)
+            seen = getattr(event, "_aiimg_recorded_paths", set())
+            if str(resolved) not in seen:
+                self.tasks.update(generated=1)
+                seen.add(str(resolved))
+                event._aiimg_recorded_paths = seen
+        except Exception as exc:
+            logger.warning("[history] 无法记录图片历史: %s", exc)
+
+    async def _get_history_image(
+        self, event: AstrMessageEvent, selector: str = ""
+    ) -> dict:
+        raw = str(selector or "").strip()
+        text = raw.removeprefix("#")
+        if raw and (not text.isascii() or not text.isdigit() or len(text) > 18):
+            raise ValueError("图片编号必须是正整数，例如 #12。")
+        image_id = int(text) if text else None
+        if image_id is not None and image_id < 1:
+            raise ValueError("图片编号必须是正整数。")
+        row = await self.image_history.get(await self._history_scope(event), image_id)
+        if row is None:
+            raise ValueError("当前会话没有这张图片，请用 /图片历史 查看编号。")
+        path = Path(row["path"]).resolve()
+        # Only generated cache images can be replayed, never arbitrary stored paths.
+        try:
+            path.relative_to((Path(self.data_dir) / "history_images").resolve())
+        except ValueError:
+            raise ValueError("历史图片路径无效。") from None
+        if not path.is_file():
+            raise ValueError(f"图片 #{row['id']} 的缓存已过期，请重新生成或上传原图。")
+        return row
+
+    @staticmethod
+    def _mentions_previous_image(prompt: str) -> bool:
+        return any(word in prompt.lower() for word in (
+            "刚才那张", "上一张", "上张图", "刚生成的图", "previous image", "last image",
+        ))
+
     @staticmethod
     def _as_int(value: Any, *, default: int) -> int:
         try:
@@ -806,6 +907,7 @@ class GiteeAIImagePlugin(
             if cur >= limit:
                 return False
             store[user_id] = cur + 1
+            self.tasks.update("generating")
             return True
 
     async def _end_user_job(self, user_id: str, *, kind: str) -> None:
@@ -996,7 +1098,13 @@ class GiteeAIImagePlugin(
         except Exception:
             pass
 
-    async def _send_image_with_fallback(
+    async def _send_image_with_fallback(self, event, image_path, **kwargs):
+        self.tasks.update("sending")
+        result = await self._send_image_impl(event, image_path, **kwargs)
+        self.tasks.update(sent=int(bool(result)), failed=int(not result))
+        return result
+
+    async def _send_image_impl(
         self,
         event: AstrMessageEvent,
         image_path: Path,
@@ -1025,6 +1133,8 @@ class GiteeAIImagePlugin(
         if not p.exists():
             logger.warning("[send_image] file not found: %s", p)
             return SendImageResult(ok=False, reason="file_not_found", cached_path=p)
+
+        await self._record_image_history(event, p)
 
         try:
             size_bytes = int(p.stat().st_size)
@@ -1339,6 +1449,7 @@ class GiteeAIImagePlugin(
         return target_backend, mode
 
     @filter.llm_tool(name="aiimg_generate")
+    @managed_task()
     async def aiimg_generate(
         self,
         event: AstrMessageEvent,
@@ -1346,6 +1457,7 @@ class GiteeAIImagePlugin(
         mode: str = "auto",
         backend: str = "auto",
         output: str = "",
+        history_id: str = "",
     ):
         """根据用户意图生成或编辑图片。
 
@@ -1384,6 +1496,7 @@ class GiteeAIImagePlugin(
             mode(string): 可选值 selfie_ref edit text auto
             backend(string): 服务商ID，不指定填 auto
             output(string): 输出尺寸如 1024x1024，不填用默认
+            history_id(string): 继续编辑历史图片的固定编号，如 12；须来自图片历史，不能猜测。当前消息有图片时优先使用消息图片。
         """
         prompt = (prompt or "").strip()
         m = (mode or "auto").strip().lower()
@@ -1416,20 +1529,32 @@ class GiteeAIImagePlugin(
                 "An image request for this user is already in progress. Do not resubmit unless the user asks for a new request."
             )
 
-        # 解析 backend：@前缀 → LLM分类 → auto
-        provider_from_prompt, prompt = self._parse_provider_override_prefix(prompt)
-        if provider_from_prompt and (not backend or backend.lower() == "auto"):
-            backend = provider_from_prompt
-        target_backend, m = await self._resolve_aiimg_backend_and_mode(
-            prompt, backend, m, event
-        )
-
-        output = self._normalize_llm_tool_output(output, event=event, prompt=prompt)
-        size = output if output and "x" in output else None
-        resolution = output if output and size is None else None
-
         try:
+            # Classification must release admission when the task is cancelled.
+            provider_from_prompt, prompt = self._parse_provider_override_prefix(prompt)
+            if provider_from_prompt and (not backend or backend.lower() == "auto"):
+                backend = provider_from_prompt
+            target_backend, m = await self._resolve_aiimg_backend_and_mode(
+                prompt, backend, m, event
+            )
+            output = self._normalize_llm_tool_output(output, event=event, prompt=prompt)
+            size = output if output and "x" in output else None
+            resolution = output if output and size is None else None
             await mark_processing(event)
+
+            await self._capture_history_scope(event)
+            history_row = None
+            has_current_images = await self._has_message_images(event)
+            if not has_current_images and (
+                history_id or (
+                    m in {"auto", "edit"} and self._mentions_previous_image(prompt)
+                    and not self._is_auto_selfie_prompt(prompt)
+                )
+            ):
+                history_row = await self._get_history_image(event, history_id)
+                if not history_id and time.time() - history_row["created_at"] > 1800:
+                    raise ValueError("上一张图片已超过 30 分钟，请明确指定历史编号或引用图片。")
+                m = "edit"
 
             if m in {"selfie_ref", "selfie", "ref"}:
                 logger.info("[aiimg_generate] route=selfie_ref (explicit)")
@@ -1547,6 +1672,8 @@ class GiteeAIImagePlugin(
                         include_sender_avatar_fallback=False,
                     )
                 bytes_images = await self._image_segs_to_bytes(image_segs)
+                if not image_segs and history_row is not None:
+                    bytes_images = [await asyncio.to_thread(Path(history_row["path"]).read_bytes)]
                 if not bytes_images:
                     await self._signal_llm_tool_failure(event)
                     return self._llm_tool_text_result(
@@ -1581,6 +1708,8 @@ class GiteeAIImagePlugin(
                     continue_with="edit",
                     backend=target_backend,
                 )
+                if history_row is not None:
+                    task_meta["parent_image_id"] = history_row["id"]
                 return await self._finalize_llm_tool_image(
                     event, image_path, task_meta=task_meta,
                     elapsed=time.perf_counter() - _t_start,
@@ -1631,6 +1760,7 @@ class GiteeAIImagePlugin(
             await self._end_user_job(user_id, kind="image")
 
     @filter.llm_tool(name="aiimg_batch_generate")
+    @managed_task("batch")
     async def aiimg_batch_generate(
         self,
         event: AstrMessageEvent,
@@ -1847,6 +1977,7 @@ class GiteeAIImagePlugin(
         event.should_call_llm(True)
 
     @filter.command("文生图")
+    @managed_task()
     async def generate_image_with_presets(self, event: AstrMessageEvent):
         """支持文生图预设的图片生成命令。"""
         parsed = self._parse_structured_image_request(event.message_str)
@@ -1883,6 +2014,7 @@ class GiteeAIImagePlugin(
             _t0 = time.perf_counter()
             executed = await self._execute_image_task_spec(event, spec)
             self._remember_last_image(event, executed.image_path)
+            await self._record_image_history(event, executed.image_path, executed.task_meta)
             sent = await self._send_image_with_fallback(event, executed.image_path, elapsed=time.perf_counter() - _t0, provider_tries=executed.task_meta.get("provider_tries"))
             if not sent:
                 await self._fail_cmd(event)
@@ -1902,6 +2034,7 @@ class GiteeAIImagePlugin(
             event.should_call_llm(True)
 
     @filter.command("aiimg", alias={"生图", "画图", "绘图", "出图"})
+    @managed_task()
     async def generate_image_command(self, event: AstrMessageEvent, prompt: str):
         """生成图片指令
 
@@ -1955,12 +2088,17 @@ class GiteeAIImagePlugin(
                 return_exceptions=True,
             )
             t_start = time.perf_counter()
+            await self._capture_history_scope(event)
             image_path, _prov_tries = await self.draw.generate(
                 prompt, size=size, provider_id=provider_override
             )
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
+            await self._record_image_history(event, image_path, {
+                "mode": "text", "user_prompt": prompt, "size": size,
+                "provider_tries": _prov_tries,
+            })
             sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start, provider_tries=_prov_tries)
             if not sent:
                 await mark_failed(event)
@@ -1989,6 +2127,7 @@ class GiteeAIImagePlugin(
             event.should_call_llm(True)
 
     @filter.regex(r"[/!！.。．]批量(?:\s*\d+|\d+)(?:\s|$)", priority=-10)
+    @managed_task("batch")
     async def batch_image_command(self, event: AstrMessageEvent):
         """批量图片任务入口。"""
         fragment = self._extract_batch_command_fragment(event.message_str)
@@ -2270,6 +2409,7 @@ class GiteeAIImagePlugin(
 
     # ==================== LLM 工具 ====================
 
+    @managed_task()
     async def _do_edit_direct(
         self,
         event: AstrMessageEvent,
@@ -2281,6 +2421,7 @@ class GiteeAIImagePlugin(
 
         使用 event.send() 直接发送消息，不使用 yield
         """
+        await self._capture_history_scope(event)
         user_id = str(event.get_sender_id() or "")
         request_id = self._debounce_key(event, "edit", user_id)
 
@@ -2375,12 +2516,14 @@ class GiteeAIImagePlugin(
             event.stop_event()
             event.should_call_llm(True)
 
+    @managed_task()
     async def _do_edit(
         self,
         event: AstrMessageEvent,
         prompt: str,
         backend: str | None = None,
         preset: str | None = None,
+        history_selector: str | None = None,
     ):
         """统一改图执行入口
 
@@ -2389,6 +2532,7 @@ class GiteeAIImagePlugin(
         2. 否则检查 prompt 是否匹配预设名，若匹配则自动转为预设
         3. 都不匹配则作为普通提示词处理
         """
+        await self._capture_history_scope(event)
         user_id = str(event.get_sender_id() or "")
         request_id = self._debounce_key(event, "edit", user_id)
 
@@ -2419,7 +2563,15 @@ class GiteeAIImagePlugin(
             include_avatar=True,
             include_sender_avatar_fallback=False,
         )
-        if not image_segs:
+        history_row = None
+        if not image_segs and history_selector is not None:
+            try:
+                history_row = await self._get_history_image(event, history_selector)
+            except (ValueError, OSError) as exc:
+                await event.send(event.plain_result(str(exc)))
+                event.stop_event()
+                return
+        if not image_segs and history_row is None:
             await event.send(event.plain_result(
                 "🖼️ 改图需要提供一张图片。\n请同时发送图片 + 指令，或引用一条含图片的消息。\n例如：发送图片，并在同一条消息里写 /改图 <提示词>"
             ))
@@ -2427,6 +2579,13 @@ class GiteeAIImagePlugin(
             return
 
         bytes_images = await self._image_segs_to_bytes(image_segs)
+        if history_row is not None:
+            try:
+                bytes_images = [await asyncio.to_thread(Path(history_row["path"]).read_bytes)]
+            except OSError:
+                await event.send(event.plain_result("历史图片已不可用，请重新上传原图。"))
+                event.stop_event()
+                return
 
         if not bytes_images:
             await event.send(event.plain_result("⚠️ 图片读取失败，请重新发送。"))
@@ -2457,6 +2616,12 @@ class GiteeAIImagePlugin(
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
+            await self._record_image_history(event, image_path, {
+                "mode": "edit", "user_prompt": prompt,
+                "preset": preset,
+                "parent_image_id": history_row["id"] if history_row else None,
+                "provider_tries": _prov_tries,
+            })
             sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start, provider_tries=_prov_tries)
             if not sent:
                 await mark_failed(event)
@@ -2619,6 +2784,7 @@ class GiteeAIImagePlugin(
 
     # ==================== 视频生成 ====================
 
+    @managed_task()
     async def _do_selfie(
         self,
         event: AstrMessageEvent,
@@ -2649,7 +2815,7 @@ class GiteeAIImagePlugin(
 
         try:
             # 发送等待提示文案，同时贴"处理中"表情（两者并行）
-            pending_text = self._pending_msg_selfie(prompt)
+            pending_text = self._pending_msg_selfie(prompt, persona=await self._get_event_persona(event))
             await asyncio.gather(
                 event.send(event.plain_result(pending_text)),
                 mark_processing(event),
@@ -2661,6 +2827,7 @@ class GiteeAIImagePlugin(
                 event, prompt, backend
             )
             self._remember_last_image(event, image_path)
+            await self._record_image_history(event, image_path, task_meta)
             sent = await self._send_image_with_fallback(event, image_path, elapsed=time.perf_counter() - _t0, provider_tries=task_meta.get("provider_tries"))
             if not sent:
                 await mark_failed(event)
@@ -2782,6 +2949,7 @@ class GiteeAIImagePlugin(
                 video_path = await self.videomgr.download_video(
                     url, timeout_seconds=download_timeout
                 )
+                self.tasks.update("sending")
                 await asyncio.wait_for(
                     event.send(
                         event.chain_result([Video.fromFileSystem(str(video_path))])
@@ -2973,6 +3141,7 @@ class GiteeAIImagePlugin(
 
     # ==================== 管理命令 ====================
 
+    @managed_task("video")
     async def _async_generate_video(
         self,
         event: AstrMessageEvent,
@@ -3026,6 +3195,7 @@ class GiteeAIImagePlugin(
             used_pid: str | None = None
             for pid in candidates:
                 try:
+                    self.tasks.update("generating")
                     backend = self.registry.get_video_backend(pid)
                     candidate_url = await backend.generate_video_url(
                         prompt=prompt, image_bytes=image_bytes
@@ -3043,7 +3213,9 @@ class GiteeAIImagePlugin(
             if not video_url:
                 raise RuntimeError(f"视频生成失败: {last_error}") from last_error
 
+            self.tasks.update("sending", generated=1)
             await self._send_video_result(event, video_url)
+            self.tasks.update(sent=1)
             await mark_success(event)
             if llm_tool_failure:
                 await self._append_plugin_conversation_note(
@@ -3078,23 +3250,58 @@ class GiteeAIImagePlugin(
 
     @filter.command("重发图片")
     async def resend_last_image(self, event: AstrMessageEvent):
-        """重发最近一次生成/改图的图片（不重新生成，不消耗次数）。"""
-        user_id = str(event.get_sender_id() or "")
-        p = self._last_image_by_user.get(user_id)
-        if not p:
-            await self._fail_cmd(event)
+        """重发图片 [编号]，不重新生成。省略编号使用当前会话最新结果。"""
+        try:
+            selector = self._extract_extra_prompt(event, "重发图片").strip()
+            row = await self._get_history_image(event, selector)
+            ok = await self._send_image_with_fallback(event, Path(row["path"]))
+            await (mark_success(event) if ok else mark_failed(event))
+        except (ValueError, OSError) as exc:
+            await event.send(event.plain_result(str(exc)))
+        finally:
+            event.stop_event()
+            event.should_call_llm(False)
+
+    @filter.command("图片历史")
+    async def image_history_command(self, event: AstrMessageEvent):
+        """查看当前用户在当前会话最近十张生成结果的固定编号。"""
+        try:
+            rows = await self.image_history.list(await self._history_scope(event))
+            lines = ["图片历史（当前会话）"]
+            for row in rows:
+                prompt = " ".join(str(row["metadata"].get("user_prompt", "")).split())[:70]
+                state = "" if Path(row["path"]).is_file() else " [已过期]"
+                lines.append(f"#{row['id']}{state} {prompt}")
+            if not rows:
+                lines.append("暂无记录。")
+            else:
+                lines.append("/重发图片 #编号 或 /继续改图 #编号 修改要求")
+            await event.send(event.plain_result("\n".join(lines)))
+        except (ValueError, OSError) as exc:
+            await event.send(event.plain_result(str(exc)))
+        finally:
+            event.stop_event()
+            event.should_call_llm(False)
+
+    @filter.command("继续改图")
+    async def continue_image_command(self, event: AstrMessageEvent):
+        """继续改图 [#编号] 修改要求；省略编号使用最新结果，消息图片优先。"""
+        arg = self._extract_extra_prompt(event, "继续改图").strip()
+        selector = ""
+        if arg.startswith("#"):
+            parts = arg.split(maxsplit=1)
+            selector = parts[0]
+            arg = parts[1] if len(parts) > 1 else ""
+        if not arg:
+            await event.send(event.plain_result("用法：/继续改图 [#编号] 修改要求"))
+            event.stop_event()
+            event.should_call_llm(False)
             return
-        if not Path(p).exists():
-            await self._fail_cmd(event)
-            return
-        _t0 = time.perf_counter()
-        ok = await self._send_image_with_fallback(event, p, elapsed=time.perf_counter() - _t0)
-        if ok:
-            await mark_success(event)
-        else:
-            await mark_failed(event)
-        event.stop_event()
-        event.should_call_llm(True)
+        try:
+            await self._do_edit(event, arg, history_selector=selector)
+        finally:
+            event.stop_event()
+            event.should_call_llm(False)
 
     @filter.command("服务商")
     async def provider_list_command(self, event: AstrMessageEvent):
@@ -3224,12 +3431,41 @@ class GiteeAIImagePlugin(
     @filter.command("人设")
     async def persona_list_command(self, event: AstrMessageEvent):
         """查看所有人设列表及当前激活人设。用法: /人设"""
-        msg = "🎭 可用人设：\n"
+        active = await self._get_event_persona(event)
+        msg = f"当前会话人设：{active.name}\n"
         for index, p in enumerate(self.persona_mgr.all_personas, start=1):
-            marker = "👉" if p.id == self.persona_mgr.active.id else "  "
+            marker = "👉" if p.id == active.id else "  "
             msg += f"{marker} [{index}] {p.name} ({p.id}) · 参考图 {len(p.ref_images)} 张\n"
         msg += "\n使用 /切换人设 [序号/ID/名称] 切换自拍人格与对应参考图组。"
         yield event.plain_result(msg)
+
+    @filter.command("任务列表")
+    async def task_list_command(self, event: AstrMessageEvent):
+        scope = await self._history_scope(event)
+        items = self.tasks.list(scope)[:10]
+        lines = ["当前用户会话任务"]
+        for item in items:
+            lines.append(
+                f"{item['id']} · {STATUS_LABELS[item['state']]} · "
+                f"已生成 {item['generated']} / 已发送 {item['sent']} · {item['prompt'][:60]}"
+            )
+        if not items:
+            lines.append("暂无任务记录。")
+        await event.send(event.plain_result("\n".join(lines)))
+        event.stop_event()
+        event.should_call_llm(False)
+
+    @filter.command("取消任务")
+    async def cancel_task_command(self, event: AstrMessageEvent):
+        task_id = self._extract_extra_prompt(event, "取消任务").strip()
+        try:
+            self.tasks.cancel(task_id, scope=await self._history_scope(event))
+            message = "已请求取消。上游可能仍会继续生成并计费。"
+        except ValueError as exc:
+            message = str(exc) + "，请先查看 /任务列表。"
+        await event.send(event.plain_result(message))
+        event.stop_event()
+        event.should_call_llm(False)
 
     @filter.command("切换人设")
     async def persona_switch_command(self, event: AstrMessageEvent):
@@ -3239,25 +3475,27 @@ class GiteeAIImagePlugin(
             yield event.plain_result("⚠️ 缺少人设。用法: /切换人设 [序号/ID/名称]\n可先发送 /人设 查看列表。")
             return
 
-        target = self.persona_mgr.switch(selector)
+        scope = await self._persona_scope(event)
+        if selector == "默认":
+            await self.session_personas.set(scope, "")
+            yield event.plain_result(f"当前会话已恢复全局默认人设「{self.persona_mgr.active.name}」。")
+            return
+        target = self.persona_mgr.find_by_name_or_id(selector)
         if not target:
             yield event.plain_result(f"⚠️ 找不到人设: {selector}\n可先发送 /人设 查看列表。")
             return
 
-        # 对齐 omnidraw：_set_active_persona → _persist_config → _safe_update_context_config
-        if isinstance(self.config, dict):
-            self.config.setdefault("persona_config", {})["active_persona_id"] = target.id
-        self._safe_update_config()
-
-        ref_count = len(self.persona_mgr.get_active_ref_paths())
+        await self.session_personas.set(scope, target.id)
+        ref_count = len(target.ref_images)
         yield event.plain_result(
-            f"✅ 已切换至人设「{target.name}」，"
+            f"当前会话已切换至人设「{target.name}」，"
             f"自拍将使用该人设的 {ref_count} 张参考图。"
         )
 
     # ==================== Bot 自拍（参考照） ====================
 
     async def terminate(self):
+        await self.tasks.close()
         self.debouncer.clear_all()
         try:
             tasks = list(getattr(self, "_video_tasks", []))
@@ -3453,6 +3691,7 @@ class GiteeAIImagePlugin(
         size: str | None = None,
         resolution: str | None = None,
     ) -> ExecutedImageTask:
+        await self._capture_history_scope(event)
         if spec.mode == "draw":
             prompt = str(spec.effective_prompt or spec.user_prompt or "").strip()
             if not prompt:
@@ -3542,6 +3781,7 @@ class GiteeAIImagePlugin(
                 size=size,
                 resolution=resolution,
             )
+            await self._record_image_history(event, result.image_path, result.task_meta)
             if stream_send:
                 completed += 1
                 try:
@@ -3553,7 +3793,9 @@ class GiteeAIImagePlugin(
                     logger.warning("[batch] 流式发送第%d张失败: %s", completed, e)
             return result
 
-        return await run_batch(specs, concurrency=concurrency, runner=_runner)
+        results = await run_batch(specs, concurrency=concurrency, runner=_runner)
+        self.tasks.update(failed=sum(not result.success for result in results))
+        return results
 
     async def _remember_batch_success(
         self,
@@ -3728,7 +3970,7 @@ class GiteeAIImagePlugin(
         tpl = str(rc.get("draw_pending_message") or "").strip()
         msg = self._format_reply(tpl, _DEFAULT_DRAW_PENDING,
                                   prompt=prompt,
-                                  persona_name=self.persona_mgr.active.name)
+                                  persona_name=self._task_persona_name())
         if self._as_bool(rc.get("verbose_report"), default=False) and prompt:
             msg += f"\n📝 提示词: {prompt[:200]}"
         return msg
@@ -3738,20 +3980,21 @@ class GiteeAIImagePlugin(
         tpl = str(rc.get("edit_pending_message") or "").strip()
         msg = self._format_reply(tpl, _DEFAULT_EDIT_PENDING,
                                   prompt=prompt,
-                                  persona_name=self.persona_mgr.active.name)
+                                  persona_name=self._task_persona_name())
         if self._as_bool(rc.get("verbose_report"), default=False) and prompt:
             msg += f"\n📝 提示词: {prompt[:200]}"
         return msg
 
-    def _pending_msg_selfie(self, prompt: str = "") -> str:
+    def _pending_msg_selfie(self, prompt: str = "", *, persona=None) -> str:
+        persona = persona or self.persona_mgr.active
         rc = self._get_reply_conf()
         tpl = str(rc.get("selfie_pending_message") or "").strip()
         msg = self._format_reply(tpl, _DEFAULT_SELFIE_PENDING,
                                   prompt=prompt,
-                                  persona_name=self.persona_mgr.active.name)
+                                  persona_name=persona.name)
         if self._as_bool(rc.get("verbose_report"), default=False):
-            ref_count = len(self.persona_mgr.get_active_ref_paths())
-            msg += f"\n👤 人设: {self.persona_mgr.active.name}  📸 参考图: {ref_count} 张"
+            ref_count = len(persona.ref_images)
+            msg += f"\n👤 人设: {persona.name}  📸 参考图: {ref_count} 张"
             if prompt:
                 msg += f"\n📝 动作提示: {prompt[:200]}"
         return msg
@@ -3767,7 +4010,7 @@ class GiteeAIImagePlugin(
         error_text = " ".join(str(error or "未知错误").split())[:300]
         return self._format_reply(tpl, _DEFAULT_DRAW_ERROR,
                                    error=error_text,
-                                   persona_name=self.persona_mgr.active.name)
+                                   persona_name=self._task_persona_name())
 
     def _error_msg_selfie(self, error: Exception | str) -> str:
         rc = self._get_reply_conf()
@@ -3775,7 +4018,11 @@ class GiteeAIImagePlugin(
         error_text = " ".join(str(error or "未知错误").split())[:300]
         return self._format_reply(tpl, _DEFAULT_SELFIE_ERROR,
                                    error=error_text,
-                                   persona_name=self.persona_mgr.active.name)
+                                   persona_name=self._task_persona_name())
+
+    def _task_persona_name(self) -> str:
+        task = self.tasks.current()
+        return task.persona if task else self.persona_mgr.active.name
 
     # ==================== Pages 可视化配置 API ====================
 
@@ -3827,6 +4074,7 @@ class GiteeAIImagePlugin(
         provider_tries: list[dict] | None = None,
     ) -> mcp.types.CallToolResult:
         self._remember_last_image(event, image_path)
+        await self._record_image_history(event, image_path, task_meta)
 
         sent = await self._send_image_with_fallback(event, image_path, elapsed=elapsed, provider_tries=provider_tries)
         if not sent:
@@ -3891,7 +4139,8 @@ class GiteeAIImagePlugin(
         """返回(路径列表, 来源)；优先级：人设参考图 > WebUI reference_images > 命令设置的 store"""
         # 1) 当前人设的参考图（最高优先级）
         # URL参考图直接保留（字符串形式），本地路径转Path；两者混合时分别处理
-        persona_ref_strs = self.persona_mgr.get_active_ref_paths()
+        persona = await self._get_event_persona(event, snapshot=True)
+        persona_ref_strs = persona.ref_images
         if persona_ref_strs:
             persona_paths: list[Path | str] = []
             for r in persona_ref_strs:
@@ -3900,7 +4149,7 @@ class GiteeAIImagePlugin(
                 elif Path(r).is_file():
                     persona_paths.append(Path(r))    # 本地路径转Path
             if persona_paths:
-                return persona_paths, f"persona:{self.persona_mgr.active.name}"
+                return persona_paths, f"persona:{persona.name}"
 
         # 2) WebUI features.selfie.reference_images
         webui_paths = self._get_config_selfie_reference_paths()
@@ -4098,7 +4347,7 @@ class GiteeAIImagePlugin(
         )
         return True
 
-    def _build_selfie_prompt(self, prompt: str, extra_refs: int) -> str:
+    def _build_selfie_prompt(self, prompt: str, extra_refs: int, *, persona=None) -> str:
         conf = self._get_selfie_conf()
         prefix = str(conf.get("prompt_prefix", "") or "").strip()
         if not prefix:
@@ -4110,7 +4359,7 @@ class GiteeAIImagePlugin(
             )
 
         # 融合当前人设的基础描述
-        persona_base = self.persona_mgr.active.base_prompt.strip()
+        persona_base = (persona or self.persona_mgr.active).base_prompt.strip()
         if persona_base:
             prefix = f"{prefix}\n人物设定：{persona_base}"
 
@@ -4157,17 +4406,28 @@ class GiteeAIImagePlugin(
         resolution: str | None = None,
         follow_up_meta: dict[str, Any] | None = None,
     ) -> tuple[Path, dict[str, Any]]:
+        await self._capture_history_scope(event)
+        persona = await self._get_event_persona(event, snapshot=True)
         conf = self._get_selfie_conf()
         if not self._is_selfie_enabled():
             raise RuntimeError(self._selfie_disabled_message())
 
         # 1) 读取参考照（WebUI 优先，其次命令设置的 store）
         ref_paths, ref_source = await self._get_selfie_reference_paths(event)
-        ref_images = await self._read_paths_bytes(ref_paths)
+        ref_images = []
+        roles = []
+        for path in ref_paths:
+            data = await self._read_paths_bytes([path])
+            if data:
+                ref_images.extend(data)
+                roles.append(persona.ref_roles.get(str(path), "identity")
+                             if ref_source.startswith("persona:") else "identity")
         if not ref_images:
             raise RuntimeError(
                 "未设置自拍参考照。请先：发送图片 + /自拍参考 设置，或在 WebUI 配置 features.selfie.reference_images 上传。"
             )
+        if "identity" not in roles:
+            raise RuntimeError("自拍至少需要一张可读取的身份参考图，请检查参考图角色。")
 
         # 2) 读取额外参考图（衣服/姿势/场景）
         extra_segs = await get_images_from_event(event, include_avatar=False)
@@ -4180,7 +4440,19 @@ class GiteeAIImagePlugin(
             prompt, follow_up_meta
         )
         final_prompt = self._build_selfie_prompt(
-            effective_user_prompt, extra_refs=len(extra_bytes)
+            effective_user_prompt, extra_refs=len(extra_bytes), persona=persona
+        )
+        role_names = {
+            "identity": "身份：只保持人物身份与五官，不复制衣服和背景",
+            "clothing": "服装：只参考穿搭，不改变人物身份",
+            "pose": "姿势：只参考动作和构图，不改变人物身份",
+            "scene": "场景：只参考环境与光线，不改变人物身份",
+            "context": "用户补充素材：按用户要求参考，不替换身份",
+        }
+        # Labels follow successfully loaded bytes, never stale input positions.
+        final_prompt += "\n\n参考图职责（优先于上文的图片顺序说明）：\n" + "\n".join(
+            f"第{index}张：{role_names[role]}"
+            for index, role in enumerate([*roles, *(["context"] * len(extra_bytes))], 1)
         )
 
         chain_override: list[dict] | None = None
@@ -4249,6 +4521,8 @@ class GiteeAIImagePlugin(
             backend=backend,
         )
         task_meta["provider_tries"] = _prov_tries
+        task_meta["persona_id"] = persona.id
+        task_meta["reference_roles"] = roles
         return image_path, task_meta
 
     async def _generate_selfie_image(

@@ -8,6 +8,7 @@ from astrbot.api import logger
 from .output_spec import parse_output
 from .provider_chain import as_dict, as_list, candidates_from_chain
 from .provider_registry import ProviderRegistry
+from .task_manager import update_task_state
 
 
 class ImageDrawService:
@@ -101,6 +102,7 @@ class ImageDrawService:
 
             t0 = time.perf_counter()
             try:
+                update_task_state("generating")
                 gen = getattr(backend, "generate", None)
                 if not callable(gen):
                     raise RuntimeError("Provider does not support generate()")

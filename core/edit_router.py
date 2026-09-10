@@ -11,6 +11,7 @@ from .gitee_edit import GiteeEditBackend
 from .output_spec import parse_output
 from .provider_chain import as_dict, as_list, candidates_from_chain
 from .provider_registry import ProviderRegistry
+from .task_manager import update_task_state
 
 
 class EditRouter:
@@ -198,6 +199,7 @@ class EditRouter:
 
             for attempt in range(max_attempts):
                 try:
+                    update_task_state("generating")
                     logger.info(
                         "[edit] Provider=%s attempt=%s/%s",
                         pid,

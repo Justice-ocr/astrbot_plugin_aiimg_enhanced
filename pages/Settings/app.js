@@ -1,5 +1,7 @@
 import { loadOutputSizeData, normalizeOutputSize, sizeOptionsHtml } from './output_sizes.js';
 import { createPersonaRefController } from './persona_refs.js';
+import { createHistoryController } from './history.js';
+import { createOperationsController } from './operations.js';
 import {
   inferProviderType,
   PROVIDER_NAMES,
@@ -81,6 +83,8 @@ const personaRefs = createPersonaRefController({
   markDirty,
   showToast,
 });
+const historyPage = createHistoryController({ $, bridge, showToast });
+const operations = createOperationsController({ $, bridge, showToast });
 
 function showToast(msg, type='ok') {
   const el=$('toast'); el.textContent=msg; el.className=`toast ${type}`; el.style.display='block';
@@ -110,6 +114,8 @@ function initTabs() {
       btn.classList.add('active');
       const t=document.getElementById(btn.dataset.tab);
       if(t){ t.classList.add('active'); $('topbar-title').textContent=btn.textContent.replace(/^[^ ]+ /,''); }
+      if (btn.dataset.tab === 'tab-history') historyPage.load();
+      operations.activate(btn.dataset.tab);
     });
   });
 }
@@ -486,9 +492,9 @@ function renderPersonas() {
         <div class="pname">${esc(p.persona_name||p.id)}</div>
         <div class="pmeta">ID: ${esc(p.id)} · 参考图 ${refs.length} 张${p.persona_base_prompt?' · '+esc(p.persona_base_prompt.slice(0,40))+(p.persona_base_prompt.length>40?'…':''):''}</div>
       </div>
-      ${isActive?'<span class="persona-badge">当前启用</span>':''}
+      ${isActive?'<span class="persona-badge">全局默认</span>':''}
       <div class="persona-actions">
-        ${!isActive?`<button class="btn-ghost btn-sm" data-act="activate" data-idx="${idx}">启用</button>`:''}
+        ${!isActive?`<button class="btn-ghost btn-sm" data-act="activate" data-idx="${idx}">设为默认</button>`:''}
         <button class="btn-ghost btn-sm" data-act="edit" data-idx="${idx}">编辑</button>
         <button class="btn-danger" data-act="del" data-idx="${idx}">删除</button>
       </div>`;
@@ -532,7 +538,7 @@ function openPersonaModal(idx){
   const p=isNew?{id:'',persona_name:'',persona_base_prompt:'',persona_ref_image:[]}:S.persona_config.profiles[idx];
   $('modal-id').value=p.id||''; $('modal-name').value=p.persona_name||'';
   $('modal-prompt').value=p.persona_base_prompt||'';
-  personaRefs.setRefs(p.persona_ref_image || []);
+  personaRefs.setRefs(p.persona_ref_image || [], p.persona_ref_roles || {});
   $('persona-modal').style.display='flex'; $('modal-name').focus();
 }
 
@@ -548,7 +554,7 @@ async function savePersonaModal(){
   const persona_base_prompt=$('modal-prompt').value.trim();
   // 旧配置可能仍含 data URL；后端会在保存时转存为本地文件。
   const persona_ref_image = personaRefs.refs();
-  const obj={id,persona_name,persona_base_prompt,persona_ref_image};
+  const obj={id,persona_name,persona_base_prompt,persona_ref_image,persona_ref_roles:personaRefs.roles()};
   if(_personaIdx<0){
     S.persona_config.profiles.push(obj);
     if(!S.persona_config.active_persona_id)S.persona_config.active_persona_id=id;
@@ -588,6 +594,7 @@ async function init(){
   initOutputSizeSelects();
   initTabs();
   document.querySelectorAll('input:not([type=checkbox]):not([type=hidden]),textarea,select').forEach(el=>{
+    if (el.closest('#tab-history, #tab-tasks, #session-personas')) return;
     el.addEventListener('input',markDirty); el.addEventListener('change',markDirty);
   });
   document.querySelectorAll('input[type=checkbox].toggle').forEach(el=>el.addEventListener('change',markDirty));
@@ -615,6 +622,8 @@ async function init(){
   $('btn-modal-cancel').addEventListener('click',()=>$('persona-modal').style.display='none');
   $('btn-modal-ok').addEventListener('click',savePersonaModal);
   personaRefs.bind();
+  historyPage.bind();
+  operations.bind();
   const addPreset=(arr,key,cid)=>{arr.push({name:'',prompt:''});renderPresets(cid,arr,key);updateStats();markDirty();};
   $('btn-add-draw-preset').addEventListener('click',()=>addPreset(S.draw_presets,'draw','draw-presets-list'));
   $('btn-add-edit-preset').addEventListener('click',()=>addPreset(S.edit_presets,'edit','edit-presets-list'));

@@ -1,12 +1,14 @@
 """Auto-split from main.py — mixin class, do not use standalone."""
 from __future__ import annotations
 import inspect
+import json
 import pathlib
 from quart import jsonify, request
 from astrbot.api import logger
 from ..core.persona_manager import PersonaManager
 from ..core.pages_config_service import PagesConfigService
 from ..core.persona_ref_service import PersonaRefService
+from ..core.history_page_service import HistoryPageService
 
 class PagesAPIMixin:
     _REF_IMAGE_MAX_BYTES = 20 * 1024 * 1024
@@ -25,6 +27,12 @@ class PagesAPIMixin:
 
         _pid = "astrbot_plugin_aiimg_enhanced"
         routes = [
+            ("get_tasks", self._pages_get_tasks, ["GET"], "任务列表"),
+            ("cancel_task", self._pages_cancel_task, ["POST"], "取消生成任务"),
+            ("get_session_personas", self._pages_get_session_personas, ["GET"], "会话人设"),
+            ("set_session_persona", self._pages_set_session_persona, ["POST"], "设置会话人设"),
+            ("get_history", self._pages_get_history, ["GET"], "获取生成历史（管理页面）"),
+            ("get_history_image", self._pages_get_history_image, ["GET"], "获取历史图片预览或原图"),
             ("get_config", self._pages_get_config, ["GET"], "获取 AI绘图站 插件配置"),
             ("save_config", self._pages_save_config, ["POST"], "保存 AI绘图站 插件配置"),
             ("get_persona", self._pages_get_persona, ["GET"], "获取人设信息"),
@@ -46,6 +54,97 @@ class PagesAPIMixin:
         ]
         for name, handler, methods, desc in routes:
             register_web_api(f"/{_pid}/{name}", handler, methods, desc)
+
+    async def _pages_get_tasks(self):
+        items = []
+        for task in self.tasks.list():
+            origin, bot, sender, cid = json.loads(task.pop("scope"))
+            task.update(origin=origin, bot=bot, sender=sender, conversation=cid)
+            items.append(task)
+        return jsonify({"success": True, "items": items})
+
+    async def _pages_cancel_task(self):
+        data = await request.get_json() or {}
+        try:
+            self.tasks.cancel(str(data.get("id") or ""))
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": True})
+
+    async def _pages_get_session_personas(self):
+        selections = await self.session_personas.list()
+        sessions = {scope: {} for scope in selections}
+        for task in self.tasks.list():
+            origin, bot, _sender, cid = json.loads(task["scope"])
+            sessions.setdefault(json.dumps([origin, bot, cid], ensure_ascii=False), {})
+        for item in (await self.image_history.browse(page_size=100))["items"]:
+            origin, bot, _sender, cid = json.loads(item["scope"])
+            scope = json.dumps([origin, bot, cid], ensure_ascii=False)
+            sessions.setdefault(scope, {})
+            if not sessions[scope]:
+                sessions[scope] = {"title": item["metadata"].get("conversation_title", "")}
+        items = []
+        for scope, details in sessions.items():
+            origin, bot, cid = json.loads(scope)
+            selected = selections.get(scope, "")
+            target = self.persona_mgr.get_persona(selected) if selected else None
+            items.append({
+                "scope": scope, "origin": origin, "bot": bot, "conversation": cid,
+                "title": details.get("title", ""),
+                "persona_id": target.id if target else "",
+                "effective_name": (target or self.persona_mgr.active).name,
+            })
+        return jsonify({
+            "success": True, "items": items,
+            "personas": [{"id": p.id, "name": p.name} for p in self.persona_mgr.all_personas],
+        })
+
+    async def _pages_set_session_persona(self):
+        data = await request.get_json() or {}
+        try:
+            scope_parts = json.loads(str(data.get("scope") or ""))
+            if not isinstance(scope_parts, list) or len(scope_parts) != 3:
+                raise ValueError("无效会话")
+            if not all(isinstance(value, str) for value in scope_parts) or not scope_parts[0]:
+                raise ValueError("无效会话")
+            persona_id = str(data.get("persona_id") or "")
+            if persona_id and self.persona_mgr.get_persona(persona_id) is None:
+                raise ValueError("人设不存在，请先保存人设")
+            await self.session_personas.set(json.dumps(scope_parts, ensure_ascii=False), persona_id)
+            return jsonify({"success": True})
+        except (ValueError, TypeError) as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+
+    async def _pages_get_history(self):
+        try:
+            page = max(1, int(request.args.get("page", "1")))
+            query = str(request.args.get("query", "")).strip()
+            result = await HistoryPageService(self.image_history, self.data_dir).browse(
+                page=page, query=query,
+            )
+            return jsonify({"success": True, **result})
+        except (ValueError, TypeError):
+            return jsonify({"success": False, "error": "分页参数无效"}), 400
+        except Exception:
+            logger.error("[history] 读取历史失败", exc_info=True)
+            return jsonify({"success": False, "error": "读取历史失败，请重试"}), 500
+
+    async def _pages_get_history_image(self):
+        try:
+            image_id = int(request.args.get("id", "0"))
+            if image_id < 1 or image_id > 2**63 - 1:
+                raise ValueError("图片编号无效")
+            result = await HistoryPageService(self.image_history, self.data_dir).image(
+                image_id, original=request.args.get("original") == "1",
+            )
+            return jsonify({"success": True, **result})
+        except FileNotFoundError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 404
+        except (ValueError, TypeError) as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        except Exception:
+            logger.error("[history] 读取图片失败", exc_info=True)
+            return jsonify({"success": False, "error": "图片读取失败，请重试"}), 500
 
     async def _pages_get_config(self):
         """GET /astrbot_plugin_aiimg_enhanced/get_config"""
@@ -84,9 +183,20 @@ class PagesAPIMixin:
                     ref_service = self._persona_ref_service()
                     for profile in pc.get("profiles") or []:
                         if isinstance(profile, dict):
+                            previous_refs = profile.get("persona_ref_image") or []
                             profile["persona_ref_image"] = await ref_service.save_base64_refs(
-                                profile.get("persona_ref_image") or []
+                                previous_refs
                             )
+                            previous_roles = profile.get("persona_ref_roles") or {}
+                            if not isinstance(previous_roles, dict):
+                                previous_roles = {}
+                            profile["persona_ref_roles"] = {
+                                new: previous_roles.get(old, "identity")
+                                for old, new in zip(
+                                    [str(ref).strip() for ref in previous_refs if str(ref or "").strip()],
+                                    profile["persona_ref_image"],
+                                )
+                            }
                 self.config["persona_config"] = pc
                 self.persona_mgr = PersonaManager(self.config, self.data_dir)
 

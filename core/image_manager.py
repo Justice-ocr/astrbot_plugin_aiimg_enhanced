@@ -10,6 +10,7 @@ import aiohttp
 from astrbot.api import logger
 
 from .image_format import guess_image_mime_and_ext
+from .task_manager import update_task_state
 from .net_safety import URLFetchPolicy, collect_trusted_origins, ensure_url_allowed, read_network_policy
 
 
@@ -84,6 +85,7 @@ class ImageManager:
 
     async def download_image(self, url: str) -> Path:
         """下载远程图片并保存到本地，返回文件路径"""
+        update_task_state("downloading")
         t0 = time.time()
         session = await self._session_get()
 

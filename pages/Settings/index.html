@@ -21,6 +21,8 @@
       <button class="nav-btn active" data-tab="tab-features">⚡ 功能开关</button>
       <button class="nav-btn" data-tab="tab-providers">🔌 服务商</button>
       <button class="nav-btn" data-tab="tab-presets">⌘ 预设指令</button>
+      <button class="nav-btn" data-tab="tab-history">生成历史</button>
+      <button class="nav-btn" data-tab="tab-tasks">任务管理</button>
       <div class="nav-section">人设</div>
       <button class="nav-btn" data-tab="tab-persona">🎭 人设管理</button>
       <div class="nav-section">系统</div>
@@ -123,6 +125,30 @@
         </div>
       </section>
 
+      <section id="tab-tasks" class="tab">
+        <div class="operations-toolbar">
+          <h3>生成任务</h3>
+          <button type="button" id="tasks-refresh" class="btn-ghost" title="刷新任务" aria-label="刷新任务">↻</button>
+        </div>
+        <p id="tasks-status" role="status"></p>
+        <div id="tasks-list" class="operations-list"></div>
+      </section>
+      <section id="tab-history" class="tab">
+        <form id="history-search" class="history-toolbar" role="search">
+          <input id="history-query" class="inp" type="search" placeholder="搜索提示词" aria-label="搜索历史提示词" maxlength="200"/>
+          <button type="submit" class="btn-primary">搜索</button>
+          <button type="button" id="history-refresh" class="btn-ghost" aria-label="刷新历史" title="刷新历史">↻</button>
+          <span id="history-count" class="history-count"></span>
+        </form>
+        <div id="history-status" role="status" class="history-status"></div>
+        <div id="history-grid" class="history-grid"></div>
+        <div class="history-pagination">
+          <button type="button" id="history-prev" class="btn-ghost" aria-label="上一页" title="上一页">←</button>
+          <span id="history-page"></span>
+          <button type="button" id="history-next" class="btn-ghost" aria-label="下一页" title="下一页">→</button>
+        </div>
+      </section>
+
       <section id="tab-providers" class="tab">
         <div class="card wide">
           <div class="card-header">
@@ -188,6 +214,14 @@
       </section>
 
       <section id="tab-persona" class="tab">
+        <div id="session-personas" class="session-personas">
+          <div class="operations-toolbar">
+            <h3>会话人设</h3>
+            <button type="button" id="sessions-refresh" class="btn-ghost" title="刷新会话" aria-label="刷新会话">↻</button>
+          </div>
+          <p id="sessions-status" role="status"></p>
+          <div id="sessions-list" class="operations-list"></div>
+        </div>
         <div class="card wide">
           <div class="card-header">
             <div><div class="card-title">人设列表</div><div class="card-desc">为 /自拍 配置多套人设，每套有独立名称、外貌描述和参考图组。</div></div>
@@ -303,6 +337,26 @@
 </div>
 
 <div id="toast" class="toast" style="display:none"></div>
+<dialog id="history-detail" class="history-detail">
+  <div class="history-detail-head">
+    <h3 id="history-detail-title">图片详情</h3>
+    <button type="button" id="history-close" class="btn-ghost" aria-label="关闭详情" title="关闭详情">×</button>
+  </div>
+  <div class="history-detail-body">
+    <div class="history-detail-media"><img id="history-detail-image" alt="生成结果"/></div>
+    <div class="history-detail-info">
+      <p id="history-detail-meta"></p>
+      <h4>生成会话</h4><p id="history-detail-session"></p>
+      <h4>提示词</h4><p id="history-detail-prompt"></p>
+      <h4>实际提示词</h4><p id="history-detail-effective"></p>
+      <div class="history-detail-actions">
+        <button type="button" id="history-download" class="btn-primary">下载原图</button>
+        <button type="button" id="history-copy" class="btn-ghost">复制提示词</button>
+      </div>
+      <p id="history-detail-status" role="status"></p>
+    </div>
+  </div>
+</dialog>
 <script type="module" src="./app.js"></script>
 </body>
 </html>
