@@ -35,3 +35,14 @@ def test_provider_form_logic_is_split_into_its_own_module():
     assert "function readProviderForm(" not in app_js
     assert "export function buildProviderForm(" in provider_form_js
     assert "export function readProviderForm(" in provider_form_js
+
+
+def test_agnes_video_provider_template_is_available():
+    provider_js = PROVIDER_JS.read_text(encoding="utf-8")
+    provider_form_js = PROVIDER_FORM_JS.read_text(encoding="utf-8")
+    index_html = (ROOT / "pages" / "Settings" / "index.html").read_text(encoding="utf-8")
+
+    assert "agnes_video" in provider_js
+    assert "agnes-video-2.5-flash" in provider_js
+    assert "image_handling_method" in provider_form_js
+    assert 'value="agnes_video"' in index_html

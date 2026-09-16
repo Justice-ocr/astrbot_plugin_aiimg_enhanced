@@ -3159,16 +3159,31 @@ class GiteeAIImagePlugin(
             )
             had_image = bool(image_segs)
             image_bytes: bytes | None = None
-            for i, seg in enumerate(image_segs):
+            image_bytes_list: list[bytes] = []
+            image_urls: list[str] = []
+            for i, seg in enumerate(image_segs[:5]):
+                source_url = str(
+                    getattr(seg, "url", None) or getattr(seg, "file", None) or ""
+                ).strip()
+                if not source_url.startswith(("http://", "https://")):
+                    source_url = ""
                 try:
                     b64 = await asyncio.wait_for(seg.convert_to_base64(), timeout=30.0)
-                    image_bytes = decode_base64_image_payload(b64)
-                    break
+                    current_bytes = decode_base64_image_payload(b64)
+                    if not current_bytes:
+                        raise ValueError("图片解码结果为空")
+                    image_bytes_list.append(current_bytes)
+                    image_urls.append(source_url)
+                    if image_bytes is None:
+                        image_bytes = current_bytes
                 except Exception as e:
+                    if source_url:
+                        image_bytes_list.append(b"")
+                        image_urls.append(source_url)
                     logger.warning(f"[视频] 图片 {i + 1} 转换失败，跳过: {e}")
 
             # 允许文生视频（无图）走支持的后端；但若用户确实发了图却读不到，则直接失败
-            if had_image and not image_bytes:
+            if had_image and not image_bytes_list and not any(image_urls):
                 if llm_tool_failure:
                     await self._append_plugin_conversation_note(
                         event,
@@ -3197,9 +3212,17 @@ class GiteeAIImagePlugin(
                 try:
                     self.tasks.update("generating")
                     backend = self.registry.get_video_backend(pid)
-                    candidate_url = await backend.generate_video_url(
-                        prompt=prompt, image_bytes=image_bytes
-                    )
+                    if getattr(backend, "supports_multiple_images", False):
+                        candidate_url = await backend.generate_video_url(
+                            prompt=prompt,
+                            image_bytes=image_bytes,
+                            image_bytes_list=image_bytes_list,
+                            image_urls=image_urls,
+                        )
+                    else:
+                        candidate_url = await backend.generate_video_url(
+                            prompt=prompt, image_bytes=image_bytes
+                        )
                     candidate_url = str(candidate_url or "").strip()
                     if not candidate_url:
                         raise RuntimeError("Provider returned empty video url")
@@ -4219,7 +4242,7 @@ class GiteeAIImagePlugin(
             if not provider_id:
                 return None
 
-            video_keys = {"grok_video", "grok2api_video", "flow2api_video", "custom_video"}
+            video_keys = {"grok_video", "grok2api_video", "flow2api_video", "custom_video", "agnes_video"}
             draw_provider_ids = [
                 pid for pid in self.registry.provider_ids()
                 if self.registry.get(pid).get("__template_key", "") not in video_keys

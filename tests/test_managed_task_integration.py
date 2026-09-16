@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import tempfile
 import types
 import unittest
@@ -66,6 +67,46 @@ class ManagedTaskIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await outer
         self.assertEqual(self.plugin._video_inflight, {})
         self.assertEqual(self.plugin.tasks.list()[0]["state"], "cancelled")
+
+    async def test_agnes_video_receives_multiple_reference_images(self):
+        class ImageSegment:
+            def __init__(self, url, payload):
+                self.url = url
+                self.payload = payload
+
+            async def convert_to_base64(self):
+                return base64.b64encode(self.payload).decode("ascii")
+
+        generate = AsyncMock(return_value="https://cdn.example.com/video.mp4")
+        backend = types.SimpleNamespace(
+            supports_multiple_images=True,
+            generate_video_url=generate,
+        )
+        self.plugin.registry = types.SimpleNamespace(get_video_backend=lambda _: backend)
+        self.plugin._get_video_chain = lambda: ["agnes"]
+        self.plugin._send_video_result = AsyncMock()
+        self.mod.decode_base64_image_payload = lambda value: base64.b64decode(value)
+        self.mod.get_images_from_event = AsyncMock(
+            return_value=[
+                ImageSegment("https://cdn.example.com/one.png", b"\x89PNG\r\n\x1a\none"),
+                ImageSegment("https://cdn.example.com/two.png", b"\x89PNG\r\n\x1a\ntwo"),
+            ]
+        )
+
+        await self.plugin._async_generate_video(self.event, "animate", "alice")
+
+        kwargs = generate.await_args.kwargs
+        self.assertEqual(
+            kwargs["image_bytes_list"],
+            [b"\x89PNG\r\n\x1a\none", b"\x89PNG\r\n\x1a\ntwo"],
+        )
+        self.assertEqual(
+            kwargs["image_urls"],
+            ["https://cdn.example.com/one.png", "https://cdn.example.com/two.png"],
+        )
+        self.plugin._send_video_result.assert_awaited_once_with(
+            self.event, "https://cdn.example.com/video.mp4"
+        )
 
     async def test_successful_command_records_task_and_history(self):
         image_dir = self.root / "images"

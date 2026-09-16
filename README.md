@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>AstrBot &gt;= 4.16.0, &lt; 5</strong>
-  · v4.4.0
+  · v4.5.0
   · MIT
   · <a href="https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced">GitHub 仓库</a>
 </p>

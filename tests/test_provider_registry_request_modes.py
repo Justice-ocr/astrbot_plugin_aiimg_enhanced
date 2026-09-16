@@ -342,6 +342,33 @@ class ProviderRegistryRequestModeTests(unittest.TestCase):
             ],
         )
 
+    def test_validate_requires_agnes_video_connection_fields(self):
+        mod = _load_module()
+        registry = mod.ProviderRegistry(
+            config={
+                "providers": [
+                    {
+                        "id": "agnes",
+                        "__template_key": "agnes_video",
+                        "base_url": "",
+                        "api_keys": [],
+                        "model": "",
+                    }
+                ]
+            },
+            imgr=object(),
+            data_dir=Path("/tmp"),
+        )
+
+        self.assertEqual(
+            registry.validate(),
+            [
+                "provider 'agnes' missing base_url",
+                "provider 'agnes' missing model",
+                "provider 'agnes' missing api_keys",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
