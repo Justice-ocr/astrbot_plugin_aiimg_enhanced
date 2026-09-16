@@ -725,7 +725,7 @@ class ProviderRegistry:
             backend = CustomVideoBackend(settings=p)
         elif template_key == "agnes_video":
             from .agnes_video_service import AgnesVideoService
-            backend = AgnesVideoService(settings=p)
+            backend = AgnesVideoService(settings=p, data_dir=self._data_dir)
         else:
             raise RuntimeError(f"Provider '{pid}' is not a video provider")
         self._video_backends[pid] = backend

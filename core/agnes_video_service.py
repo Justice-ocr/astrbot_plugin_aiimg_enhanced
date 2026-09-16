@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -16,6 +18,7 @@ from .image_format import guess_image_mime_and_ext
 _ASPECT_RATIOS = {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
 _DONE_STATUSES = {"completed", "complete", "succeeded", "success", "finished", "done"}
 _FAIL_STATUSES = {"failed", "error", "cancelled", "canceled"}
+_ASTRBOT_FILE_SERVICE_PATCHED = False
 
 
 def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
@@ -63,8 +66,9 @@ class AgnesVideoService:
     supports_multiple_images = True
     supports_selfie_reference_fallback = True
 
-    def __init__(self, *, settings: dict):
+    def __init__(self, *, settings: dict, data_dir: Path | str | None = None):
         s = settings if isinstance(settings, dict) else {}
+        self.data_dir = Path(data_dir or ".")
         self.base_url = str(s.get("base_url") or "https://apihub.agnes-ai.com/v1").rstrip("/")
         self.model = str(s.get("model") or "agnes-video-2.5-flash").strip()
 
@@ -82,6 +86,10 @@ class AgnesVideoService:
         self.seconds = str(s.get("seconds") or "5").strip()
         self.aspect_ratio = str(s.get("aspect_ratio") or "16:9").strip()
         self.image_handling_method = str(s.get("image_handling_method") or "auto").strip().lower()
+        self.file_service_base_url = str(
+            s.get("file_service_base_url") or s.get("video_file_service_base_url") or ""
+        ).strip().rstrip("/")
+        self.enable_file_service_magic = bool(s.get("enable_file_service_magic", True))
         self.third_party_upload_url = str(s.get("third_party_upload_url") or "").strip()
         self.third_party_token = str(s.get("third_party_token") or "").strip()
         self.proxy_url = str(s.get("proxy_url") or "").strip() or None
@@ -180,10 +188,88 @@ class AgnesVideoService:
             raise RuntimeError("第三方图床响应中未找到图片 URL")
         return url
 
+    def _install_astrbot_file_service_magic(self, file_token_service: Any) -> None:
+        global _ASTRBOT_FILE_SERVICE_PATCHED
+        if not self.enable_file_service_magic or _ASTRBOT_FILE_SERVICE_PATCHED:
+            return
+        if getattr(file_token_service, "_aiimg_agnes_magic_patched", False):
+            _ASTRBOT_FILE_SERVICE_PATCHED = True
+            return
+        required = ("handle_file", "lock", "_cleanup_expired_tokens", "staged_files")
+        if not all(hasattr(file_token_service, name) for name in required):
+            logger.warning("[AgnesVideo] 当前 AstrBot 文件服务不支持可重复访问补丁")
+            return
+
+        original_handle_file = file_token_service.handle_file
+
+        async def repeatable_handle_file(file_token: str) -> str:
+            async with file_token_service.lock:
+                await file_token_service._cleanup_expired_tokens()
+                if file_token not in file_token_service.staged_files:
+                    raise KeyError(f"无效或过期的文件 token: {file_token}")
+                file_path, expire_time = file_token_service.staged_files[file_token]
+                if time.time() > expire_time:
+                    file_token_service.staged_files.pop(file_token, None)
+                    raise KeyError(f"无效或过期的文件 token: {file_token}")
+                if not Path(file_path).is_file():
+                    file_token_service.staged_files.pop(file_token, None)
+                    raise FileNotFoundError(f"文件不存在: {file_path}")
+                return file_path
+
+        file_token_service._aiimg_agnes_original_handle_file = original_handle_file
+        file_token_service.handle_file = repeatable_handle_file
+        file_token_service._aiimg_agnes_magic_patched = True
+        _ASTRBOT_FILE_SERVICE_PATCHED = True
+        logger.info("[AgnesVideo] 已启用 AstrBot 文件 token 可重复访问")
+
+    def _resolve_file_service_base_url(self) -> str:
+        if self.file_service_base_url:
+            if not _is_http_url(self.file_service_base_url):
+                raise RuntimeError("AstrBot 文件服务公网地址必须以 http:// 或 https:// 开头")
+            return self.file_service_base_url
+        try:
+            from astrbot.core import astrbot_config
+
+            base_url = str(astrbot_config.get("callback_api_base", "") or "").strip()
+        except Exception:
+            base_url = ""
+        if not _is_http_url(base_url):
+            raise RuntimeError(
+                "未配置 AstrBot 文件服务公网地址，且 callback_api_base 不可用"
+            )
+        return base_url.rstrip("/")
+
+    async def _upload_astrbot_file_service(self, image_bytes: bytes) -> tuple[str, Path]:
+        try:
+            from astrbot.core import file_token_service
+        except Exception as exc:
+            raise RuntimeError("当前 AstrBot 不提供文件 token 服务") from exc
+
+        base_url = self._resolve_file_service_base_url()
+        self._install_astrbot_file_service_magic(file_token_service)
+        _, ext = guess_image_mime_and_ext(image_bytes)
+        cache_dir = self.data_dir / "agnes_video_refs"
+        await asyncio.to_thread(cache_dir.mkdir, parents=True, exist_ok=True)
+        file_path = cache_dir / f"agnes_ref_{uuid.uuid4().hex}.{ext}"
+        await asyncio.to_thread(file_path.write_bytes, image_bytes)
+        try:
+            token = await file_token_service.register_file(str(file_path))
+        except Exception:
+            file_path.unlink(missing_ok=True)
+            raise
+        token = str(token or "").strip()
+        if not token:
+            file_path.unlink(missing_ok=True)
+            raise RuntimeError("AstrBot 文件服务未返回有效 token")
+        public_url = f"{base_url}/api/file/{token}"
+        logger.info("[AgnesVideo] 已生成 AstrBot 文件服务参考图 URL")
+        return public_url, file_path
+
     async def _prepare_reference_urls(
         self,
         image_bytes_list: list[bytes],
         image_urls: list[str],
+        temporary_paths: list[Path] | None = None,
     ) -> list[str]:
         refs: list[str] = []
         count = min(max(len(image_bytes_list), len(image_urls)), 5)
@@ -197,12 +283,22 @@ class AgnesVideoService:
             if not image_bytes:
                 raise RuntimeError(f"Agnes 第 {index + 1} 张参考图缺少可用数据")
 
-            if self.image_handling_method == "third_party":
+            if self.image_handling_method == "astrbot":
+                url, file_path = await self._upload_astrbot_file_service(image_bytes)
+                refs.append(url)
+                if temporary_paths is not None:
+                    temporary_paths.append(file_path)
+            elif self.image_handling_method == "third_party":
                 refs.append(await self._upload_third_party(image_bytes))
             elif self.image_handling_method == "free_public":
                 refs.append(await self._upload_free_public(image_bytes))
             elif self.image_handling_method == "auto":
-                if self.third_party_upload_url:
+                if self.file_service_base_url:
+                    url, file_path = await self._upload_astrbot_file_service(image_bytes)
+                    refs.append(url)
+                    if temporary_paths is not None:
+                        temporary_paths.append(file_path)
+                elif self.third_party_upload_url:
                     refs.append(await self._upload_third_party(image_bytes))
                 else:
                     refs.append(await self._upload_free_public(image_bytes))
@@ -336,8 +432,18 @@ class AgnesVideoService:
         del preset
         byte_items = list(image_bytes_list or ([] if image_bytes is None else [image_bytes]))
         url_items = list(image_urls or [])
-        refs = await self._prepare_reference_urls(byte_items, url_items)
-        payload = self._build_payload(prompt, refs)
-        video_id, task_id = await self._submit(payload)
-        logger.info("[AgnesVideo] 任务已提交: video_id=%s task_id=%s", video_id, task_id or "")
-        return await self._poll(video_id)
+        temporary_paths: list[Path] = []
+        try:
+            refs = await self._prepare_reference_urls(
+                byte_items, url_items, temporary_paths=temporary_paths
+            )
+            payload = self._build_payload(prompt, refs)
+            video_id, task_id = await self._submit(payload)
+            logger.info("[AgnesVideo] 任务已提交: video_id=%s task_id=%s", video_id, task_id or "")
+            return await self._poll(video_id)
+        finally:
+            for path in temporary_paths:
+                try:
+                    path.unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.warning("[AgnesVideo] 清理临时参考图失败: %s", exc)

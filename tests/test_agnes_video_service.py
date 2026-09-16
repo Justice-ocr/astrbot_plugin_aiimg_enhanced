@@ -1,6 +1,8 @@
 import asyncio
 import importlib.util
 import sys
+import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -116,6 +118,96 @@ class AgnesVideoServiceTests(unittest.IsolatedAsyncioTestCase):
         self.backend._upload_free_public = AsyncMock(side_effect=asyncio.CancelledError)
         with self.assertRaises(asyncio.CancelledError):
             await self.backend._prepare_reference_urls([b"image"], [""])
+
+    async def test_astrbot_file_service_builds_public_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core_mod = types.ModuleType("astrbot.core")
+            file_service = types.SimpleNamespace(
+                register_file=AsyncMock(return_value="token-1")
+            )
+            core_mod.file_token_service = file_service
+            sys.modules["astrbot.core"] = core_mod
+            self.addCleanup(sys.modules.pop, "astrbot.core", None)
+            backend = self.mod.AgnesVideoService(
+                settings={
+                    "api_keys": ["secret"],
+                    "image_handling_method": "astrbot",
+                    "file_service_base_url": "https://bot.example.com/",
+                    "enable_file_service_magic": False,
+                },
+                data_dir=tmp,
+            )
+
+            temporary_paths = []
+            refs = await backend._prepare_reference_urls(
+                [b"image-data"], [""], temporary_paths=temporary_paths
+            )
+
+            self.assertEqual(
+                refs, ["https://bot.example.com/api/file/token-1"]
+            )
+            self.assertEqual(len(temporary_paths), 1)
+            self.assertEqual(temporary_paths[0].read_bytes(), b"image-data")
+            file_service.register_file.assert_awaited_once_with(
+                str(temporary_paths[0])
+            )
+
+    async def test_auto_prefers_configured_astrbot_file_service(self):
+        backend = self.mod.AgnesVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "image_handling_method": "auto",
+                "file_service_base_url": "https://bot.example.com",
+            }
+        )
+        temp_path = Path("reference.png")
+        backend._upload_astrbot_file_service = AsyncMock(
+            return_value=("https://bot.example.com/api/file/token-2", temp_path)
+        )
+
+        temporary_paths = []
+        refs = await backend._prepare_reference_urls(
+            [b"image-data"], [""], temporary_paths=temporary_paths
+        )
+
+        self.assertEqual(refs, ["https://bot.example.com/api/file/token-2"])
+        self.assertEqual(temporary_paths, [temp_path])
+
+    async def test_astrbot_file_token_remains_repeatable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "reference.png"
+            image_path.write_bytes(b"image-data")
+            file_service = types.SimpleNamespace(
+                handle_file=AsyncMock(),
+                lock=asyncio.Lock(),
+                _cleanup_expired_tokens=AsyncMock(),
+                staged_files={"token": (str(image_path), time.time() + 60)},
+            )
+
+            self.backend._install_astrbot_file_service_magic(file_service)
+
+            self.assertEqual(await file_service.handle_file("token"), str(image_path))
+            self.assertEqual(await file_service.handle_file("token"), str(image_path))
+            self.assertIn("token", file_service.staged_files)
+
+    async def test_temporary_astrbot_reference_is_cleaned_after_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "reference.png"
+            image_path.write_bytes(b"image-data")
+
+            async def prepare(*args, temporary_paths, **kwargs):
+                temporary_paths.append(image_path)
+                return ["https://bot.example.com/api/file/token"]
+
+            self.backend._prepare_reference_urls = prepare
+            self.backend._submit = AsyncMock(side_effect=RuntimeError("submit failed"))
+
+            with self.assertRaisesRegex(RuntimeError, "submit failed"):
+                await self.backend.generate_video_url(
+                    "animate", image_bytes_list=[b"image-data"]
+                )
+
+            self.assertFalse(image_path.exists())
 
     def test_extracts_metadata_video_url(self):
         self.assertEqual(

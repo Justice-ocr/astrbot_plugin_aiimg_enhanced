@@ -45,4 +45,7 @@ def test_agnes_video_provider_template_is_available():
     assert "agnes_video" in provider_js
     assert "agnes-video-2.5-flash" in provider_js
     assert "image_handling_method" in provider_form_js
+    assert "file_service_base_url" in provider_js
+    assert "enable_file_service_magic" in provider_form_js
+    assert "'astrbot'" in provider_form_js
     assert 'value="agnes_video"' in index_html

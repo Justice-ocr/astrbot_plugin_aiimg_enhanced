@@ -60,7 +60,7 @@ export function buildProviderForm(p) {
   if (hasField('poll_timeout')) rows.push(buildField('poll_timeout', '轮询超时(秒)', 'number', p.poll_timeout ?? 300));
   if (hasField('seconds')) rows.push(buildSelectField('seconds', '视频时长(秒)', ['4','5','6','7','8','9','10','11','12'], String(p.seconds || '5')));
   if (hasField('aspect_ratio')) rows.push(buildSelectField('aspect_ratio', '视频画幅', ['21:9','16:9','4:3','1:1','3:4','9:16'], p.aspect_ratio || '16:9'));
-  if (hasField('image_handling_method')) rows.push(buildSelectField('image_handling_method', '本地参考图处理', ['auto','third_party','free_public','disabled'], p.image_handling_method || 'auto'));
+  if (hasField('image_handling_method')) rows.push(buildSelectField('image_handling_method', '本地参考图处理', ['auto','astrbot','third_party','free_public','disabled'], p.image_handling_method || 'auto'));
   if (hasField('default_style')) rows.push(buildField('default_style', '默认风格', 'text', p.default_style || '写实'));
   if (hasField('default_ratio')) rows.push(buildField('default_ratio', '默认比例', 'text', p.default_ratio || '1:1'));
   if (hasField('default_model')) rows.push(buildField('default_model', '默认模型', 'text', p.default_model || 'Seedream 4.0'));
@@ -68,6 +68,8 @@ export function buildProviderForm(p) {
   if (hasField('empty_response_retry')) rows.push(buildField('empty_response_retry', '无视频URL重试次数', 'number', p.empty_response_retry ?? 2));
   if (hasField('retry_delay')) rows.push(buildField('retry_delay', '重试间隔(秒)', 'number', p.retry_delay ?? 2));
   rows.push('</div>');
+  if (hasField('file_service_base_url')) rows.push(buildField('file_service_base_url', 'AstrBot 文件服务公网地址', 'text', p.file_service_base_url || ''));
+  if (hasField('enable_file_service_magic')) rows.push(buildCheckField('enable_file_service_magic', '允许文件 token 在有效期内重复访问', p.enable_file_service_magic !== false));
   if (hasField('third_party_upload_url')) rows.push(buildField('third_party_upload_url', '第三方图床上传 URL', 'text', p.third_party_upload_url || ''));
   if (hasField('third_party_token')) rows.push(buildField('third_party_token', '第三方图床 Token', 'password', p.third_party_token || ''));
   if (hasField('proxy_url')) rows.push(buildTextareaField('proxy_url', '代理地址（可选）', p.proxy_url || '').replace('rows="3"', 'rows="1"'));
@@ -126,6 +128,8 @@ export function readProviderForm($) {
   if (has('seconds')) result.seconds = g('seconds');
   if (has('aspect_ratio')) result.aspect_ratio = g('aspect_ratio');
   if (has('image_handling_method')) result.image_handling_method = g('image_handling_method');
+  if (has('file_service_base_url')) result.file_service_base_url = g('file_service_base_url');
+  if (has('enable_file_service_magic')) result.enable_file_service_magic = gCk('enable_file_service_magic');
   if (has('default_style')) result.default_style = g('default_style');
   if (has('default_ratio')) result.default_ratio = g('default_ratio');
   if (has('default_model')) result.default_model = g('default_model');
