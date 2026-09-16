@@ -61,6 +61,7 @@ class AgnesVideoService:
     """Agnes Video 2.5 Flash async video backend."""
 
     supports_multiple_images = True
+    supports_selfie_reference_fallback = True
 
     def __init__(self, *, settings: dict):
         s = settings if isinstance(settings, dict) else {}

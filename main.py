@@ -3141,6 +3141,57 @@ class GiteeAIImagePlugin(
 
     # ==================== 管理命令 ====================
 
+    async def _get_video_selfie_reference_inputs(
+        self, event: AstrMessageEvent
+    ) -> tuple[list[bytes], list[str], str]:
+        ref_paths, ref_source = await self._get_selfie_reference_paths(event)
+        if not ref_paths:
+            return [], [], ""
+
+        persona = await self._get_event_persona(event, snapshot=True)
+        image_bytes_list: list[bytes] = []
+        image_urls: list[str] = []
+        roles: list[str] = []
+        for path in ref_paths[:5]:
+            path_text = str(path)
+            if path_text.startswith(("http://", "https://")):
+                image_bytes_list.append(b"")
+                image_urls.append(path_text)
+            else:
+                data = await self._read_paths_bytes([path])
+                if not data:
+                    continue
+                image_bytes_list.append(data[0])
+                image_urls.append("")
+            roles.append(
+                persona.ref_roles.get(path_text, "identity")
+                if ref_source.startswith("persona:")
+                else "identity"
+            )
+
+        if not image_bytes_list:
+            return [], [], ""
+
+        role_names = {
+            "identity": "保持人物身份、五官和气质，不照搬服装或背景",
+            "clothing": "只参考服装和配饰，不改变人物身份",
+            "pose": "只参考姿势、动作和构图，不改变人物身份",
+            "scene": "只参考场景、环境和光线，不改变人物身份",
+        }
+        if len(roles) == 1:
+            role_prompt = f"第1张参考图作为视频首帧；{role_names.get(roles[0], role_names['identity'])}。"
+        else:
+            role_prompt = "视频参考图职责：\n" + "\n".join(
+                f"- <Picture {index}>：{role_names.get(role, role_names['identity'])}。"
+                for index, role in enumerate(roles, 1)
+            )
+        logger.info(
+            "[视频] 使用自拍参考图回退: source=%s count=%s",
+            ref_source,
+            len(image_bytes_list),
+        )
+        return image_bytes_list, image_urls, role_prompt
+
     @managed_task("video")
     async def _async_generate_video(
         self,
@@ -3208,16 +3259,37 @@ class GiteeAIImagePlugin(
             last_error: Exception | None = None
             video_url: str | None = None
             used_pid: str | None = None
+            selfie_reference_inputs: tuple[list[bytes], list[str], str] | None = None
             for pid in candidates:
                 try:
                     self.tasks.update("generating")
                     backend = self.registry.get_video_backend(pid)
                     if getattr(backend, "supports_multiple_images", False):
+                        backend_image_bytes = image_bytes
+                        backend_image_bytes_list = image_bytes_list
+                        backend_image_urls = image_urls
+                        backend_prompt = prompt
+                        if (
+                            not had_image
+                            and getattr(backend, "supports_selfie_reference_fallback", False)
+                        ):
+                            if selfie_reference_inputs is None:
+                                selfie_reference_inputs = (
+                                    await self._get_video_selfie_reference_inputs(event)
+                                )
+                            fallback_bytes, fallback_urls, role_prompt = selfie_reference_inputs
+                            if fallback_bytes:
+                                backend_image_bytes = next(
+                                    (data for data in fallback_bytes if data), None
+                                )
+                                backend_image_bytes_list = fallback_bytes
+                                backend_image_urls = fallback_urls
+                                backend_prompt = f"{prompt}\n\n{role_prompt}"
                         candidate_url = await backend.generate_video_url(
-                            prompt=prompt,
-                            image_bytes=image_bytes,
-                            image_bytes_list=image_bytes_list,
-                            image_urls=image_urls,
+                            prompt=backend_prompt,
+                            image_bytes=backend_image_bytes,
+                            image_bytes_list=backend_image_bytes_list,
+                            image_urls=backend_image_urls,
                         )
                     else:
                         candidate_url = await backend.generate_video_url(

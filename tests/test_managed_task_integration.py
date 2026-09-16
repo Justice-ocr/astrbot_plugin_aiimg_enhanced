@@ -108,6 +108,39 @@ class ManagedTaskIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.event, "https://cdn.example.com/video.mp4"
         )
 
+    async def test_agnes_video_falls_back_to_session_selfie_references(self):
+        local_ref = self.root / "identity.png"
+        local_ref.write_bytes(b"local-identity")
+        public_ref = "https://cdn.example.com/clothing.png"
+        generate = AsyncMock(return_value="https://cdn.example.com/video.mp4")
+        backend = types.SimpleNamespace(
+            supports_multiple_images=True,
+            supports_selfie_reference_fallback=True,
+            generate_video_url=generate,
+        )
+        self.plugin.registry = types.SimpleNamespace(get_video_backend=lambda _: backend)
+        self.plugin._get_video_chain = lambda: ["agnes"]
+        self.plugin._send_video_result = AsyncMock()
+        self.plugin._get_selfie_reference_paths = AsyncMock(
+            return_value=([local_ref, public_ref], "persona:Alice")
+        )
+        self.plugin._get_event_persona = AsyncMock(
+            return_value=types.SimpleNamespace(
+                name="Alice",
+                ref_roles={str(local_ref): "identity", public_ref: "clothing"}
+            )
+        )
+
+        await self.plugin._async_generate_video(self.event, "walk forward", "alice")
+
+        kwargs = generate.await_args.kwargs
+        self.assertEqual(kwargs["image_bytes"], b"local-identity")
+        self.assertEqual(kwargs["image_bytes_list"], [b"local-identity", b""])
+        self.assertEqual(kwargs["image_urls"], ["", public_ref])
+        self.assertIn("<Picture 1>", kwargs["prompt"])
+        self.assertIn("<Picture 2>", kwargs["prompt"])
+        self.assertIn("只参考服装和配饰", kwargs["prompt"])
+
     async def test_successful_command_records_task_and_history(self):
         image_dir = self.root / "images"
         image_dir.mkdir()
