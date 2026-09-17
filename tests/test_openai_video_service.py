@@ -127,6 +127,27 @@ class OpenAIVideoServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["quality"], (None, "high"))
         self.assertIn("image", fields)
 
+    def test_normalizes_full_width_ratio_and_pixel_size(self):
+        ratio_backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "size": " 16 ： 9 ",
+            }
+        )
+        ratio_fields = dict(ratio_backend._multipart_fields("go", None))
+        self.assertEqual(ratio_fields["size"], (None, "16:9"))
+
+        pixel_backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "size": "1280×720",
+            }
+        )
+        pixel_fields = dict(pixel_backend._multipart_fields("go", None))
+        self.assertEqual(pixel_fields["size"], (None, "1280x720"))
+
     async def test_text_submission_is_multipart_and_returns_video_id(self):
         async def handler(request: httpx.Request) -> httpx.Response:
             self.assertTrue(

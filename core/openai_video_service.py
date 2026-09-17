@@ -35,6 +35,14 @@ def _is_http_url(value: Any) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+def _normalize_video_size(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.replace("：", ":").replace("×", "x").replace("X", "x")
+    return "".join(text.split())
+
+
 def _extract_url(data: Any) -> str:
     if not isinstance(data, dict):
         return ""
@@ -69,7 +77,7 @@ class OpenAIVideoService:
         self.poll_interval = _clamp_int(s.get("poll_interval", 10), 10, 1, 60)
         self.poll_timeout = _clamp_int(s.get("poll_timeout", 1200), 1200, 30, 7200)
         self.seconds = str(s.get("seconds") or "4").strip()
-        self.size = str(s.get("size") or "").strip()
+        self.size = _normalize_video_size(s.get("size"))
         self.input_reference_field = str(
             s.get("input_reference_field") or "input_reference"
         ).strip() or "input_reference"
@@ -154,6 +162,8 @@ class OpenAIVideoService:
             if not name or value is None:
                 continue
             rendered = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            if name == "size":
+                rendered = _normalize_video_size(rendered)
             fields.append((name, (None, rendered)))
         if image_bytes:
             mime, ext = guess_image_mime_and_ext(image_bytes)
