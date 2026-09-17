@@ -58,11 +58,17 @@ export function buildProviderForm(p) {
   if (hasField('guidance_scale')) rows.push(buildField('guidance_scale', '引导系数', 'number', p.guidance_scale ?? 1.0));
   if (hasField('poll_interval')) rows.push(buildField('poll_interval', '轮询间隔(秒)', 'number', p.poll_interval ?? 5));
   if (hasField('poll_timeout')) rows.push(buildField('poll_timeout', '轮询超时(秒)', 'number', p.poll_timeout ?? 300));
-  if (hasField('seconds')) rows.push(buildSelectField('seconds', '视频时长(秒)', ['4','5','6','7','8','9','10','11','12'], String(p.seconds || '5')));
+  if (hasField('seconds')) {
+    if (type === 'openai_video') rows.push(buildField('seconds', '视频时长(秒)', 'number', p.seconds || '4'));
+    else rows.push(buildSelectField('seconds', '视频时长(秒)', ['4','5','6','7','8','9','10','11','12'], String(p.seconds || '5')));
+  }
   if (hasField('duration')) rows.push(buildSelectField('duration', '视频时长(秒)', ['4','5','6','7','8','9','10','11','12','13','14','15'], String(p.duration || '5')));
   if (hasField('aspect_ratio')) rows.push(buildSelectField('aspect_ratio', '视频画幅', ['21:9','16:9','4:3','1:1','3:4','9:16'], p.aspect_ratio || '16:9'));
   if (hasField('resolution')) rows.push(buildSelectField('resolution', '视频分辨率', ['768P','2K'], p.resolution || '2K'));
   if (hasField('ratio')) rows.push(buildSelectField('ratio', '视频画幅', ['adaptive','21:9','16:9','4:3','1:1','3:4','9:16'], p.ratio || '16:9'));
+  if (hasField('size')) rows.push(buildField('size', '视频尺寸（可选）', 'text', p.size || '', '如 1280x720；留空使用服务商默认'));
+  if (hasField('input_reference_field')) rows.push(buildField('input_reference_field', '参考图字段名', 'text', p.input_reference_field || 'input_reference'));
+  if (hasField('max_download_mb')) rows.push(buildField('max_download_mb', '最大下载大小(MB)', 'number', p.max_download_mb ?? 500));
   if (hasField('image_handling_method')) {
     const imageMethods = type === 'minimax_h3_video' ? ['data_uri','astrbot','disabled'] : ['auto','astrbot','third_party','free_public','disabled'];
     rows.push(buildSelectField('image_handling_method', '本地参考图处理', imageMethods, p.image_handling_method || imageMethods[0]));
@@ -92,6 +98,7 @@ export function buildProviderForm(p) {
   if (hasField('image_field')) rows.push(buildField('image_field', '图片字段名', 'text', p.image_field || 'image'));
   if (hasField('request_mode')) rows.push(buildSelectField('request_mode', '请求模式', ['auto', 'json', 'multipart'], p.request_mode || 'auto'));
   if (hasField('extra_body')) rows.push(buildTextareaField('extra_body', '额外请求体（JSON，可选）', p.extra_body || ''));
+  if (hasField('extra_form')) rows.push(buildTextareaField('extra_form', '额外表单字段（JSON，可选）', p.extra_form || ''));
   return rows.join('');
 }
 
@@ -136,6 +143,9 @@ export function readProviderForm($) {
   if (has('aspect_ratio')) result.aspect_ratio = g('aspect_ratio');
   if (has('resolution')) result.resolution = g('resolution');
   if (has('ratio')) result.ratio = g('ratio');
+  if (has('size')) result.size = g('size');
+  if (has('input_reference_field')) result.input_reference_field = g('input_reference_field');
+  if (has('max_download_mb')) result.max_download_mb = gNum('max_download_mb', 500);
   if (has('image_handling_method')) result.image_handling_method = g('image_handling_method');
   if (has('file_service_base_url')) result.file_service_base_url = g('file_service_base_url');
   if (has('enable_file_service_magic')) result.enable_file_service_magic = gCk('enable_file_service_magic');
@@ -159,5 +169,6 @@ export function readProviderForm($) {
   if (has('image_field')) result.image_field = g('image_field');
   if (has('request_mode')) result.request_mode = g('request_mode');
   if (has('extra_body')) result.extra_body = g('extra_body');
+  if (has('extra_form')) result.extra_form = g('extra_form');
   return result;
 }

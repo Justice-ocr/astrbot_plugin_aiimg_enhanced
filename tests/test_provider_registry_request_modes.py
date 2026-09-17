@@ -114,6 +114,10 @@ def _load_module():
         OpenAIFullURLBackend=_StubBackend,
     )
     _install_stub_module(
+        f"{CORE_PACKAGE_NAME}.openai_video_service",
+        OpenAIVideoService=_StubBackend,
+    )
+    _install_stub_module(
         f"{CORE_PACKAGE_NAME}.vertex_ai_anonymous_backend",
         VertexAIAnonymousBackend=_StubBackend,
         VertexAIAnonymousSettings=_StubVertexSettings,
@@ -395,6 +399,57 @@ class ProviderRegistryRequestModeTests(unittest.TestCase):
                 "provider 'minimax-h3' missing api_keys",
             ],
         )
+
+    def test_validate_requires_openai_video_connection_fields(self):
+        mod = _load_module()
+        registry = mod.ProviderRegistry(
+            config={
+                "providers": [
+                    {
+                        "id": "openai-video",
+                        "__template_key": "openai_video",
+                        "base_url": "",
+                        "api_keys": [],
+                        "model": "",
+                    }
+                ]
+            },
+            imgr=object(),
+            data_dir=Path("/tmp"),
+        )
+
+        self.assertEqual(
+            registry.validate(),
+            [
+                "provider 'openai-video' missing base_url",
+                "provider 'openai-video' missing model",
+                "provider 'openai-video' missing api_keys",
+            ],
+        )
+
+    def test_openai_video_template_builds_dedicated_backend(self):
+        mod = _load_module()
+        registry = mod.ProviderRegistry(
+            config={
+                "providers": [
+                    {
+                        "id": "subrouter-video",
+                        "__template_key": "openai_video",
+                        "base_url": "https://hk.orbitlink.me",
+                        "api_keys": ["test-key"],
+                        "model": "minimax-h3",
+                    }
+                ]
+            },
+            imgr=object(),
+            data_dir=Path("/tmp/plugin-data"),
+        )
+
+        backend = registry.get_video_backend("subrouter-video")
+
+        self.assertEqual(registry.validate(), [])
+        self.assertEqual(backend.kwargs["settings"]["model"], "minimax-h3")
+        self.assertEqual(backend.kwargs["data_dir"], Path("/tmp/plugin-data"))
 
 
 if __name__ == "__main__":

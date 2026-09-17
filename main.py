@@ -1012,7 +1012,15 @@ class GiteeAIImagePlugin(
             return
 
         # 生图/改图服务商（非视频）
-        _VIDEO_KEYS = {"grok_video", "grok2api_video", "flow2api_video", "custom_video"}
+        _VIDEO_KEYS = {
+            "grok_video",
+            "grok2api_video",
+            "flow2api_video",
+            "custom_video",
+            "agnes_video",
+            "minimax_h3_video",
+            "openai_video",
+        }
         draw_ids  = [pid for pid in self.registry.provider_ids()
                      if self.registry.get(pid).get("__template_key", "") not in _VIDEO_KEYS]
         video_ids = [pid for pid in self.registry.provider_ids()
@@ -2946,9 +2954,13 @@ class GiteeAIImagePlugin(
 
         async def _send_file(url: str) -> bool:
             try:
-                video_path = await self.videomgr.download_video(
-                    url, timeout_seconds=download_timeout
-                )
+                local_path = Path(str(url or ""))
+                if local_path.is_file():
+                    video_path = local_path
+                else:
+                    video_path = await self.videomgr.download_video(
+                        url, timeout_seconds=download_timeout
+                    )
                 self.tasks.update("sending")
                 await asyncio.wait_for(
                     event.send(
@@ -2980,6 +2992,11 @@ class GiteeAIImagePlugin(
             return
 
         if mode == "url":
+            if Path(str(video_url or "")).is_file():
+                if await _send_file(video_url):
+                    return
+                await event.send(event.plain_result(video_url))
+                return
             if await _send_url(video_url):
                 return
             await event.send(event.plain_result(video_url))
@@ -4314,7 +4331,7 @@ class GiteeAIImagePlugin(
             if not provider_id:
                 return None
 
-            video_keys = {"grok_video", "grok2api_video", "flow2api_video", "custom_video", "agnes_video", "minimax_h3_video"}
+            video_keys = {"grok_video", "grok2api_video", "flow2api_video", "custom_video", "agnes_video", "minimax_h3_video", "openai_video"}
             draw_provider_ids = [
                 pid for pid in self.registry.provider_ids()
                 if self.registry.get(pid).get("__template_key", "") not in video_keys

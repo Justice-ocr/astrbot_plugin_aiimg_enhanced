@@ -61,3 +61,15 @@ def test_minimax_h3_video_provider_template_is_available():
     assert "data_uri" in provider_form_js
     assert "duration" in provider_form_js
     assert 'value="minimax_h3_video"' in index_html
+
+
+def test_openai_video_provider_template_is_available():
+    provider_js = PROVIDER_JS.read_text(encoding="utf-8")
+    provider_form_js = PROVIDER_FORM_JS.read_text(encoding="utf-8")
+    index_html = (ROOT / "pages" / "Settings" / "index.html").read_text(encoding="utf-8")
+
+    assert "openai_video" in provider_js
+    assert "https://api.openai.com" in provider_js
+    assert "input_reference_field" in provider_form_js
+    assert "extra_form" in provider_form_js
+    assert 'value="openai_video"' in index_html
