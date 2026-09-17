@@ -369,6 +369,33 @@ class ProviderRegistryRequestModeTests(unittest.TestCase):
             ],
         )
 
+    def test_validate_requires_minimax_h3_video_connection_fields(self):
+        mod = _load_module()
+        registry = mod.ProviderRegistry(
+            config={
+                "providers": [
+                    {
+                        "id": "minimax-h3",
+                        "__template_key": "minimax_h3_video",
+                        "base_url": "",
+                        "api_keys": [],
+                        "model": "minimaxh3",
+                    }
+                ]
+            },
+            imgr=object(),
+            data_dir=Path("/tmp"),
+        )
+
+        self.assertEqual(
+            registry.validate(),
+            [
+                "provider 'minimax-h3' missing base_url",
+                "provider 'minimax-h3' model must be MiniMax-H3",
+                "provider 'minimax-h3' missing api_keys",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,6 +41,7 @@ const PROVIDER_TEMPLATES = {
   gitee_async:            { label:'Gitee 异步改图', base_url:'https://ai.gitee.com/v1', api_keys:[], model:'Qwen-Image-Edit-2511', num_inference_steps:4, guidance_scale:1.0, poll_interval:5, poll_timeout:300, generate_request_mode:'auto', edit_request_mode:'auto' },
   jimeng:                 { label:'即梦', api_url:'', apikey:'', cookie_list:[], default_style:'写实', default_ratio:'1:1', default_model:'Seedream 4.0', timeout:120 },
   agnes_video:            { label:'Agnes 视频', base_url:'https://apihub.agnes-ai.com/v1', api_keys:[], model:'agnes-video-2.5-flash', timeout:120, max_retries:1, poll_interval:2, poll_timeout:900, seconds:'5', aspect_ratio:'16:9', image_handling_method:'auto', file_service_base_url:'', enable_file_service_magic:true, third_party_upload_url:'', third_party_token:'', proxy_url:'' },
+  minimax_h3_video:       { label:'MiniMax H3 视频', base_url:'https://api.minimax.io', api_keys:[], model:'MiniMax-H3', timeout:120, max_retries:1, poll_interval:10, poll_timeout:1200, duration:'5', resolution:'2K', ratio:'16:9', image_handling_method:'data_uri', file_service_base_url:'', enable_file_service_magic:true, proxy_url:'' },
   grok_video:             { label:'Grok 视频', server_url:'https://api.x.ai', api_key:'', model:'grok-imagine-0.9', timeout_seconds:180, max_retries:2, empty_response_retry:2, retry_delay:2, presets:[] },
   grok2api_video:         { label:'Grok2API 视频', base_url:'https://api.x.ai', api_keys:[], model:'grok-imagine-1.0-video', timeout:300, max_retries:2 },
   flow2api_video:         { label:'Flow2API 视频', api_url:'', api_keys:[], model:'', timeout:300, use_proxy:false, proxy_url:'' },
@@ -65,6 +66,7 @@ const PROVIDER_NAMES = {
   gitee_async:'Gitee 异步改图',
   jimeng:'即梦',
   agnes_video:'Agnes 视频',
+  minimax_h3_video:'MiniMax H3 视频',
   grok_video:'Grok 视频',
   grok2api_video:'Grok2API 视频',
   flow2api_video:'Flow2API 视频',
@@ -73,7 +75,7 @@ const PROVIDER_NAMES = {
   openai_full_url_images:'OpenAI ImagesURL',
 };
 
-const VIDEO_PROVIDER_TYPES = new Set(['agnes_video', 'grok_video', 'grok2api_video', 'flow2api_video', 'custom_video']);
+const VIDEO_PROVIDER_TYPES = new Set(['agnes_video', 'minimax_h3_video', 'grok_video', 'grok2api_video', 'flow2api_video', 'custom_video']);
 
 export {
   inferProviderType,

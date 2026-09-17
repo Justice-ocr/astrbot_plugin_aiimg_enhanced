@@ -48,6 +48,7 @@ _TEMPLATE_KEY_ALIASES: dict[str, str] = {
     "grok2api": "grok2api_images",
     "grok2api_video": "grok2api_video",
     "agnes_video": "agnes_video",
+    "minimax_h3_video": "minimax_h3_video",
     "custom_video": "custom_video",
     "openai": "openai_images",
     "openai_compat": "openai_images",
@@ -172,6 +173,8 @@ class ProviderRegistry:
             return "custom_video"
         if pid in {"agnes_video"}:
             return "agnes_video"
+        if pid in {"minimax_h3_video", "minimax_h3"}:
+            return "minimax_h3_video"
 
         # 最终兜底：根据字段特征推断（处理任意自定义 id 的服务商）
         if "poll_interval" in item or "poll_timeout" in item:
@@ -418,6 +421,14 @@ class ProviderRegistry:
                     errors.append(f"provider '{provider_id}' missing base_url")
                 if not str(item.get("model") or "").strip():
                     errors.append(f"provider '{provider_id}' missing model")
+                keys = item.get("api_keys") or []
+                if not keys or not any(str(k).strip() for k in keys):
+                    errors.append(f"provider '{provider_id}' missing api_keys")
+            if template_key == "minimax_h3_video":
+                if not str(item.get("base_url") or "").strip():
+                    errors.append(f"provider '{provider_id}' missing base_url")
+                if str(item.get("model") or "").strip() != "MiniMax-H3":
+                    errors.append(f"provider '{provider_id}' model must be MiniMax-H3")
                 keys = item.get("api_keys") or []
                 if not keys or not any(str(k).strip() for k in keys):
                     errors.append(f"provider '{provider_id}' missing api_keys")
@@ -726,6 +737,9 @@ class ProviderRegistry:
         elif template_key == "agnes_video":
             from .agnes_video_service import AgnesVideoService
             backend = AgnesVideoService(settings=p, data_dir=self._data_dir)
+        elif template_key == "minimax_h3_video":
+            from .minimax_h3_video_service import MiniMaxH3VideoService
+            backend = MiniMaxH3VideoService(settings=p, data_dir=self._data_dir)
         else:
             raise RuntimeError(f"Provider '{pid}' is not a video provider")
         self._video_backends[pid] = backend
