@@ -71,5 +71,8 @@ def test_openai_video_provider_template_is_available():
     assert "openai_video" in provider_js
     assert "https://api.openai.com" in provider_js
     assert "input_reference_field" in provider_form_js
+    assert "image_input_mode" in provider_form_js
+    assert "roles_frames" in provider_form_js
+    assert "video_resolution" in provider_form_js
     assert "extra_form" in provider_form_js
     assert 'value="openai_video"' in index_html

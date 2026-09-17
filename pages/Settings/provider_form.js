@@ -14,7 +14,11 @@ function buildTextareaField(id, label, val = '', hint = '') {
 }
 
 function buildSelectField(id, label, opts, val = '') {
-  return `<div class="pform-group"><label class="pform-label">${label}</label><select class="sel" id="pf-${id}">${opts.map(o => `<option value="${o}" ${o === val ? 'selected' : ''}>${o}</option>`).join('')}</select></div>`;
+  return `<div class="pform-group"><label class="pform-label">${label}</label><select class="sel" id="pf-${id}">${opts.map(o => {
+    const value = typeof o === 'object' ? o.value : o;
+    const text = typeof o === 'object' ? o.label : o;
+    return `<option value="${esc(value)}" ${value === val ? 'selected' : ''}>${esc(text)}</option>`;
+  }).join('')}</select></div>`;
 }
 
 function buildSizeField(id, label, val = '') {
@@ -67,6 +71,16 @@ export function buildProviderForm(p) {
   if (hasField('resolution')) rows.push(buildSelectField('resolution', '视频分辨率', ['768P','2K'], p.resolution || '2K'));
   if (hasField('ratio')) rows.push(buildSelectField('ratio', '视频画幅', ['adaptive','21:9','16:9','4:3','1:1','3:4','9:16'], p.ratio || '16:9'));
   if (hasField('size')) rows.push(buildField('size', '视频尺寸（可选）', 'text', p.size || '', '如 1280x720；留空使用服务商默认'));
+  if (hasField('video_resolution')) rows.push(buildSelectField('video_resolution', '视频分辨率（可选）', [{value:'',label:'服务商默认'},'480p','768p','1080p'], p.video_resolution || ''));
+  if (hasField('seed')) rows.push(buildField('seed', '随机种子（可选）', 'number', p.seed || ''));
+  if (hasField('image_input_mode')) rows.push(buildSelectField('image_input_mode', '参考图输入模式', [
+    {value:'auto',label:'自动（单图兼容 / 多图参考）'},
+    {value:'input_reference',label:'单图 input_reference'},
+    {value:'image_urls',label:'多参考图 image_urls（1–9张）'},
+    {value:'first_last_frame',label:'首尾帧双图'},
+    {value:'roles_reference',label:'角色数组：参考图'},
+    {value:'roles_frames',label:'角色数组：首尾帧'},
+  ], p.image_input_mode || 'auto'));
   if (hasField('input_reference_field')) rows.push(buildField('input_reference_field', '参考图字段名', 'text', p.input_reference_field || 'input_reference'));
   if (hasField('max_download_mb')) rows.push(buildField('max_download_mb', '最大下载大小(MB)', 'number', p.max_download_mb ?? 500));
   if (hasField('image_handling_method')) {
@@ -144,6 +158,9 @@ export function readProviderForm($) {
   if (has('resolution')) result.resolution = g('resolution');
   if (has('ratio')) result.ratio = g('ratio');
   if (has('size')) result.size = g('size');
+  if (has('video_resolution')) result.video_resolution = g('video_resolution');
+  if (has('seed')) result.seed = g('seed');
+  if (has('image_input_mode')) result.image_input_mode = g('image_input_mode');
   if (has('input_reference_field')) result.input_reference_field = g('input_reference_field');
   if (has('max_download_mb')) result.max_download_mb = gNum('max_download_mb', 500);
   if (has('image_handling_method')) result.image_handling_method = g('image_handling_method');

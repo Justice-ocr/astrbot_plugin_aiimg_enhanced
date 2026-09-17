@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 import uuid
@@ -13,11 +14,19 @@ import httpx
 
 from astrbot.api import logger
 
-from .image_format import guess_image_mime_and_ext
+from .image_format import guess_image_mime_and_ext, guess_image_mime_and_ext_strict
 
 
 _DONE_STATUSES = {"completed", "succeeded"}
 _FAIL_STATUSES = {"failed", "cancelled", "canceled"}
+_IMAGE_INPUT_MODES = {
+    "auto",
+    "input_reference",
+    "image_urls",
+    "first_last_frame",
+    "roles_reference",
+    "roles_frames",
+}
 
 
 def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
@@ -59,6 +68,8 @@ def _extract_url(data: Any) -> str:
 class OpenAIVideoService:
     """OpenAI-compatible Videos API backend."""
 
+    supports_multiple_images = True
+
     def __init__(self, *, settings: dict, data_dir: Path | str | None = None):
         s = settings if isinstance(settings, dict) else {}
         self.data_dir = Path(data_dir or ".")
@@ -78,6 +89,17 @@ class OpenAIVideoService:
         self.poll_timeout = _clamp_int(s.get("poll_timeout", 1200), 1200, 30, 7200)
         self.seconds = str(s.get("seconds") or "4").strip()
         self.size = _normalize_video_size(s.get("size"))
+        self.resolution = str(s.get("video_resolution") or "").strip().lower()
+        self.seed = str(s.get("seed") or "").strip()
+        self.image_input_mode = str(
+            s.get("image_input_mode") or "auto"
+        ).strip().lower()
+        if self.image_input_mode not in _IMAGE_INPUT_MODES:
+            self.image_input_mode = "auto"
+        self.supports_selfie_reference_fallback = self.image_input_mode not in {
+            "first_last_frame",
+            "roles_frames",
+        }
         self.input_reference_field = str(
             s.get("input_reference_field") or "input_reference"
         ).strip() or "input_reference"
@@ -140,8 +162,79 @@ class OpenAIVideoService:
             return str(error.get("message") or error.get("code") or "").strip()
         return str(error or "").strip()
 
+    @staticmethod
+    def _to_data_uri(image_bytes: bytes) -> str:
+        detected = guess_image_mime_and_ext_strict(image_bytes)
+        if detected is None or detected[0] not in {
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+        }:
+            raise RuntimeError("OpenAI Videos 参考图仅支持 JPEG、PNG 或 WEBP")
+        mime, _ = detected
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
+
+    async def _prepare_reference_urls(
+        self,
+        image_bytes_list: list[bytes],
+        image_urls: list[str],
+    ) -> list[str]:
+        refs: list[str] = []
+        count = min(max(len(image_bytes_list), len(image_urls)), 9)
+        for index in range(count):
+            source_url = image_urls[index] if index < len(image_urls) else ""
+            if _is_http_url(source_url):
+                refs.append(source_url.strip())
+                continue
+            image_bytes = image_bytes_list[index] if index < len(image_bytes_list) else b""
+            if not image_bytes:
+                raise RuntimeError(f"OpenAI Videos 第 {index + 1} 张参考图缺少可用数据")
+            refs.append(self._to_data_uri(image_bytes))
+        return refs
+
+    def _validate_minimax_h3_options(self, reference_mode: str | None) -> None:
+        if self.model.strip().lower() != "minimax-h3":
+            return
+        try:
+            seconds = int(self.seconds)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("MiniMax H3 视频时长必须是整数") from exc
+
+        if reference_mode is None:
+            if not 1 <= seconds <= 15:
+                raise RuntimeError("MiniMax H3 文生视频时长必须为 1–15 秒")
+            allowed_resolutions = {"", "480p", "768p"}
+        else:
+            if not 1 <= seconds <= 10:
+                raise RuntimeError("MiniMax H3 图生视频时长必须为 1–10 秒")
+            allowed_resolutions = {"", "480p", "768p", "1080p"}
+            if reference_mode in {"first_last_frame", "roles_frames"}:
+                allowed_resolutions.discard("1080p")
+        if self.resolution not in allowed_resolutions:
+            allowed_text = " / ".join(sorted(value for value in allowed_resolutions if value))
+            raise RuntimeError(f"当前 MiniMax H3 模式的分辨率仅支持 {allowed_text}")
+
+    def _resolve_image_input_mode(
+        self, reference_count: int, *, has_upload_bytes: bool
+    ) -> str | None:
+        if reference_count <= 0:
+            return None
+        mode = self.image_input_mode
+        if mode == "auto":
+            return (
+                "input_reference"
+                if reference_count == 1 and has_upload_bytes
+                else "image_urls"
+            )
+        return mode
+
     def _multipart_fields(
-        self, prompt: str, image_bytes: bytes | None
+        self,
+        prompt: str,
+        image_bytes: bytes | None,
+        *,
+        reference_urls: list[str] | None = None,
     ) -> list[tuple[str, Any]]:
         text = str(prompt or "").strip()
         if not text:
@@ -157,15 +250,20 @@ class OpenAIVideoService:
             fields.append(("seconds", (None, self.seconds)))
         if self.size:
             fields.append(("size", (None, self.size)))
-        for key, value in self.extra_form.items():
-            name = str(key or "").strip()
-            if not name or value is None:
-                continue
-            rendered = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-            if name == "size":
-                rendered = _normalize_video_size(rendered)
-            fields.append((name, (None, rendered)))
-        if image_bytes:
+        if self.resolution:
+            fields.append(("resolution", (None, self.resolution)))
+        if self.seed:
+            fields.append(("seed", (None, self.seed)))
+
+        refs = list(reference_urls or [])[:9]
+        reference_mode = self._resolve_image_input_mode(
+            len(refs) or (1 if image_bytes else 0),
+            has_upload_bytes=bool(image_bytes),
+        )
+        self._validate_minimax_h3_options(reference_mode)
+        if reference_mode in {"first_last_frame", "roles_frames"} and len(refs) != 2:
+            raise RuntimeError("MiniMax H3 首尾帧模式必须同时提供且仅提供两张图片")
+        if reference_mode == "input_reference" and image_bytes:
             mime, ext = guess_image_mime_and_ext(image_bytes)
             fields.append(
                 (
@@ -173,11 +271,53 @@ class OpenAIVideoService:
                     (f"reference.{ext}", image_bytes, mime),
                 )
             )
+        elif reference_mode == "input_reference":
+            raise RuntimeError("input_reference 模式需要可上传的本地参考图")
+        elif reference_mode == "image_urls":
+            fields.append(("image_urls", (None, json.dumps(refs, ensure_ascii=False))))
+        elif reference_mode == "first_last_frame":
+            fields.extend(
+                [
+                    ("first_frame_image", (None, refs[0])),
+                    ("last_frame_image", (None, refs[1])),
+                ]
+            )
+        elif reference_mode == "roles_reference":
+            values = [{"url": url, "role": "reference_image"} for url in refs]
+            fields.append(
+                ("image_with_roles", (None, json.dumps(values, ensure_ascii=False)))
+            )
+        elif reference_mode == "roles_frames":
+            values = [
+                {"url": refs[0], "role": "first_frame"},
+                {"url": refs[1], "role": "last_frame"},
+            ]
+            fields.append(
+                ("image_with_roles", (None, json.dumps(values, ensure_ascii=False)))
+            )
+
+        existing_names = {name for name, _ in fields}
+        for key, value in self.extra_form.items():
+            name = str(key or "").strip()
+            if not name or value is None or name in existing_names:
+                continue
+            rendered = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            if name == "size":
+                rendered = _normalize_video_size(rendered)
+            fields.append((name, (None, rendered)))
         return fields
 
-    async def _submit(self, prompt: str, image_bytes: bytes | None) -> str:
+    async def _submit(
+        self,
+        prompt: str,
+        image_bytes: bytes | None,
+        *,
+        reference_urls: list[str] | None = None,
+    ) -> str:
         last_error: Exception | None = None
-        fields = self._multipart_fields(prompt, image_bytes)
+        fields = self._multipart_fields(
+            prompt, image_bytes, reference_urls=reference_urls
+        )
         for attempt in range(self.max_retries + 1):
             if attempt:
                 await asyncio.sleep(min(2**attempt, 10))
@@ -315,9 +455,29 @@ class OpenAIVideoService:
         prompt: str,
         image_bytes: bytes | None = None,
         *,
+        image_bytes_list: list[bytes] | None = None,
+        image_urls: list[str] | None = None,
         preset: str | None = None,
     ) -> str:
         del preset
-        video_id = await self._submit(prompt, image_bytes)
+        byte_items = list(image_bytes_list or ([] if image_bytes is None else [image_bytes]))
+        url_items = list(image_urls or [])
+        primary_bytes = next((data for data in byte_items if data), image_bytes)
+        reference_count = max(len(byte_items), len(url_items))
+        use_direct_upload = (
+            reference_count == 1
+            and bool(primary_bytes)
+            and self.image_input_mode in {"auto", "input_reference"}
+        )
+        reference_urls = (
+            []
+            if use_direct_upload
+            else await self._prepare_reference_urls(byte_items, url_items)
+        )
+        video_id = await self._submit(
+            prompt,
+            primary_bytes,
+            reference_urls=reference_urls,
+        )
         logger.info("[OpenAIVideo] 任务已提交: video_id=%s", video_id)
         return await self._poll(video_id)

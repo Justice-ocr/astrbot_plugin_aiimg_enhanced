@@ -2,6 +2,17 @@
 
 ## [未发布]
 
+## [v4.8.0] - 2026-09-17
+
+### OpenAI Videos 多参考图输入
+
+- OpenAI Videos 模板新增最多 9 张 `image_urls` 参考图，支持公网 URL 与 JPEG、PNG、WebP 的 Data URI Base64。
+- 新增首尾帧模式，可通过 `first_frame_image` 与 `last_frame_image` 提交严格配对的两张图片。
+- 新增 `image_with_roles` 模式，支持 `reference_image`、`first_frame` 和 `last_frame` 角色标记。
+- 新增自动、单图上传、多参考图、首尾帧、角色参考图和角色首尾帧六种输入模式，并保留原有 `input_reference` 兼容行为。
+- 新增视频分辨率与随机种子配置，并按 MiniMax H3 的输入模式校验时长和分辨率范围。
+- 普通参考图模式可在消息无图片时自动使用当前会话的人设/自拍参考图；首尾帧模式不会混入自动参考图。
+
 ## [v4.7.2] - 2026-09-17
 
 ### 本地视频跨容器发送修复

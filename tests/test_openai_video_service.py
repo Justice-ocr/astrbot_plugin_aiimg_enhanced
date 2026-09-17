@@ -1,4 +1,5 @@
 import asyncio
+import json
 import importlib.util
 import sys
 import tempfile
@@ -148,6 +149,139 @@ class OpenAIVideoServiceTests(unittest.IsolatedAsyncioTestCase):
         pixel_fields = dict(pixel_backend._multipart_fields("go", None))
         self.assertEqual(pixel_fields["size"], (None, "1280x720"))
 
+    async def test_prepares_public_and_data_uri_reference_images(self):
+        png = b"\x89PNG\r\n\x1a\nimage-data"
+        refs = await self.backend._prepare_reference_urls(
+            [b"", png],
+            ["https://cdn.test/one.png", ""],
+        )
+
+        self.assertEqual(refs[0], "https://cdn.test/one.png")
+        self.assertTrue(refs[1].startswith("data:image/png;base64,"))
+
+    def test_builds_image_urls_for_up_to_nine_references(self):
+        backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "seconds": "8",
+                "video_resolution": "1080p",
+                "image_input_mode": "image_urls",
+            }
+        )
+        refs = [f"https://cdn.test/{index}.png" for index in range(12)]
+        fields = dict(
+            backend._multipart_fields("animate", b"image", reference_urls=refs)
+        )
+
+        self.assertEqual(fields["resolution"], (None, "1080p"))
+        self.assertEqual(
+            json.loads(fields["image_urls"][1]),
+            refs[:9],
+        )
+        self.assertNotIn("input_reference", fields)
+
+    def test_builds_first_and_last_frame_fields(self):
+        backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "seconds": "10",
+                "video_resolution": "768p",
+                "image_input_mode": "first_last_frame",
+            }
+        )
+        refs = ["https://cdn.test/first.png", "https://cdn.test/last.png"]
+        fields = dict(
+            backend._multipart_fields("transition", b"first", reference_urls=refs)
+        )
+
+        self.assertEqual(fields["first_frame_image"], (None, refs[0]))
+        self.assertEqual(fields["last_frame_image"], (None, refs[1]))
+        self.assertNotIn("image_urls", fields)
+
+        with self.assertRaisesRegex(RuntimeError, "必须同时提供且仅提供两张"):
+            backend._multipart_fields("transition", b"first", reference_urls=refs[:1])
+
+    def test_builds_image_with_roles_variants(self):
+        refs = ["https://cdn.test/one.png", "https://cdn.test/two.png"]
+        reference_backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "image_input_mode": "roles_reference",
+            }
+        )
+        reference_fields = dict(
+            reference_backend._multipart_fields("keep characters", b"one", reference_urls=refs)
+        )
+        self.assertEqual(
+            json.loads(reference_fields["image_with_roles"][1]),
+            [
+                {"url": refs[0], "role": "reference_image"},
+                {"url": refs[1], "role": "reference_image"},
+            ],
+        )
+
+        frame_backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "image_input_mode": "roles_frames",
+            }
+        )
+        frame_fields = dict(
+            frame_backend._multipart_fields("transition", b"one", reference_urls=refs)
+        )
+        self.assertEqual(
+            json.loads(frame_fields["image_with_roles"][1]),
+            [
+                {"url": refs[0], "role": "first_frame"},
+                {"url": refs[1], "role": "last_frame"},
+            ],
+        )
+
+    def test_validates_minimax_h3_duration_and_resolution_by_mode(self):
+        text_backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "seconds": "15",
+                "video_resolution": "768p",
+            }
+        )
+        text_backend._multipart_fields("text video", None)
+
+        reference_backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "seconds": "11",
+                "image_input_mode": "image_urls",
+            }
+        )
+        with self.assertRaisesRegex(RuntimeError, "图生视频时长必须为 1–10 秒"):
+            reference_backend._multipart_fields(
+                "reference video",
+                b"image",
+                reference_urls=["https://cdn.test/ref.png"],
+            )
+
+        frame_backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "video_resolution": "1080p",
+                "image_input_mode": "first_last_frame",
+            }
+        )
+        with self.assertRaisesRegex(RuntimeError, "480p / 768p"):
+            frame_backend._multipart_fields(
+                "frames",
+                b"image",
+                reference_urls=["https://cdn.test/first.png", "https://cdn.test/last.png"],
+            )
+
     async def test_text_submission_is_multipart_and_returns_video_id(self):
         async def handler(request: httpx.Request) -> httpx.Response:
             self.assertTrue(
@@ -230,7 +364,9 @@ class OpenAIVideoServiceTests(unittest.IsolatedAsyncioTestCase):
 
         result = await self.backend.generate_video_url("animate", image_bytes=b"image")
         self.assertEqual(result, "C:/videos/result.mp4")
-        self.backend._submit.assert_awaited_once_with("animate", b"image")
+        submit_call = self.backend._submit.await_args
+        self.assertEqual(submit_call.args, ("animate", b"image"))
+        self.assertEqual(submit_call.kwargs["reference_urls"], [])
         self.backend._poll.assert_awaited_once_with("video-1")
 
         self.backend._submit = AsyncMock(side_effect=asyncio.CancelledError)
