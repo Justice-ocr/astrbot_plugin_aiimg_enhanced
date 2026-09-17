@@ -1,4 +1,6 @@
+import base64
 import sys
+import tempfile
 import types
 import unittest
 from dataclasses import dataclass
@@ -118,7 +120,15 @@ class _DummyMessageComponent:
 
     @staticmethod
     def fromFileSystem(path: str):
-        return _DummyMessageComponent(path=path)
+        return _DummyMessageComponent(kind="file", path=path)
+
+    @staticmethod
+    def fromURL(url: str):
+        return _DummyMessageComponent(kind="url", url=url)
+
+    @staticmethod
+    def fromBase64(data: str):
+        return _DummyMessageComponent(kind="base64", data=data)
 
 
 class _DummyStar:
@@ -377,6 +387,37 @@ def _make_success_result(mod, index: int, image_name: str, mode: str = "selfie_r
 
 
 class BatchResultDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_local_video_falls_back_to_base64_without_leaking_path(self):
+        mod = _load_module()
+        plugin = mod.GiteeAIImagePlugin(
+            context=types.SimpleNamespace(),
+            config={"features": {"video": {"send_mode": "auto"}}},
+        )
+        plugin.tasks = types.SimpleNamespace(update=lambda *args, **kwargs: None)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            video_path = Path(tmp) / "result.mp4"
+            video_path.write_bytes(b"video-bytes")
+
+            class _VideoEvent(_DummyEvent):
+                async def send(self, payload):
+                    component = payload[1][0]
+                    if component.kwargs.get("kind") == "file":
+                        raise RuntimeError("ENOENT")
+                    self.sent.append(payload)
+
+            event = _VideoEvent()
+            await plugin._send_video_result(event, str(video_path))
+
+        self.assertEqual(len(event.sent), 1)
+        component = event.sent[0][1][0]
+        self.assertEqual(component.kwargs["kind"], "base64")
+        self.assertEqual(
+            base64.b64decode(component.kwargs["data"]),
+            b"video-bytes",
+        )
+        self.assertFalse(any(str(video_path) in str(item) for item in event.sent))
+
     async def test_batch_results_ignore_legacy_merge_setting_and_send_images_only(self):
         mod = _load_module()
         plugin = mod.GiteeAIImagePlugin(

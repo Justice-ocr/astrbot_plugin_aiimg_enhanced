@@ -2952,6 +2952,12 @@ class GiteeAIImagePlugin(
         download_timeout = int(vconf.get("download_timeout_seconds", 300) or 300)
         download_timeout = max(1, min(download_timeout, 3600))
 
+        base64_limit_mb = int(vconf.get("base64_fallback_max_mb", 64) or 64)
+        base64_limit_bytes = max(1, min(base64_limit_mb, 512)) * 1024 * 1024
+
+        local_result_path = Path(str(video_url or ""))
+        is_local_result = local_result_path.is_file()
+
         async def _send_file(url: str) -> bool:
             try:
                 local_path = Path(str(url or ""))
@@ -2973,6 +2979,39 @@ class GiteeAIImagePlugin(
                 logger.warning(f"[视频] 本地文件发送失败: {e}")
                 return False
 
+        async def _send_base64(path: Path) -> bool:
+            try:
+                file_size = await asyncio.to_thread(lambda: path.stat().st_size)
+                if file_size > base64_limit_bytes:
+                    logger.warning(
+                        "[视频] 跳过 Base64 发送，文件过大: size=%s limit=%s",
+                        file_size,
+                        base64_limit_bytes,
+                    )
+                    return False
+
+                def _encode() -> str:
+                    return base64.b64encode(path.read_bytes()).decode("ascii")
+
+                encoded = await asyncio.to_thread(_encode)
+                self.tasks.update("sending")
+                await asyncio.wait_for(
+                    event.send(
+                        event.chain_result([Video.fromBase64(encoded)])
+                    ),
+                    timeout=float(send_timeout),
+                )
+                logger.info("[视频] Base64 回退发送成功: path=%s", path)
+                return True
+            except Exception as e:
+                logger.warning(f"[视频] Base64 回退发送失败: {e}")
+                return False
+
+        async def _send_local_result() -> bool:
+            if await _send_file(str(local_result_path)):
+                return True
+            return await _send_base64(local_result_path)
+
         async def _send_url(url: str) -> bool:
             try:
                 await asyncio.wait_for(
@@ -2986,23 +3025,39 @@ class GiteeAIImagePlugin(
 
         # file/url forced
         if mode == "file":
+            if is_local_result:
+                if await _send_local_result():
+                    return
+                raise RuntimeError(
+                    "本地视频发送失败，请配置 AstrBot callback_api_base "
+                    "或检查平台视频大小限制"
+                )
             if await _send_file(video_url):
                 return
             await event.send(event.plain_result(video_url))
             return
 
         if mode == "url":
-            if Path(str(video_url or "")).is_file():
-                if await _send_file(video_url):
+            if is_local_result:
+                if await _send_local_result():
                     return
-                await event.send(event.plain_result(video_url))
-                return
+                raise RuntimeError(
+                    "本地视频发送失败，请配置 AstrBot callback_api_base "
+                    "或检查平台视频大小限制"
+                )
             if await _send_url(video_url):
                 return
             await event.send(event.plain_result(video_url))
             return
 
         # auto: prefer file first (most platforms won't render URL as playable video)
+        if is_local_result:
+            if await _send_local_result():
+                return
+            raise RuntimeError(
+                "本地视频发送失败，请配置 AstrBot callback_api_base "
+                "或检查平台视频大小限制"
+            )
         if await _send_file(video_url):
             return
         if await _send_url(video_url):
