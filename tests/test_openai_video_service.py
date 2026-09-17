@@ -301,6 +301,70 @@ class OpenAIVideoServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.backend._submit("cinematic scene", None), "video-1"
         )
 
+    async def test_retries_data_uri_fields_as_json_on_multipart_parser_error(self):
+        png = b"\x89PNG\r\n\x1a\nimage-data"
+        refs = await self.backend._prepare_reference_urls([png], [""])
+        backend = self.mod.OpenAIVideoService(
+            settings={
+                "api_keys": ["secret"],
+                "model": "minimax-h3",
+                "image_input_mode": "image_urls",
+            }
+        )
+        requests = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if len(requests) == 1:
+                self.assertTrue(
+                    request.headers["content-type"].startswith("multipart/form-data;")
+                )
+                return httpx.Response(
+                    400,
+                    json={
+                        "code": "invalid_json",
+                        "message": "multipart: NextPart: bufio: buffer full",
+                    },
+                )
+
+            self.assertEqual(request.headers["content-type"], "application/json")
+            payload = json.loads((await request.aread()).decode("utf-8"))
+            self.assertEqual(payload["image_urls"], refs)
+            return httpx.Response(200, json={"id": "video-json", "status": "queued"})
+
+        transport = httpx.MockTransport(handler)
+        backend._client = lambda **kwargs: httpx.AsyncClient(
+            transport=transport, follow_redirects=True
+        )
+
+        self.assertEqual(
+            await backend._submit("animate", png, reference_urls=refs),
+            "video-json",
+        )
+        self.assertEqual(len(requests), 2)
+
+    async def test_does_not_json_retry_binary_reference_upload(self):
+        backend = self.mod.OpenAIVideoService(
+            settings={"api_keys": ["secret"], "max_retries": 0}
+        )
+        requests = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                400,
+                json={"message": "multipart: NextPart: bufio: buffer full"},
+            )
+
+        transport = httpx.MockTransport(handler)
+        backend._client = lambda **kwargs: httpx.AsyncClient(
+            transport=transport, follow_redirects=True
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "bufio: buffer full"):
+            await backend._submit("animate", b"image-bytes")
+        self.assertEqual(len(requests), 1)
+
     async def test_completed_task_downloads_authenticated_content(self):
         self.backend.poll_interval = 1
         self.backend._download_content = AsyncMock(return_value="C:/videos/result.mp4")

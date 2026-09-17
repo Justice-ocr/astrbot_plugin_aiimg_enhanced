@@ -2,6 +2,13 @@
 
 ## [未发布]
 
+## [v4.8.1] - 2026-09-17
+
+### OpenAI Videos Base64 提交兼容修复
+
+- 兼容部分网关无法通过 multipart 文本字段解析大体积 Data URI 的情况；出现 `NextPart: bufio: buffer full` 时自动改用 JSON 重新提交。
+- JSON 回退支持 `image_urls`、`image_with_roles` 和首尾帧字段，真实文件形式的 `input_reference` 仍保持 multipart 上传。
+
 ## [v4.8.0] - 2026-09-17
 
 ### OpenAI Videos 多参考图输入

@@ -307,6 +307,33 @@ class OpenAIVideoService:
             fields.append((name, (None, rendered)))
         return fields
 
+    @staticmethod
+    def _json_payload_from_fields(
+        fields: list[tuple[str, Any]],
+    ) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {}
+        json_fields = {"image_urls", "image_with_roles"}
+        for name, value in fields:
+            if not isinstance(value, tuple) or len(value) < 2 or value[0] is not None:
+                return None
+            rendered = value[1]
+            if name in json_fields and isinstance(rendered, str):
+                try:
+                    rendered = json.loads(rendered)
+                except json.JSONDecodeError:
+                    pass
+            payload[name] = rendered
+        return payload
+
+    @staticmethod
+    def _is_multipart_parser_error(response: httpx.Response) -> bool:
+        if response.status_code != 400:
+            return False
+        detail = response.text.lower()
+        return "multipart" in detail and (
+            "nextpart" in detail or "buffer full" in detail
+        )
+
     async def _submit(
         self,
         prompt: str,
@@ -326,6 +353,17 @@ class OpenAIVideoService:
                     response = await client.post(
                         self._create_url(), headers=self._headers(), files=fields
                     )
+                    if self._is_multipart_parser_error(response):
+                        json_payload = self._json_payload_from_fields(fields)
+                        if json_payload is not None:
+                            logger.warning(
+                                "[OpenAIVideo] 网关无法解析 multipart，改用 JSON 重试"
+                            )
+                            response = await client.post(
+                                self._create_url(),
+                                headers=self._headers(),
+                                json=json_payload,
+                            )
                 if response.status_code not in {200, 201, 202}:
                     raise RuntimeError(
                         f"OpenAI Videos 提交失败 HTTP {response.status_code}: "
