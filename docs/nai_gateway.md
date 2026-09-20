@@ -1,5 +1,16 @@
 # NovelAI 第三方 GET 网关
 
+## OpenAI Images 协议中转
+
+商家提供 `/v1/images/generations` 时，使用「OpenAI Images」模板。
+填写商家的 Base URL、Key 和模型 ID；默认尺寸改为商家支持的尺寸，
+不要直接沿用通用模板的 4096x4096。
+开启「自然语言转 NAI 标签」即可在文生图和改图前转换文字，
+转换 LLM ID 留空跟随当前会话，或指定 AstrBot 文本模型服务商 ID。
+默认关闭，不影响旧配置；失败时不提交该服务商的生图请求。
+只有商家支持图片编辑接口时才开启「支持改图」。
+此功能不注入角色保持、Vibe 或其他原生 NAI 参数。
+
 ## OpenAI Chat 协议中转
 
 商家提供 `/v1/chat/completions` 时，使用「OpenAI Chat图」模板，

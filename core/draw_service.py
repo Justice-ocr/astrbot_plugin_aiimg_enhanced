@@ -112,7 +112,7 @@ class ImageDrawService:
                 effective_prompt = prompt
                 provider_conf = self.registry.get(pid) or {}
                 if (
-                    provider_conf.get("__template_key") in {"nai_gateway", "nai_native", "openai_chat"}
+                    provider_conf.get("__template_key") in {"nai_gateway", "nai_native", "openai_chat", "openai_images"}
                     and provider_conf.get("nai_translate_prompt", False)
                 ):
                     from .nai_prompt import translate_nai_prompt

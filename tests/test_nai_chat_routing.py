@@ -46,7 +46,9 @@ class NaiChatRoutingTests(unittest.IsolatedAsyncioTestCase):
         for enabled, template, expected in [
             (True, "openai_chat", "landscape, sunset"),
             (False, "openai_chat", "original"),
-            (True, "openai_images", "original"),
+            (True, "openai_images", "landscape, sunset"),
+            (False, "openai_images", "original"),
+            (True, "grok_images", "original"),
         ]:
             router, backend = self.router(enabled=enabled, template=template)
             self.translator.translate_nai_prompt.reset_mock()
@@ -54,7 +56,7 @@ class NaiChatRoutingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(backend.generate.call_args.args[0], expected)
             self.assertEqual(
                 self.translator.translate_nai_prompt.await_count,
-                int(enabled and template == "openai_chat"),
+                int(enabled and template in {"openai_chat", "openai_images"}),
             )
 
     async def test_edit_preserves_images_and_session(self):
@@ -70,3 +72,24 @@ class NaiChatRoutingTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "conversion failed"):
             await router.generate("original", provider_id="nai", session_id="session")
         backend.generate.assert_not_awaited()
+
+    async def test_images_edit_preserves_reference_and_disabled_prompt(self):
+        for enabled, expected in [(True, "landscape, sunset"), (False, "original")]:
+            router, backend = self.router(edit=True, enabled=enabled, template="openai_images")
+            self.translator.translate_nai_prompt.reset_mock()
+            images = [b"reference"]
+            await router.edit("original", images, backend="nai", session_id="session")
+            self.assertEqual(backend.edit.call_args.args, (expected, images))
+            self.assertEqual(self.translator.translate_nai_prompt.await_count, int(enabled))
+
+    async def test_images_conversion_failure_stops_draw_and_edit(self):
+        self.translator.translate_nai_prompt.side_effect = RuntimeError("conversion failed")
+        for edit in (False, True):
+            router, backend = self.router(edit=edit, template="openai_images")
+            with self.assertRaisesRegex(RuntimeError, "conversion failed"):
+                if edit:
+                    await router.edit("original", [b"ref"], backend="nai", session_id="session")
+                else:
+                    await router.generate("original", provider_id="nai", session_id="session")
+            backend.generate.assert_not_awaited()
+            backend.edit.assert_not_awaited()
