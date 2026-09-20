@@ -219,7 +219,7 @@ class EditRouter:
                     else:
                         effective_prompt = prompt
                         conf = self.registry.get(pid) or {}
-                        if conf.get("__template_key") == "nai_native" and conf.get("nai_translate_prompt", False):
+                        if conf.get("__template_key") in {"nai_native", "openai_chat"} and conf.get("nai_translate_prompt", False):
                             from .nai_prompt import translate_nai_prompt
 
                             effective_prompt = await translate_nai_prompt(
