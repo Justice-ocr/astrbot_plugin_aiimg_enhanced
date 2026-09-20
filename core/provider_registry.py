@@ -131,6 +131,10 @@ class ProviderRegistry:
                 return key
 
         # Legacy fallback by id
+        if "nai_reference_mode" in item:
+            return "nai_native"
+        if "nai_auth_mode" in item:
+            return "nai_gateway"
         pid = str(item.get("id") or "").strip().lower()
         if pid in {"gemini_native"}:
             return "gemini_native"
@@ -435,7 +439,7 @@ class ProviderRegistry:
                 keys = item.get("api_keys") or []
                 if not keys or not any(str(k).strip() for k in keys):
                     errors.append(f"provider '{provider_id}' missing api_keys")
-            if template_key == "openai_video":
+            if template_key in {"openai_video", "nai_gateway", "nai_native"}:
                 if not str(item.get("base_url") or "").strip():
                     errors.append(f"provider '{provider_id}' missing base_url")
                 if not str(item.get("model") or "").strip():
@@ -518,6 +522,15 @@ class ProviderRegistry:
         return backend
 
     def _build_backend(self, pid: str, template_key: str, conf: dict) -> object:
+        if template_key == "nai_native":
+            from .nai_native_backend import NaiNativeBackend
+
+            return NaiNativeBackend(imgr=self._imgr, settings=conf)
+        if template_key == "nai_gateway":
+            from .nai_gateway_backend import NaiGatewayBackend
+
+            return NaiGatewayBackend(imgr=self._imgr, settings=conf)
+
         if template_key == "gemini_native":
             settings = {
                 "api_url": conf.get("api_url"),

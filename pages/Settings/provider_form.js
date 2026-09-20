@@ -41,6 +41,16 @@ export function buildProviderForm(p) {
   if (hasField('full_generate_url')) rows.push(buildField('full_generate_url', '文生图完整 URL', 'text', p.full_generate_url || ''));
   if (hasField('full_edit_url')) rows.push(buildField('full_edit_url', '改图完整 URL', 'text', p.full_edit_url || ''));
   if (hasField('model')) rows.push(buildField('model', '模型名称', 'text', p.model || ''));
+  if (hasField('nai_auth_mode')) rows.push(buildSelectField('nai_auth_mode', '鉴权方式', [{value:'token',label:'URL token 参数'}, {value:'bearer',label:'Bearer 请求头'}], p.nai_auth_mode || 'token'));
+  if (hasField('nai_translate_prompt')) rows.push(buildCheckField('nai_translate_prompt', '自然语言转 NAI 标签', p.nai_translate_prompt === true));
+  if (hasField('nai_reference_mode')) rows.push(buildSelectField('nai_reference_mode', '参考图模式', [{value:'img2img',label:'底图重绘'}, {value:'character',label:'角色保持'}, {value:'vibe',label:'风格 / 氛围参考'}], p.nai_reference_mode || 'img2img'));
+  for (const [key, label, fallback] of [['nai_strength','参考 / 重绘强度',0.6], ['nai_vibe_information','Vibe 信息提取度',1]]) {
+    if (hasField(key)) rows.push(buildField(key, label, 'number', p[key] ?? fallback).replace('type="number"', 'type="number" min="0" max="1" step="0.05"'));
+  }
+  if (hasField('nai_llm_provider_id')) rows.push(buildField('nai_llm_provider_id', '转换 LLM ID（留空跟随会话）', 'text', p.nai_llm_provider_id || ''));
+  for (const [key, label] of Object.entries({nai_prompt_prefix:'NAI 提示词前缀', nai_artist:'画师标签', nai_sampler:'采样器', nai_cfg:'CFG Rescale', nai_noise_schedule:'噪声调度'})) {
+    if (hasField(key)) rows.push(buildField(key, label, 'text', p[key] ?? ''));
+  }
   if (hasField('apikey')) rows.push(buildField('apikey', 'API Key', 'text', p.apikey || ''));
   rows.push('</div>');
   if (hasField('api_keys')) rows.push(buildTextareaField('api_keys', 'API Key 池（每行一个）', p.api_keys || []));
@@ -134,6 +144,14 @@ export function readProviderForm($) {
   if (has('full_generate_url')) result.full_generate_url = g('full_generate_url');
   if (has('full_edit_url')) result.full_edit_url = g('full_edit_url');
   if (has('model')) result.model = g('model');
+  if (has('nai_translate_prompt')) result.nai_translate_prompt = gCk('nai_translate_prompt');
+  if (has('nai_reference_mode')) result.nai_reference_mode = g('nai_reference_mode');
+  if (has('nai_strength')) result.nai_strength = gNum('nai_strength', 0.6);
+  if (has('nai_vibe_information')) result.nai_vibe_information = gNum('nai_vibe_information', 1);
+  if (has('nai_llm_provider_id')) result.nai_llm_provider_id = g('nai_llm_provider_id');
+  for (const key of ['nai_auth_mode', 'nai_prompt_prefix', 'nai_artist', 'nai_sampler', 'nai_cfg', 'nai_noise_schedule']) {
+    if (has(key)) result[key] = g(key);
+  }
   if (has('api_keys')) result.api_keys = gList('api_keys');
   if (has('apikey')) result.apikey = g('apikey');
   if (has('api_key')) result.api_key = g('api_key');

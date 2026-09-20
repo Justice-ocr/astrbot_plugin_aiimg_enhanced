@@ -1,5 +1,7 @@
 function inferProviderType(p) {
   if (!p || typeof p !== 'object') return 'openai_images';
+  if ('nai_reference_mode' in p) return 'nai_native';
+  if ('nai_auth_mode' in p) return 'nai_gateway';
   if (String(p.model || '').toLowerCase() === 'grok-imagine-image-edit') return 'grok_images_edit';
   if ('poll_interval' in p || 'poll_timeout' in p) return 'gitee_async';
   if ('cookie_list' in p || 'apikey' in p) return 'jimeng';
@@ -26,6 +28,8 @@ function inferProviderType(p) {
 }
 
 const PROVIDER_TEMPLATES = {
+  nai_native: { label:'NovelAI 原生协议中转', base_url:'', api_keys:[], model:'nai-diffusion-4-5-full', timeout:120, default_size:'832x1216', nai_reference_mode:'img2img', nai_strength:0.6, nai_vibe_information:1, nai_translate_prompt:false, nai_llm_provider_id:'', nai_prompt_prefix:'', nai_artist:'', negative_prompt:'', nai_sampler:'k_euler_ancestral', num_inference_steps:28, guidance_scale:5, nai_cfg:0, nai_noise_schedule:'karras', seed:'', proxy_url:'' },
+  nai_gateway: { label:'NovelAI 第三方 GET 网关', base_url:'', generate_path:'/generate', api_keys:[], model:'nai-diffusion-4-5-full', timeout:120, default_size:'832x1216', nai_auth_mode:'token', nai_translate_prompt:false, nai_llm_provider_id:'', nai_prompt_prefix:'', nai_artist:'', negative_prompt:'', nai_sampler:'', num_inference_steps:28, guidance_scale:5, nai_cfg:'', nai_noise_schedule:'', seed:'', proxy_url:'', extra_body:'' },
   openai_images:          { label:'OpenAI Images', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
   openai_chat:            { label:'OpenAI Chat图', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto' },
   gemini_native:          { label:'Gemini 原生', api_url:'https://generativelanguage.googleapis.com', api_keys:[], model:'gemini-3-pro-image-preview', timeout:120, use_proxy:false, proxy_url:'', default_resolution:'4096x4096', generate_request_mode:'auto', edit_request_mode:'auto' },
@@ -52,6 +56,8 @@ const PROVIDER_TEMPLATES = {
 };
 
 const PROVIDER_NAMES = {
+  nai_native:'NovelAI 原生协议中转',
+  nai_gateway:'NovelAI 第三方 GET 网关',
   openai_images:'OpenAI Images',
   openai_chat:'OpenAI Chat图',
   gemini_native:'Gemini 原生',

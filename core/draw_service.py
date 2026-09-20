@@ -21,9 +21,11 @@ class ImageDrawService:
         data_dir: Path,
         *,
         registry: ProviderRegistry | None = None,
+        context=None,
     ):
         self.config = config if isinstance(config, dict) else {}
         self.imgr = imgr
+        self.context = context
         self.data_dir = Path(data_dir)
         self.registry = registry or ProviderRegistry(
             self.config, imgr=self.imgr, data_dir=self.data_dir
@@ -52,6 +54,7 @@ class ImageDrawService:
         size: str | None = None,
         resolution: str | None = None,
         provider_id: str | None = None,
+        session_id: str | None = None,
     ) -> tuple[Path, list[dict]]:
         """Generate an image.
 
@@ -106,7 +109,18 @@ class ImageDrawService:
                 gen = getattr(backend, "generate", None)
                 if not callable(gen):
                     raise RuntimeError("Provider does not support generate()")
-                result = await gen(prompt, size=final_size, resolution=final_res)
+                effective_prompt = prompt
+                provider_conf = self.registry.get(pid) or {}
+                if (
+                    provider_conf.get("__template_key") in {"nai_gateway", "nai_native"}
+                    and provider_conf.get("nai_translate_prompt", False)
+                ):
+                    from .nai_prompt import translate_nai_prompt
+
+                    effective_prompt = await translate_nai_prompt(
+                        self.context, prompt, provider_conf, session_id
+                    )
+                result = await gen(effective_prompt, size=final_size, resolution=final_res)
                 if not result:
                     raise RuntimeError("Provider returned empty generate result")
                 logger.info(

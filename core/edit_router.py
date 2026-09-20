@@ -24,9 +24,11 @@ class EditRouter:
         data_dir: Path,
         *,
         registry: ProviderRegistry | None = None,
+        context=None,
     ):
         self.config = config if isinstance(config, dict) else {}
         self.imgr = imgr
+        self.context = context
         self.data_dir = Path(data_dir)
         self.registry = registry or ProviderRegistry(
             self.config, imgr=self.imgr, data_dir=self.data_dir
@@ -130,6 +132,7 @@ class EditRouter:
         resolution: str | None = None,
         default_output: str | None = None,
         chain_override: list | None = None,
+        session_id: str | None = None,
     ) -> tuple[Path, list[dict]]:
         """Edit/transform an image.
 
@@ -214,8 +217,16 @@ class EditRouter:
                             prompt, images, task_types=final_task_types
                         )
                     else:
+                        effective_prompt = prompt
+                        conf = self.registry.get(pid) or {}
+                        if conf.get("__template_key") == "nai_native" and conf.get("nai_translate_prompt", False):
+                            from .nai_prompt import translate_nai_prompt
+
+                            effective_prompt = await translate_nai_prompt(
+                                self.context, prompt, conf, session_id
+                            )
                         result = await edit_fn(
-                            prompt,
+                            effective_prompt,
                             images,
                             size=final_size,
                             resolution=final_res,

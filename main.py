@@ -654,10 +654,12 @@ class GiteeAIImagePlugin(
         self._update_llm_tool_descriptions()
 
         self.draw = ImageDrawService(
-            self.config, self.imgr, self.data_dir, registry=self.registry
+            self.config, self.imgr, self.data_dir, registry=self.registry,
+            context=self.context,
         )
         self.edit = EditRouter(
-            self.config, self.imgr, self.data_dir, registry=self.registry
+            self.config, self.imgr, self.data_dir, registry=self.registry,
+            context=self.context,
         )
         self.nb = NanoBananaService(self.config, self.imgr)
         self.refs = ReferenceStore(self.data_dir)
@@ -1702,6 +1704,7 @@ class GiteeAIImagePlugin(
                     edit_prompt = ""
 
                 image_path, _prov_tries = await self.edit.edit(
+                    session_id=event.unified_msg_origin,
                     prompt=edit_prompt,
                     images=bytes_images,
                     backend=target_backend,
@@ -1739,6 +1742,7 @@ class GiteeAIImagePlugin(
                 provider_id=target_backend,
                 size=size,
                 resolution=resolution,
+                session_id=event.unified_msg_origin,
             )
             task_meta = self._build_image_task_meta(
                 mode="text",
@@ -2098,7 +2102,8 @@ class GiteeAIImagePlugin(
             t_start = time.perf_counter()
             await self._capture_history_scope(event)
             image_path, _prov_tries = await self.draw.generate(
-                prompt, size=size, provider_id=provider_override
+                prompt, size=size, provider_id=provider_override,
+                session_id=event.unified_msg_origin,
             )
             t_end = time.perf_counter()
 
@@ -2480,6 +2485,7 @@ class GiteeAIImagePlugin(
             )
             t_start = time.perf_counter()
             image_path, _prov_tries = await self.edit.edit(
+                session_id=event.unified_msg_origin,
                 prompt=prompt,
                 images=bytes_images,
                 backend=backend,
@@ -2616,6 +2622,7 @@ class GiteeAIImagePlugin(
             )
             t_start = time.perf_counter()
             image_path, _prov_tries = await self.edit.edit(
+                session_id=event.unified_msg_origin,
                 prompt=prompt,
                 images=bytes_images,
                 backend=backend,
@@ -3868,6 +3875,7 @@ class GiteeAIImagePlugin(
                 provider_id=spec.provider_id,
                 size=size,
                 resolution=resolution,
+                session_id=event.unified_msg_origin,
             )
             task_meta = self._build_image_task_meta(
                 mode="text",
@@ -3885,6 +3893,7 @@ class GiteeAIImagePlugin(
             if bytes_images is None:
                 bytes_images = await self._prepare_edit_image_bytes(event)
             image_path, _prov_tries = await self.edit.edit(
+                session_id=event.unified_msg_origin,
                 prompt=spec.user_prompt,
                 images=bytes_images,
                 backend=spec.provider_id,
@@ -4666,6 +4675,7 @@ class GiteeAIImagePlugin(
         default_output = str(conf.get("default_output") or "").strip() or None
 
         image_path, _prov_tries = await self.edit.edit(
+            session_id=event.unified_msg_origin,
             prompt=final_prompt,
             images=images,
             backend=backend,
