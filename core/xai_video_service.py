@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import time
 
+import httpx
+
 from astrbot.api import logger
 
 from .openai_video_service import OpenAIVideoService, _is_http_url
@@ -25,11 +27,11 @@ class XaiVideoService(OpenAIVideoService):
         if not 1 <= self.duration <= 15:
             raise ValueError("xAI 视频时长须为 1–15 秒")
         self.aspect_ratio = str(settings.get("aspect_ratio") or "16:9")
-        if self.aspect_ratio not in {"16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"}:
+        if self.aspect_ratio not in {"auto", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"}:
             raise ValueError("无效的 xAI 视频画幅")
         self.resolution = str(settings.get("xai_resolution") or "720p").lower()
-        if self.resolution not in {"480p", "720p"}:
-            raise ValueError("当前 xAI 模板分辨率支持 480p / 720p")
+        if self.resolution not in {"480p", "720p", "1080p"}:
+            raise ValueError("xAI 分辨率支持 480p / 720p / 1080p")
 
     def _create_url(self):
         return f"{self._api_root()}/videos/generations"
@@ -48,11 +50,18 @@ class XaiVideoService(OpenAIVideoService):
             raise ValueError("纯文生视频模式不接受参考图")
         if count > 7 or (self.reference_mode == "image" and count > 1):
             raise ValueError("xAI 首帧模式最多 1 张图片，参考图模式最多 7 张")
+        if self.resolution == "1080p":
+            if self.model != "grok-imagine-video-1.5":
+                raise ValueError("1080p 仅对 grok-imagine-video-1.5 开放")
+            if count and self.reference_mode == "reference":
+                raise ValueError("xAI 多参考图模式最高支持 720p")
         refs = await self._prepare_reference_urls(images, urls)
         payload = {
             "model": self.model, "prompt": prompt, "duration": self.duration,
-            "aspect_ratio": self.aspect_ratio, "resolution": self.resolution,
+            "resolution": self.resolution,
         }
+        if self.aspect_ratio != "auto":
+            payload["aspect_ratio"] = self.aspect_ratio
         if refs:
             if self.reference_mode == "image":
                 payload["image"] = {"url": refs[0]}
@@ -71,13 +80,34 @@ class XaiVideoService(OpenAIVideoService):
 
     async def _poll(self, request_id):
         deadline = time.monotonic() + self.poll_timeout
+        consecutive_errors = 0
         while time.monotonic() < deadline:
-            await asyncio.sleep(self.poll_interval)
-            async with self._client(timeout=30.0) as client:
-                response = await client.get(self._retrieve_url(request_id), headers=self._headers())
+            await asyncio.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                async with self._client(timeout=min(30.0, remaining)) as client:
+                    response = await asyncio.wait_for(
+                        client.get(self._retrieve_url(request_id), headers=self._headers()),
+                        timeout=remaining,
+                    )
+            except (httpx.TransportError, asyncio.TimeoutError) as exc:
+                consecutive_errors += 1
+                if consecutive_errors >= 3:
+                    raise RuntimeError(f"xAI 视频查询连续网络失败, request_id={request_id}") from exc
+                logger.warning("[XaiVideo] 查询网络异常，将重试: request_id=%s", request_id)
+                continue
+            if response.status_code in {408, 429} or response.status_code >= 500:
+                consecutive_errors += 1
+                if consecutive_errors >= 3:
+                    raise RuntimeError(f"xAI 视频查询连续失败 HTTP {response.status_code}, request_id={request_id}")
+                logger.warning("[XaiVideo] 查询 HTTP %s，将重试: request_id=%s", response.status_code, request_id)
+                continue
             if response.status_code != 200:
                 raise RuntimeError(f"xAI 视频查询失败 HTTP {response.status_code}, request_id={request_id}")
             data = response.json()
+            consecutive_errors = 0
             status = str(data.get("status") or "").lower()
             if status in {"failed", "expired", "cancelled", "canceled"}:
                 raise RuntimeError(f"xAI 视频任务 {status}: {self._error_detail(data)}")

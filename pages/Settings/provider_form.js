@@ -41,7 +41,7 @@ export function buildProviderForm(p) {
   if (hasField('full_generate_url')) rows.push(buildField('full_generate_url', '文生图完整 URL', 'text', p.full_generate_url || ''));
   if (hasField('full_edit_url')) rows.push(buildField('full_edit_url', '改图完整 URL', 'text', p.full_edit_url || ''));
   if (hasField('model')) rows.push(buildField('model', '模型名称', 'text', p.model || ''));
-  if (hasField('xai_resolution')) rows.push(buildSelectField('xai_resolution', '视频分辨率', ['480p','720p'], p.xai_resolution || '720p'));
+  if (hasField('xai_resolution')) rows.push(buildSelectField('xai_resolution', '视频分辨率', ['480p','720p','1080p'], p.xai_resolution || '720p'));
   if (hasField('xai_reference_mode')) rows.push(buildSelectField('xai_reference_mode', '视频输入模式', [{value:'reference',label:'多参考图'}, {value:'image',label:'单图首帧'}, {value:'text',label:'纯文生视频'}], p.xai_reference_mode || 'reference'));
   if (hasField('nai_auth_mode')) rows.push(buildSelectField('nai_auth_mode', '鉴权方式', [{value:'token',label:'URL token 参数'}, {value:'bearer',label:'Bearer 请求头'}], p.nai_auth_mode || 'token'));
   if (hasField('nai_translate_prompt')) rows.push(buildCheckField('nai_translate_prompt', '自然语言转 NAI 标签', p.nai_translate_prompt === true));
@@ -78,8 +78,8 @@ export function buildProviderForm(p) {
     if (type === 'openai_video') rows.push(buildField('seconds', '视频时长(秒)', 'number', p.seconds || '4'));
     else rows.push(buildSelectField('seconds', '视频时长(秒)', ['4','5','6','7','8','9','10','11','12'], String(p.seconds || '5')));
   }
-  if (hasField('duration')) rows.push(buildSelectField('duration', '视频时长(秒)', ['4','5','6','7','8','9','10','11','12','13','14','15'], String(p.duration || '5')));
-  if (hasField('aspect_ratio')) rows.push(buildSelectField('aspect_ratio', '视频画幅', ['21:9','16:9','4:3','1:1','3:4','9:16'], p.aspect_ratio || '16:9'));
+  if (hasField('duration')) rows.push(buildSelectField('duration', '视频时长(秒)', type === 'xai_video' ? Array.from({length:15}, (_, i) => String(i + 1)) : ['4','5','6','7','8','9','10','11','12','13','14','15'], String(p.duration || '5')));
+  if (hasField('aspect_ratio')) rows.push(buildSelectField('aspect_ratio', '视频画幅', type === 'xai_video' ? [{value:'auto',label:'自动 / 跟随原图'},'16:9','9:16','1:1','4:3','3:4','3:2','2:3'] : ['21:9','16:9','4:3','1:1','3:4','9:16'], p.aspect_ratio || '16:9'));
   if (hasField('resolution')) rows.push(buildSelectField('resolution', '视频分辨率', ['768P','2K'], p.resolution || '2K'));
   if (hasField('ratio')) rows.push(buildSelectField('ratio', '视频画幅', ['adaptive','21:9','16:9','4:3','1:1','3:4','9:16'], p.ratio || '16:9'));
   if (hasField('size')) rows.push(buildField('size', '视频尺寸（可选）', 'text', p.size || '', '如 1280x720；留空使用服务商默认'));

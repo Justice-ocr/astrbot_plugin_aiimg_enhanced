@@ -54,3 +54,49 @@ class XaiVideoTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.mod.asyncio, "sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
             with self.assertRaises(asyncio.CancelledError):
                 await self.backend._poll("req")
+
+    async def test_auto_ratio_and_1080p_single_image(self):
+        backend = self.mod.XaiVideoService(settings={
+            "api_keys": ["secret"], "xai_reference_mode": "image",
+            "aspect_ratio": "auto", "xai_resolution": "1080p", "duration": "1",
+        })
+        async def handler(request):
+            payload = json.loads(request.content)
+            self.assertNotIn("aspect_ratio", payload)
+            self.assertEqual(payload["resolution"], "1080p")
+            self.assertEqual(payload["duration"], 1)
+            if backend.reference_mode == "image":
+                self.assertEqual(payload["image"], {"url": "https://cdn.test/a"})
+            else:
+                self.assertNotIn("reference_images", payload)
+            return httpx.Response(200, json={"request_id": "req"})
+        backend._client = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        backend._poll = AsyncMock(return_value="result")
+        await backend.generate_video_url("animate", image_urls=["https://cdn.test/a"])
+        backend.reference_mode = "reference"
+        with self.assertRaisesRegex(ValueError, "720p"):
+            await backend.generate_video_url("animate", image_urls=["https://cdn.test/a"])
+        await backend.generate_video_url("animate")
+
+    async def test_poll_recovers_without_resubmission(self):
+        codes = iter([503, 429, 200])
+        async def handler(request):
+            self.assertEqual(request.method, "GET")
+            return httpx.Response(next(codes), json={
+                "status": "done", "video": {"url": "https://cdn.test/result"},
+            })
+        self.backend._client = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        with patch.object(self.mod.asyncio, "sleep", new=AsyncMock()):
+            self.assertEqual(await self.backend._poll("req"), "https://cdn.test/result")
+
+    async def test_poll_errors_are_bounded_and_auth_is_not_retried(self):
+        for code, expected in [(500, 3), (401, 1)]:
+            calls = []
+            async def handler(request):
+                calls.append(request)
+                return httpx.Response(code)
+            self.backend._client = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            with patch.object(self.mod.asyncio, "sleep", new=AsyncMock()):
+                with self.assertRaisesRegex(RuntimeError, "request_id=req"):
+                    await self.backend._poll("req")
+            self.assertEqual(len(calls), expected)
