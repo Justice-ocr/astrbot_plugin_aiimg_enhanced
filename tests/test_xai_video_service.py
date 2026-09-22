@@ -37,6 +37,45 @@ class XaiVideoTests(unittest.IsolatedAsyncioTestCase):
         self.mod = importlib.import_module(f"{CORE_PACKAGE_NAME}.xai_video_service")
         self.backend = self.mod.XaiVideoService(settings={"api_keys": ["secret"]})
 
+    async def test_gateway_result_fields(self):
+        url = "https://cdn.test/result.mp4"
+        for container in (None, "video", "metadata"):
+            for field in ("url", "video_url"):
+                for status in ("done", "completed", "succeeded", "success", ""):
+                    data = {field: url} if container is None else {container: {field: url}}
+                    data["status"] = status
+                    self.backend._client = lambda **kw: httpx.AsyncClient(
+                        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=data))
+                    )
+                    with patch.object(self.mod.asyncio, "sleep", new=AsyncMock()):
+                        self.assertEqual(await self.backend._poll("req"), url)
+
+    async def test_alternate_url_never_bypasses_failure_or_moderation(self):
+        for data in [
+            {"status": "failed", "url": "https://cdn.test/result"},
+            {"status": "done", "url": "https://cdn.test/result", "video": {"respect_moderation": False}},
+            {"status": "done", "respect_moderation": False, "metadata": {"url": "https://cdn.test/result"}},
+        ]:
+            self.backend._client = lambda **kw: httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: httpx.Response(200, json=data))
+            )
+            with patch.object(self.mod.asyncio, "sleep", new=AsyncMock()):
+                with self.assertRaises(RuntimeError):
+                    await self.backend._poll("req")
+
+    async def test_invalid_result_shapes_report_request_id(self):
+        for data in [
+            {"status": "done", "video": "not-an-object", "metadata": []},
+            {"status": "done", "url": "file:///tmp/video.mp4"},
+            {"status": "done", "video": {"url": ""}},
+        ]:
+            self.backend._client = lambda **kw: httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: httpx.Response(200, json=data))
+            )
+            with patch.object(self.mod.asyncio, "sleep", new=AsyncMock()):
+                with self.assertRaisesRegex(RuntimeError, "request_id=req"):
+                    await self.backend._poll("req")
+
     async def test_reference_submission_and_poll(self):
         calls = []
         async def handler(request):

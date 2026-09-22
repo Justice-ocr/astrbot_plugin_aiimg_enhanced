@@ -36,6 +36,25 @@ class XaiVideoService(OpenAIVideoService):
     def _create_url(self):
         return f"{self._api_root()}/videos/generations"
 
+    @staticmethod
+    def _result_url(data):
+        # Check moderation before considering alternative gateway URL fields.
+        containers = [data]
+        for name in ("video", "metadata"):
+            value = data.get(name)
+            if isinstance(value, dict):
+                containers.append(value)
+        if any(item.get("respect_moderation") is False for item in containers):
+            raise RuntimeError("xAI 视频未通过内容审核")
+        video = data.get("video")
+        ordered = ([video] if isinstance(video, dict) else []) + containers
+        for item in ordered:
+            for name in ("url", "video_url"):
+                value = item.get(name)
+                if isinstance(value, str) and _is_http_url(value):
+                    return value.strip()
+        return ""
+
     async def generate_video_url(
         self, prompt, image_bytes=None, *, image_bytes_list=None,
         image_urls=None, preset=None,
@@ -111,15 +130,17 @@ class XaiVideoService(OpenAIVideoService):
                 raise RuntimeError(f"xAI 视频查询失败 HTTP {response.status_code}, request_id={request_id}")
             data = response.json()
             consecutive_errors = 0
-            status = str(data.get("status") or "").lower()
+            if not isinstance(data, dict):
+                raise RuntimeError(f"xAI 查询响应不是 JSON 对象, request_id={request_id}")
+            status = str(data.get("status") or "").strip().lower()
             if status in {"failed", "expired", "cancelled", "canceled"}:
                 raise RuntimeError(f"xAI 视频任务 {status}: {self._error_detail(data)}")
-            if status == "done":
-                video = data.get("video") or {}
-                if video.get("respect_moderation") is False:
-                    raise RuntimeError("xAI 视频未通过内容审核")
-                url = video.get("url")
-                if not _is_http_url(url):
-                    raise RuntimeError("xAI 完成响应缺少 video.url")
-                return url
+            if status in {"done", "completed", "succeeded", "success", ""}:
+                url = self._result_url(data)
+                if url:
+                    return url
+                if status:
+                    raise RuntimeError(
+                        f"xAI 完成响应缺少可用视频地址（video/url/video_url/metadata）, request_id={request_id}"
+                    )
         raise RuntimeError(f"xAI 视频轮询超时, request_id={request_id}")
