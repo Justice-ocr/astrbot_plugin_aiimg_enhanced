@@ -41,6 +41,8 @@ export function buildProviderForm(p) {
   if (hasField('full_generate_url')) rows.push(buildField('full_generate_url', '文生图完整 URL', 'text', p.full_generate_url || ''));
   if (hasField('full_edit_url')) rows.push(buildField('full_edit_url', '改图完整 URL', 'text', p.full_edit_url || ''));
   if (hasField('model')) rows.push(buildField('model', '模型名称', 'text', p.model || ''));
+  if (hasField('xai_resolution')) rows.push(buildSelectField('xai_resolution', '视频分辨率', ['480p','720p'], p.xai_resolution || '720p'));
+  if (hasField('xai_reference_mode')) rows.push(buildSelectField('xai_reference_mode', '视频输入模式', [{value:'reference',label:'多参考图'}, {value:'image',label:'单图首帧'}, {value:'text',label:'纯文生视频'}], p.xai_reference_mode || 'reference'));
   if (hasField('nai_auth_mode')) rows.push(buildSelectField('nai_auth_mode', '鉴权方式', [{value:'token',label:'URL token 参数'}, {value:'bearer',label:'Bearer 请求头'}], p.nai_auth_mode || 'token'));
   if (hasField('nai_translate_prompt')) rows.push(buildCheckField('nai_translate_prompt', '自然语言转 NAI 标签', p.nai_translate_prompt === true));
   if (hasField('nai_reference_mode')) rows.push(buildSelectField('nai_reference_mode', '参考图模式', [{value:'img2img',label:'底图重绘'}, {value:'character',label:'角色保持'}, {value:'vibe',label:'风格 / 氛围参考'}], p.nai_reference_mode || 'img2img'));
@@ -144,6 +146,8 @@ export function readProviderForm($) {
   if (has('full_generate_url')) result.full_generate_url = g('full_generate_url');
   if (has('full_edit_url')) result.full_edit_url = g('full_edit_url');
   if (has('model')) result.model = g('model');
+  if (has('xai_resolution')) result.xai_resolution = g('xai_resolution');
+  if (has('xai_reference_mode')) result.xai_reference_mode = g('xai_reference_mode');
   if (has('nai_translate_prompt')) result.nai_translate_prompt = gCk('nai_translate_prompt');
   if (has('nai_reference_mode')) result.nai_reference_mode = g('nai_reference_mode');
   if (has('nai_strength')) result.nai_strength = gNum('nai_strength', 0.6);

@@ -439,7 +439,7 @@ class ProviderRegistry:
                 keys = item.get("api_keys") or []
                 if not keys or not any(str(k).strip() for k in keys):
                     errors.append(f"provider '{provider_id}' missing api_keys")
-            if template_key in {"openai_video", "nai_gateway", "nai_native"}:
+            if template_key in {"openai_video", "xai_video", "nai_gateway", "nai_native"}:
                 if not str(item.get("base_url") or "").strip():
                     errors.append(f"provider '{provider_id}' missing base_url")
                 if not str(item.get("model") or "").strip():
@@ -767,6 +767,9 @@ class ProviderRegistry:
         elif template_key == "openai_video":
             from .openai_video_service import OpenAIVideoService
             backend = OpenAIVideoService(settings=p, data_dir=self._data_dir)
+        elif template_key == "xai_video":
+            from .xai_video_service import XaiVideoService
+            backend = XaiVideoService(settings=p, data_dir=self._data_dir)
         else:
             raise RuntimeError(f"Provider '{pid}' is not a video provider")
         self._video_backends[pid] = backend

@@ -1022,6 +1022,7 @@ class GiteeAIImagePlugin(
             "agnes_video",
             "minimax_h3_video",
             "openai_video",
+            "xai_video",
         }
         draw_ids  = [pid for pid in self.registry.provider_ids()
                      if self.registry.get(pid).get("__template_key", "") not in _VIDEO_KEYS]
@@ -4395,7 +4396,7 @@ class GiteeAIImagePlugin(
             if not provider_id:
                 return None
 
-            video_keys = {"grok_video", "grok2api_video", "flow2api_video", "custom_video", "agnes_video", "minimax_h3_video", "openai_video"}
+            video_keys = {"grok_video", "grok2api_video", "flow2api_video", "custom_video", "agnes_video", "minimax_h3_video", "openai_video", "xai_video"}
             draw_provider_ids = [
                 pid for pid in self.registry.provider_ids()
                 if self.registry.get(pid).get("__template_key", "") not in video_keys
