@@ -1062,15 +1062,15 @@ class GiteeAIImagePlugin(
                 logger.debug("[aiimg] aiimg_batch_generate 工具描述已更新")
                 break
 
-        # ── 更新 grok_generate_video ──
+        # ── 更新 aiimg_generate_video ──
         for tool in llm_tools.func_list:
-            if tool.name == "grok_generate_video":
+            if tool.name == "aiimg_generate_video":
                 tool.description = (
                     "生成视频。"
                     f"当前视频主链路: {video_primary}。"
                     f"可用视频服务商: {video_list}。"
                 )
-                logger.debug("[aiimg] grok_generate_video 工具描述已更新")
+                logger.debug("[aiimg] aiimg_generate_video 工具描述已更新")
                 break
 
     def _is_selfie_enabled(self) -> bool:
@@ -1901,11 +1901,11 @@ class GiteeAIImagePlugin(
             await self._end_user_job(user_id, kind="image")
 
     @filter.llm_tool()
-    async def grok_generate_video(self, event: AstrMessageEvent, prompt: str):
-        """根据用户发送/引用的图片生成视频。
+    async def aiimg_generate_video(self, event: AstrMessageEvent, prompt: str):
+        """使用配置的视频服务商生成视频，支持文生视频和参考图生视频，不限于 Grok。
 
         Args:
-            prompt(string): 视频提示词。支持 "预设名 额外提示词"（与 `/视频 预设名 额外提示词` 一致）
+            prompt(string): 视频提示词。可用 @服务商ID 指定后端，支持 "预设名 额外提示词"。
         """
         if not self._is_feature_enabled("video", default=False):
             await self._signal_llm_tool_failure(event)

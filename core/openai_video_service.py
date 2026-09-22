@@ -88,6 +88,9 @@ class OpenAIVideoService:
         self.poll_interval = _clamp_int(s.get("poll_interval", 10), 10, 1, 60)
         self.poll_timeout = _clamp_int(s.get("poll_timeout", 1200), 1200, 30, 7200)
         self.seconds = str(s.get("seconds") or "4").strip()
+        self.request_mode = str(s.get("request_mode") or "auto").strip().lower()
+        if self.request_mode not in {"auto", "multipart", "json"}:
+            raise ValueError("视频请求模式必须为 auto、multipart 或 json")
         self.size = _normalize_video_size(s.get("size"))
         self.resolution = str(s.get("video_resolution") or "").strip().lower()
         self.seed = str(s.get("seed") or "").strip()
@@ -221,10 +224,12 @@ class OpenAIVideoService:
         if reference_count <= 0:
             return None
         mode = self.image_input_mode
+        if self.request_mode == "json" and mode == "input_reference":
+            raise ValueError("JSON 模式不支持 input_reference 文件上传，请选择 image_urls")
         if mode == "auto":
             return (
                 "input_reference"
-                if reference_count == 1 and has_upload_bytes
+                if reference_count == 1 and has_upload_bytes and self.request_mode != "json"
                 else "image_urls"
             )
         return mode
@@ -322,6 +327,11 @@ class OpenAIVideoService:
                     rendered = json.loads(rendered)
                 except json.JSONDecodeError:
                     pass
+            if name in {"seconds", "seed"}:
+                try:
+                    rendered = int(rendered)
+                except (TypeError, ValueError):
+                    raise ValueError(f"JSON 视频参数 {name} 必须为整数") from None
             payload[name] = rendered
         return payload
 
@@ -345,20 +355,29 @@ class OpenAIVideoService:
         fields = self._multipart_fields(
             prompt, image_bytes, reference_urls=reference_urls
         )
+        use_json = self.request_mode == "json"
+        json_payload = self._json_payload_from_fields(fields) if use_json else None
+        if use_json and json_payload is None:
+            raise ValueError("JSON 视频请求不能包含文件上传")
         for attempt in range(self.max_retries + 1):
             if attempt:
                 await asyncio.sleep(min(2**attempt, 10))
             try:
                 async with self._client(timeout=float(self.timeout)) as client:
                     response = await client.post(
-                        self._create_url(), headers=self._headers(), files=fields
+                        self._create_url(), headers=self._headers(),
+                        **({"json": json_payload} if use_json else {"files": fields}),
                     )
-                    if self._is_multipart_parser_error(response):
+                    if (
+                        self.request_mode == "auto" and not use_json
+                        and (response.status_code == 415 or self._is_multipart_parser_error(response))
+                    ):
                         json_payload = self._json_payload_from_fields(fields)
                         if json_payload is not None:
                             logger.warning(
-                                "[OpenAIVideo] 网关无法解析 multipart，改用 JSON 重试"
+                                "[OpenAIVideo] 网关拒绝 multipart，改用 JSON 重试"
                             )
+                            use_json = True
                             response = await client.post(
                                 self._create_url(),
                                 headers=self._headers(),
@@ -503,6 +522,8 @@ class OpenAIVideoService:
         primary_bytes = next((data for data in byte_items if data), image_bytes)
         reference_count = max(len(byte_items), len(url_items))
         use_direct_upload = (
+            self.request_mode != "json"
+            and
             reference_count == 1
             and bool(primary_bytes)
             and self.image_input_mode in {"auto", "input_reference"}

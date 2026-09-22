@@ -301,6 +301,51 @@ class OpenAIVideoServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.backend._submit("cinematic scene", None), "video-1"
         )
 
+    async def test_json_submission_encodes_reference_and_integer_fields(self):
+        backend = self.mod.OpenAIVideoService(settings={
+            "api_keys": ["secret"], "request_mode": "json",
+            "seconds": "8", "seed": "0",
+        })
+        async def handler(request):
+            self.assertEqual(request.headers["content-type"], "application/json")
+            payload = json.loads(request.content)
+            self.assertEqual(payload["seconds"], 8)
+            self.assertEqual(payload["seed"], 0)
+            self.assertTrue(payload["image_urls"][0].startswith("data:image/png;base64,"))
+            self.assertNotIn("input_reference", payload)
+            return httpx.Response(200, json={"id": "json-task"})
+        backend._client = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        backend._poll = AsyncMock(return_value="video.mp4")
+        result = await backend.generate_video_url("animate", b"\x89PNG\r\n\x1a\nimage")
+        self.assertEqual(result, "video.mp4")
+
+    async def test_415_fallback_only_in_auto_mode(self):
+        for mode, expected_count in [("auto", 2), ("multipart", 1)]:
+            backend = self.mod.OpenAIVideoService(settings={
+                "api_keys": ["secret"], "request_mode": mode, "max_retries": 0,
+            })
+            requests = []
+            async def handler(request):
+                requests.append(request)
+                if request.headers["content-type"] == "application/json":
+                    return httpx.Response(200, json={"id": "task"})
+                return httpx.Response(415, json={"error": "unsupported media"})
+            backend._client = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            if mode == "auto":
+                self.assertEqual(await backend._submit("animate", None), "task")
+            else:
+                with self.assertRaisesRegex(RuntimeError, "415"):
+                    await backend._submit("animate", None)
+            self.assertEqual(len(requests), expected_count)
+
+    async def test_json_rejects_explicit_file_mode(self):
+        backend = self.mod.OpenAIVideoService(settings={
+            "api_keys": ["secret"], "request_mode": "json",
+            "image_input_mode": "input_reference",
+        })
+        with self.assertRaisesRegex(ValueError, "input_reference"):
+            await backend.generate_video_url("animate", b"\x89PNG\r\n\x1a\nimage")
+
     async def test_retries_data_uri_fields_as_json_on_multipart_parser_error(self):
         png = b"\x89PNG\r\n\x1a\nimage-data"
         refs = await self.backend._prepare_reference_urls([png], [""])

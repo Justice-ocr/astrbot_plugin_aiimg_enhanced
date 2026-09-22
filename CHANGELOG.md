@@ -2,6 +2,13 @@
 
 ## [未发布]
 
+## [v4.10.0] - 2026-09-22
+
+### 视频提交格式与工具命名
+
+- OpenAI Videos 新增 auto / multipart / json 提交模式；JSON 模式支持 Data URI 参考图，auto 在可转换的请求遭遇 HTTP 415 或 multipart 解析错误时回退 JSON。
+- 视频 LLM 工具更名为 `aiimg_generate_video`，明确适用于所有已配置的视频服务商。旧名称不再注册，外部工具白名单或提示词需同步更新。
+
 ## [v4.9.2] - 2026-09-20
 
 ### NAI Images 协议适配
