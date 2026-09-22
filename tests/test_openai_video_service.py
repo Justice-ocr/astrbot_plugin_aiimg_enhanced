@@ -69,6 +69,45 @@ def _load_module():
 
 
 class OpenAIVideoServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_seconds_string_compatibility_in_json_and_auto(self):
+        for mode in ("json", "auto"):
+            backend = self.mod.OpenAIVideoService(settings={
+                "api_keys": ["secret"], "request_mode": mode,
+                "seconds": "6", "seed": "0", "max_retries": 0,
+            })
+            payloads = []
+            async def handler(request):
+                if request.headers["content-type"].startswith("multipart/"):
+                    return httpx.Response(415)
+                payload = json.loads(request.content)
+                payloads.append(payload)
+                if isinstance(payload["seconds"], int):
+                    return httpx.Response(400, json={
+                        "code": "invalid_json",
+                        "message": "json: cannot unmarshal number into Go struct field .seconds of type string",
+                    })
+                self.assertEqual(payload["seconds"], "6")
+                self.assertEqual(payload["seed"], 0)
+                return httpx.Response(200, json={"id": "task"})
+            backend._client = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            self.assertEqual(await backend._submit("test", None), "task")
+            self.assertEqual(len(payloads), 2)
+
+    async def test_other_validation_errors_do_not_trigger_seconds_retry(self):
+        backend = self.mod.OpenAIVideoService(settings={
+            "api_keys": ["secret"], "request_mode": "json", "max_retries": 0,
+        })
+        calls = []
+        async def handler(request):
+            calls.append(request)
+            return httpx.Response(400, json={
+                "message": "json: cannot unmarshal number into Go struct field .seed of type string",
+            })
+        backend._client = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        with self.assertRaisesRegex(RuntimeError, "HTTP 400"):
+            await backend._submit("test", None)
+        self.assertEqual(len(calls), 1)
+
     def setUp(self):
         self.mod = _load_module()
         self.backend = self.mod.OpenAIVideoService(

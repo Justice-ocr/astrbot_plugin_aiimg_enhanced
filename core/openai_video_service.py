@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -383,6 +384,20 @@ class OpenAIVideoService:
                                 headers=self._headers(),
                                 json=json_payload,
                             )
+                    if (
+                        use_json and json_payload is not None
+                        and isinstance(json_payload.get("seconds"), int)
+                        and response.status_code == 400
+                        and re.search(
+                            r"cannot unmarshal number into Go struct field [^\s]*\.seconds of type string",
+                            response.text,
+                        )
+                    ):
+                        json_payload = {**json_payload, "seconds": str(json_payload["seconds"])}
+                        logger.warning("[OpenAIVideo] 网关要求字符串 seconds，调整类型后重试")
+                        response = await client.post(
+                            self._create_url(), headers=self._headers(), json=json_payload,
+                        )
                 if response.status_code not in {200, 201, 202}:
                     raise RuntimeError(
                         f"OpenAI Videos 提交失败 HTTP {response.status_code}: "
