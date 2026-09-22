@@ -4,7 +4,7 @@ short_desc: 多服务商生图、改图、视频与多人设自拍工作台
 desc: >
   面向 AstrBot 的多服务商 AI 绘图工作台，支持文生图、改图、视频生成、
   批量任务、LLM 工具调用和多人设参考图，并提供完整的可视化配置页面。
-version: v4.11.1
+version: v4.11.2
 author: Justice-ocr
 astrbot_version: ">=4.16.0,<5"
 support_platforms:

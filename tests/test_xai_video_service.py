@@ -10,6 +10,28 @@ from test_openai_video_service import _load_module, CORE_PACKAGE_NAME
 
 
 class XaiVideoTests(unittest.IsolatedAsyncioTestCase):
+    async def test_accepted_responses_continue_polling_without_parsing_body(self):
+        responses = iter([
+            httpx.Response(503),
+            httpx.Response(202),
+            httpx.Response(202, text="processing"),
+            httpx.Response(503),
+            httpx.Response(503),
+            httpx.Response(200, json={
+                "status": "done", "video": {"url": "https://cdn.test/result"},
+            }),
+        ])
+        calls = []
+        async def handler(request):
+            self.assertEqual(request.method, "GET")
+            self.assertEqual(request.url.path, "/v1/videos/req")
+            calls.append(request)
+            return next(responses)
+        self.backend._client = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        with patch.object(self.mod.asyncio, "sleep", new=AsyncMock()):
+            self.assertEqual(await self.backend._poll("req"), "https://cdn.test/result")
+        self.assertEqual(len(calls), 6)
+
     def setUp(self):
         _load_module()
         self.mod = importlib.import_module(f"{CORE_PACKAGE_NAME}.xai_video_service")

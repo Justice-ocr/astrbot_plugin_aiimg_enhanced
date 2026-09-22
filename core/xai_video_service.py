@@ -104,6 +104,9 @@ class XaiVideoService(OpenAIVideoService):
                     raise RuntimeError(f"xAI 视频查询连续失败 HTTP {response.status_code}, request_id={request_id}")
                 logger.warning("[XaiVideo] 查询 HTTP %s，将重试: request_id=%s", response.status_code, request_id)
                 continue
+            if response.status_code == 202:
+                consecutive_errors = 0
+                continue
             if response.status_code != 200:
                 raise RuntimeError(f"xAI 视频查询失败 HTTP {response.status_code}, request_id={request_id}")
             data = response.json()
