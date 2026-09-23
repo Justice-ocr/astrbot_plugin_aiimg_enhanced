@@ -968,6 +968,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   const [generationBusy, setGenerationBusy] = useState(false);
   const [generationArmed, setGenerationArmed] = useState(false);
   const [assetUploadBusy, setAssetUploadBusy] = useState(false);
+  const [canvasDropActive, setCanvasDropActive] = useState(false);
   const generationRequest = useRef<Record<string, unknown> | null>(null);
   const dirtyRef = useRef(false);
   const projectRevisionRef = useRef(project?.revision || 0);
@@ -1515,7 +1516,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
         }}>加入画布</button>}
       </div>)}
       <div className="canvas-layout">
-        <div ref={boardRef} className="canvas-board" aria-label="画布" tabIndex={0}
+        <div ref={boardRef} className={canvasDropActive ? "canvas-board drop-active" : "canvas-board"} aria-label="画布" tabIndex={0}
           onWheel={(event) => {
             event.preventDefault();
             const rect = event.currentTarget.getBoundingClientRect();
@@ -1524,10 +1525,22 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
           onDragOver={(event) => {
             event.preventDefault();
             event.dataTransfer.dropEffect = "copy";
+            setCanvasDropActive(true);
+          }}
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setCanvasDropActive(true);
+          }}
+          onDragLeave={(event) => {
+            if (event.currentTarget === event.target || !event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setCanvasDropActive(false);
+            }
           }}
           onDrop={(event) => {
             event.preventDefault();
-            const assetId = event.dataTransfer.getData("text/studio-asset");
+            setCanvasDropActive(false);
+            const assetId = event.dataTransfer.getData("text/studio-asset")
+              || event.dataTransfer.getData("text/plain");
             if (assetId) {
               const asset = snapshot.assets.find((item) => item.asset_id === assetId);
               if (asset) void addAsset(asset);
@@ -1592,20 +1605,28 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
             <small>点击或拖入画布</small>
           </div>
           {snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).map((asset) => (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               className="asset-picker-row"
               draggable
               key={asset.asset_id}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = "copy";
                 event.dataTransfer.setData("text/studio-asset", asset.asset_id);
+                event.dataTransfer.setData("text/plain", asset.asset_id);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  void addAsset(asset);
+                }
               }}
               onClick={() => void addAsset(asset)}
             >
               <AssetPreview item={asset} history={snapshot.history} />
               <span>{asset.filename}</span>
-            </button>
+            </div>
           ))}
           {snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).length === 0 && <div className="empty-state">当前会话暂无图片素材</div>}
         </aside>

@@ -571,6 +571,12 @@
   background-size: 22px 22px;
 }
 
+.canvas-board.drop-active {
+  outline: 3px solid var(--primary-color);
+  outline-offset: -3px;
+  background-color: var(--primary-color-lighten);
+}
+
 .canvas-world {
   position: absolute;
   inset: 0;
@@ -690,6 +696,7 @@
 
 .asset-picker-row:hover { background: var(--primary-color-lighten); }
 .asset-picker-row:active { cursor: grabbing; }
+.asset-picker-row:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
 .asset-picker-row img, .asset-picker-row .media-placeholder { width: 42px; height: 42px; object-fit: cover; border-radius: 4px; }
 .asset-picker-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 
