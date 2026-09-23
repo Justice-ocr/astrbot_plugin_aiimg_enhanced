@@ -13,12 +13,17 @@ import asyncio
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
 from astrbot.api import logger
 from .image_format import guess_image_mime_and_ext
+from .video_errors import (
+    VideoNoFallbackError,
+    VideoSubmissionUnknownError,
+    VideoTaskAcceptedError,
+)
 
 
 def _clamp_int(v: Any, default: int, lo: int, hi: int) -> int:
@@ -327,6 +332,7 @@ class CustomVideoBackend:
         image_bytes: bytes | None = None,
         *,
         preset: str | None = None,
+        on_task_accepted: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         t0 = time.perf_counter()
         last_exc: Exception | None = None
@@ -343,7 +349,13 @@ class CustomVideoBackend:
                     follow_redirects=True,
                     proxies=self.proxy_url,
                 ) as client:
-                    data = await self._post_generate(prompt, image_bytes, client)
+                    try:
+                        data = await self._post_generate(prompt, image_bytes, client)
+                    except (httpx.TimeoutException, httpx.TransportError) as exc:
+                        raise VideoSubmissionUnknownError(
+                            f"自定义视频提交连接中断，任务可能已被接收，"
+                            f"不会自动重试: {exc}"
+                        ) from exc
                     logger.debug("[CustomVideo] 提交响应: %s", str(data)[:200])
 
                     # 直接返回型：响应里有 URL
@@ -357,14 +369,36 @@ class CustomVideoBackend:
                         task_id = _extract_task_id(data, self.task_id_path)
                         if task_id:
                             logger.info("[CustomVideo] 获取 task_id=%s，开始轮询", task_id)
-                            url = await self._poll_for_url(task_id)
+                            if on_task_accepted is not None:
+                                await on_task_accepted(task_id)
+                            try:
+                                url = await self._poll_for_url(task_id)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as exc:
+                                raise VideoTaskAcceptedError(
+                                    "Custom Video", task_id, "轮询", exc
+                                ) from exc
                             logger.info("[CustomVideo] 轮询完成 URL，耗时=%.2fs", time.perf_counter() - t0)
                             return url
 
-                    raise RuntimeError(f"响应中未找到视频 URL 或 task_id，响应: {str(data)[:300]}")
+                    raise VideoSubmissionUnknownError(
+                        "自定义视频提交已收到成功响应，但没有视频 URL 或 task_id，"
+                        f"不会自动重试: {str(data)[:300]}"
+                    )
 
+            except VideoNoFallbackError:
+                raise
             except Exception as e:
                 last_exc = e
                 logger.warning("[CustomVideo] attempt=%s/%s 失败: %s", attempt + 1, self.max_retries + 1, e)
 
         raise last_exc or RuntimeError("视频生成失败")
+
+    async def resume_video_url(self, upstream_task_id: str) -> str:
+        task_id = str(upstream_task_id or "").strip()
+        if not task_id:
+            raise ValueError("缺少自定义视频上游任务 ID")
+        if not self.poll_path:
+            raise ValueError("自定义视频服务商没有配置 poll_path，无法恢复查询")
+        return await self._poll_for_url(task_id)

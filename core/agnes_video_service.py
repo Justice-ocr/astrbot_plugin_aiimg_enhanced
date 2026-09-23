@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -13,14 +13,16 @@ import httpx
 from astrbot.api import logger
 
 from .image_format import guess_image_mime_and_ext
+from .repeatable_file_tokens import (
+    install_repeatable_file_token_support,
+    mark_repeatable_file_token,
+)
+from .video_errors import VideoSubmissionUnknownError, VideoTaskAcceptedError
 
 
 _ASPECT_RATIOS = {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
 _DONE_STATUSES = {"completed", "complete", "succeeded", "success", "finished", "done"}
 _FAIL_STATUSES = {"failed", "error", "cancelled", "canceled"}
-_ASTRBOT_FILE_SERVICE_PATCHED = False
-
-
 def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     try:
         return max(minimum, min(int(value), maximum))
@@ -189,38 +191,10 @@ class AgnesVideoService:
         return url
 
     def _install_astrbot_file_service_magic(self, file_token_service: Any) -> None:
-        global _ASTRBOT_FILE_SERVICE_PATCHED
-        if not self.enable_file_service_magic or _ASTRBOT_FILE_SERVICE_PATCHED:
+        if not self.enable_file_service_magic:
             return
-        if getattr(file_token_service, "_aiimg_agnes_magic_patched", False):
-            _ASTRBOT_FILE_SERVICE_PATCHED = True
-            return
-        required = ("handle_file", "lock", "_cleanup_expired_tokens", "staged_files")
-        if not all(hasattr(file_token_service, name) for name in required):
+        if not install_repeatable_file_token_support(file_token_service):
             logger.warning("[AgnesVideo] 当前 AstrBot 文件服务不支持可重复访问补丁")
-            return
-
-        original_handle_file = file_token_service.handle_file
-
-        async def repeatable_handle_file(file_token: str) -> str:
-            async with file_token_service.lock:
-                await file_token_service._cleanup_expired_tokens()
-                if file_token not in file_token_service.staged_files:
-                    raise KeyError(f"无效或过期的文件 token: {file_token}")
-                file_path, expire_time = file_token_service.staged_files[file_token]
-                if time.time() > expire_time:
-                    file_token_service.staged_files.pop(file_token, None)
-                    raise KeyError(f"无效或过期的文件 token: {file_token}")
-                if not Path(file_path).is_file():
-                    file_token_service.staged_files.pop(file_token, None)
-                    raise FileNotFoundError(f"文件不存在: {file_path}")
-                return file_path
-
-        file_token_service._aiimg_agnes_original_handle_file = original_handle_file
-        file_token_service.handle_file = repeatable_handle_file
-        file_token_service._aiimg_agnes_magic_patched = True
-        _ASTRBOT_FILE_SERVICE_PATCHED = True
-        logger.info("[AgnesVideo] 已启用 AstrBot 文件 token 可重复访问")
 
     def _resolve_file_service_base_url(self) -> str:
         if self.file_service_base_url:
@@ -261,6 +235,12 @@ class AgnesVideoService:
         if not token:
             file_path.unlink(missing_ok=True)
             raise RuntimeError("AstrBot 文件服务未返回有效 token")
+        if self.enable_file_service_magic:
+            try:
+                mark_repeatable_file_token(file_token_service, token, file_path)
+            except Exception:
+                file_path.unlink(missing_ok=True)
+                raise
         public_url = f"{base_url}/api/file/{token}"
         logger.info("[AgnesVideo] 已生成 AstrBot 文件服务参考图 URL")
         return public_url, file_path
@@ -306,17 +286,25 @@ class AgnesVideoService:
                 raise RuntimeError("Agnes 参考图不是公网 URL，且未启用图床上传")
         return refs
 
-    def _build_payload(self, prompt: str, refs: list[str]) -> dict[str, Any]:
+    def _build_payload(
+        self,
+        prompt: str,
+        refs: list[str],
+        *,
+        seconds_override: str | int | None = None,
+        aspect_ratio_override: str | None = None,
+    ) -> dict[str, Any]:
         if self.model != "agnes-video-2.5-flash":
             raise RuntimeError("当前 Agnes 视频模板仅支持 agnes-video-2.5-flash")
         try:
-            seconds = int(self.seconds)
+            seconds = int(seconds_override if seconds_override is not None else self.seconds)
         except ValueError as exc:
             raise RuntimeError("Agnes 视频时长必须为 4 到 12 秒") from exc
         if seconds < 4 or seconds > 12:
             raise RuntimeError("Agnes 视频时长必须为 4 到 12 秒")
-        if self.aspect_ratio not in _ASPECT_RATIOS:
-            raise RuntimeError(f"Agnes 不支持画幅 {self.aspect_ratio}")
+        aspect_ratio = str(aspect_ratio_override or self.aspect_ratio)
+        if aspect_ratio not in _ASPECT_RATIOS:
+            raise RuntimeError(f"Agnes 不支持画幅 {aspect_ratio}")
 
         payload: dict[str, Any] = {
             "model": self.model,
@@ -324,7 +312,7 @@ class AgnesVideoService:
             "seconds": str(seconds),
             "mode": "text",
             "size": "720P",
-            "aspect_ratio": self.aspect_ratio,
+            "aspect_ratio": aspect_ratio,
             "n": 1,
         }
         if not payload["prompt"]:
@@ -338,32 +326,34 @@ class AgnesVideoService:
         return payload
 
     async def _submit(self, payload: dict[str, Any]) -> tuple[str, str | None]:
-        last_error: Exception | None = None
-        for attempt in range(self.max_retries + 1):
-            if attempt:
-                await asyncio.sleep(min(2**attempt, 10))
-            try:
-                async with self._client(timeout=float(self.timeout)) as client:
-                    response = await client.post(
-                        self._create_url(), headers=self._headers(), json=payload
-                    )
-                if response.status_code < 200 or response.status_code >= 300:
-                    raise RuntimeError(
-                        f"Agnes 提交任务失败 HTTP {response.status_code}: {response.text[:300]}"
-                    )
-                data = response.json()
-                video_id = str(data.get("video_id") or "").strip()
-                task_id = str(data.get("task_id") or data.get("id") or "").strip() or None
-                if not video_id:
-                    raise RuntimeError(f"Agnes 未返回 video_id: {str(data)[:300]}")
-                return video_id, task_id
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                last_error = exc
-                if attempt >= self.max_retries:
-                    break
-        raise last_error or RuntimeError("Agnes 视频任务提交失败")
+        try:
+            async with self._client(timeout=float(self.timeout)) as client:
+                response = await client.post(
+                    self._create_url(), headers=self._headers(), json=payload
+                )
+        except asyncio.CancelledError:
+            raise
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise VideoSubmissionUnknownError(
+                f"Agnes 提交连接中断，任务可能已被接收，不会自动重试: {exc}"
+            ) from exc
+        if response.status_code < 200 or response.status_code >= 300:
+            raise RuntimeError(
+                f"Agnes 提交任务失败 HTTP {response.status_code}: {response.text[:300]}"
+            )
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise VideoSubmissionUnknownError(
+                "Agnes 提交成功但响应无法解析，不会自动重试"
+            ) from exc
+        video_id = str(data.get("video_id") or "").strip()
+        task_id = str(data.get("task_id") or data.get("id") or "").strip() or None
+        if not video_id:
+            raise VideoSubmissionUnknownError(
+                f"Agnes 提交成功但没有 video_id，不会自动重试: {str(data)[:300]}"
+            )
+        return video_id, task_id
 
     @staticmethod
     def _extract_video_url(data: Any) -> str | None:
@@ -420,6 +410,12 @@ class AgnesVideoService:
 
         raise RuntimeError(f"Agnes 视频轮询超时（{self.poll_timeout}s），video_id={video_id}")
 
+    async def resume_video_url(self, upstream_task_id: str) -> str:
+        video_id = str(upstream_task_id or "").strip()
+        if not video_id:
+            raise ValueError("缺少 Agnes 上游视频 ID")
+        return await self._poll(video_id)
+
     async def generate_video_url(
         self,
         prompt: str,
@@ -428,6 +424,10 @@ class AgnesVideoService:
         image_bytes_list: list[bytes] | None = None,
         image_urls: list[str] | None = None,
         preset: str | None = None,
+        seconds: str | int | None = None,
+        duration: str | int | None = None,
+        aspect_ratio: str | None = None,
+        on_task_accepted: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         del preset
         byte_items = list(image_bytes_list or ([] if image_bytes is None else [image_bytes]))
@@ -437,10 +437,24 @@ class AgnesVideoService:
             refs = await self._prepare_reference_urls(
                 byte_items, url_items, temporary_paths=temporary_paths
             )
-            payload = self._build_payload(prompt, refs)
+            payload = self._build_payload(
+                prompt,
+                refs,
+                seconds_override=seconds if seconds is not None else duration,
+                aspect_ratio_override=aspect_ratio,
+            )
             video_id, task_id = await self._submit(payload)
             logger.info("[AgnesVideo] 任务已提交: video_id=%s task_id=%s", video_id, task_id or "")
-            return await self._poll(video_id)
+            if on_task_accepted is not None:
+                await on_task_accepted(video_id)
+            try:
+                return await self._poll(video_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise VideoTaskAcceptedError(
+                    "Agnes Video", task_id or video_id, "轮询", exc
+                ) from exc
         finally:
             for path in temporary_paths:
                 try:

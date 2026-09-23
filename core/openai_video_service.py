@@ -7,7 +7,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 from urllib.parse import quote, urlsplit
 
 import aiofiles
@@ -16,6 +16,8 @@ import httpx
 from astrbot.api import logger
 
 from .image_format import guess_image_mime_and_ext, guess_image_mime_and_ext_strict
+from .media_leases import acquire_media, media_is_active, release_media
+from .video_errors import VideoSubmissionUnknownError, VideoTaskAcceptedError
 
 
 _DONE_STATUSES = {"completed", "succeeded"}
@@ -197,11 +199,17 @@ class OpenAIVideoService:
             refs.append(self._to_data_uri(image_bytes))
         return refs
 
-    def _validate_minimax_h3_options(self, reference_mode: str | None) -> None:
+    def _validate_minimax_h3_options(
+        self,
+        reference_mode: str | None,
+        *,
+        seconds: str | None = None,
+        resolution: str | None = None,
+    ) -> None:
         if self.model.strip().lower() != "minimax-h3":
             return
         try:
-            seconds = int(self.seconds)
+            seconds = int(seconds if seconds is not None else self.seconds)
         except (TypeError, ValueError) as exc:
             raise RuntimeError("MiniMax H3 视频时长必须是整数") from exc
 
@@ -215,16 +223,21 @@ class OpenAIVideoService:
             allowed_resolutions = {"", "480p", "768p", "1080p"}
             if reference_mode in {"first_last_frame", "roles_frames"}:
                 allowed_resolutions.discard("1080p")
-        if self.resolution not in allowed_resolutions:
+        selected_resolution = resolution if resolution is not None else self.resolution
+        if selected_resolution not in allowed_resolutions:
             allowed_text = " / ".join(sorted(value for value in allowed_resolutions if value))
             raise RuntimeError(f"当前 MiniMax H3 模式的分辨率仅支持 {allowed_text}")
 
     def _resolve_image_input_mode(
-        self, reference_count: int, *, has_upload_bytes: bool
+        self,
+        reference_count: int,
+        *,
+        has_upload_bytes: bool,
+        image_input_mode: str | None = None,
     ) -> str | None:
         if reference_count <= 0:
             return None
-        mode = self.image_input_mode
+        mode = image_input_mode or self.image_input_mode
         if self.request_mode == "json" and mode == "input_reference":
             raise ValueError("JSON 模式不支持 input_reference 文件上传，请选择 image_urls")
         if mode == "auto":
@@ -241,6 +254,10 @@ class OpenAIVideoService:
         image_bytes: bytes | None,
         *,
         reference_urls: list[str] | None = None,
+        seconds: str | None = None,
+        size: str | None = None,
+        resolution: str | None = None,
+        image_input_mode: str | None = None,
     ) -> list[tuple[str, Any]]:
         text = str(prompt or "").strip()
         if not text:
@@ -252,12 +269,15 @@ class OpenAIVideoService:
             ("model", (None, self.model)),
             ("prompt", (None, text)),
         ]
-        if self.seconds:
-            fields.append(("seconds", (None, self.seconds)))
-        if self.size:
-            fields.append(("size", (None, self.size)))
-        if self.resolution:
-            fields.append(("resolution", (None, self.resolution)))
+        selected_seconds = seconds if seconds is not None else self.seconds
+        selected_size = _normalize_video_size(size if size is not None else self.size)
+        selected_resolution = resolution if resolution is not None else self.resolution
+        if selected_seconds:
+            fields.append(("seconds", (None, selected_seconds)))
+        if selected_size:
+            fields.append(("size", (None, selected_size)))
+        if selected_resolution:
+            fields.append(("resolution", (None, selected_resolution)))
         if self.seed:
             fields.append(("seed", (None, self.seed)))
 
@@ -265,8 +285,11 @@ class OpenAIVideoService:
         reference_mode = self._resolve_image_input_mode(
             len(refs) or (1 if image_bytes else 0),
             has_upload_bytes=bool(image_bytes),
+            image_input_mode=image_input_mode,
         )
-        self._validate_minimax_h3_options(reference_mode)
+        self._validate_minimax_h3_options(
+            reference_mode, seconds=selected_seconds, resolution=selected_resolution
+        )
         if reference_mode in {"first_last_frame", "roles_frames"} and len(refs) != 2:
             raise RuntimeError("MiniMax H3 首尾帧模式必须同时提供且仅提供两张图片")
         if reference_mode == "input_reference" and image_bytes:
@@ -313,8 +336,8 @@ class OpenAIVideoService:
             fields.append((name, (None, rendered)))
         return fields
 
-    @staticmethod
     def _json_payload_from_fields(
+        self,
         fields: list[tuple[str, Any]],
     ) -> dict[str, Any] | None:
         payload: dict[str, Any] = {}
@@ -323,6 +346,8 @@ class OpenAIVideoService:
             if not isinstance(value, tuple) or len(value) < 2 or value[0] is not None:
                 return None
             rendered = value[1]
+            if name in self.extra_form:
+                rendered = self.extra_form[name]
             if name in json_fields and isinstance(rendered, str):
                 try:
                     rendered = json.loads(rendered)
@@ -333,6 +358,8 @@ class OpenAIVideoService:
                     rendered = int(rendered)
                 except (TypeError, ValueError):
                     raise ValueError(f"JSON 视频参数 {name} 必须为整数") from None
+            if name == "size":
+                rendered = _normalize_video_size(rendered)
             payload[name] = rendered
         return payload
 
@@ -351,79 +378,103 @@ class OpenAIVideoService:
         image_bytes: bytes | None,
         *,
         reference_urls: list[str] | None = None,
+        seconds: str | None = None,
+        size: str | None = None,
+        resolution: str | None = None,
+        image_input_mode: str | None = None,
     ) -> str:
-        last_error: Exception | None = None
         fields = self._multipart_fields(
-            prompt, image_bytes, reference_urls=reference_urls
+            prompt,
+            image_bytes,
+            reference_urls=reference_urls,
+            seconds=seconds,
+            size=size,
+            resolution=resolution,
+            image_input_mode=image_input_mode,
         )
         use_json = self.request_mode == "json"
         json_payload = self._json_payload_from_fields(fields) if use_json else None
         if use_json and json_payload is None:
             raise ValueError("JSON 视频请求不能包含文件上传")
-        for attempt in range(self.max_retries + 1):
-            if attempt:
-                await asyncio.sleep(min(2**attempt, 10))
-            try:
-                async with self._client(timeout=float(self.timeout)) as client:
-                    response = await client.post(
-                        self._create_url(), headers=self._headers(),
-                        **({"json": json_payload} if use_json else {"files": fields}),
-                    )
-                    if (
-                        self.request_mode == "auto" and not use_json
-                        and (response.status_code == 415 or self._is_multipart_parser_error(response))
-                    ):
-                        json_payload = self._json_payload_from_fields(fields)
-                        if json_payload is not None:
-                            logger.warning(
-                                "[OpenAIVideo] 网关拒绝 multipart，改用 JSON 重试"
-                            )
-                            use_json = True
-                            response = await client.post(
-                                self._create_url(),
-                                headers=self._headers(),
-                                json=json_payload,
-                            )
-                    if (
-                        use_json and json_payload is not None
-                        and isinstance(json_payload.get("seconds"), int)
-                        and response.status_code == 400
-                        and re.search(
-                            r"cannot unmarshal number into Go struct field [^\s]*\.seconds of type string",
-                            response.text,
+        try:
+            async with self._client(timeout=float(self.timeout)) as client:
+                response = await client.post(
+                    self._create_url(), headers=self._headers(),
+                    **({"json": json_payload} if use_json else {"files": fields}),
+                )
+                if (
+                    self.request_mode == "auto" and not use_json
+                    and (response.status_code == 415 or self._is_multipart_parser_error(response))
+                ):
+                    json_payload = self._json_payload_from_fields(fields)
+                    if json_payload is not None:
+                        logger.warning(
+                            "[OpenAIVideo] 网关拒绝 multipart，改用 JSON 重试"
                         )
-                    ):
-                        json_payload = {**json_payload, "seconds": str(json_payload["seconds"])}
-                        logger.warning("[OpenAIVideo] 网关要求字符串 seconds，调整类型后重试")
+                        use_json = True
                         response = await client.post(
-                            self._create_url(), headers=self._headers(), json=json_payload,
+                            self._create_url(),
+                            headers=self._headers(),
+                            json=json_payload,
                         )
-                if response.status_code not in {200, 201, 202}:
-                    raise RuntimeError(
-                        f"OpenAI Videos 提交失败 HTTP {response.status_code}: "
-                        f"{response.text[:300]}"
+                if (
+                    use_json and json_payload is not None
+                    and isinstance(json_payload.get("seconds"), int)
+                    and response.status_code == 400
+                    and re.search(
+                        r"cannot unmarshal number into Go struct field [^\s]*\.seconds of type string",
+                        response.text,
                     )
+                ):
+                    json_payload = {**json_payload, "seconds": str(json_payload["seconds"])}
+                    logger.warning("[OpenAIVideo] 网关要求字符串 seconds，调整类型后重试")
+                    response = await client.post(
+                        self._create_url(), headers=self._headers(), json=json_payload,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise VideoSubmissionUnknownError(
+                f"OpenAI Videos 提交连接中断，任务可能已被上游接收，"
+                f"不会自动重试或切换服务商: {exc}"
+            ) from exc
+
+        if response.status_code not in {200, 201, 202}:
+            raise RuntimeError(
+                f"OpenAI Videos 提交失败 HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+        try:
                 data = response.json()
-                video_id = str(data.get("id") or data.get("task_id") or "").strip()
-                if not video_id:
-                    raise RuntimeError(f"OpenAI Videos 未返回任务 ID: {str(data)[:300]}")
-                return video_id
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                last_error = exc
-                if attempt >= self.max_retries:
-                    break
-        raise last_error or RuntimeError("OpenAI Videos 任务提交失败")
+        except Exception as exc:
+            raise VideoSubmissionUnknownError(
+                "OpenAI Videos 提交返回成功状态但响应无法解析，"
+                "任务可能已被接收，不会自动重试"
+            ) from exc
+        video_id = str(data.get("id") or data.get("task_id") or "").strip()
+        if not video_id:
+            raise VideoSubmissionUnknownError(
+                f"OpenAI Videos 提交返回成功状态但没有任务 ID，"
+                f"不会自动重试: {str(data)[:300]}"
+            )
+        return video_id
 
     async def _cleanup_cached_videos(self) -> None:
         video_dir = self.data_dir / "videos"
         try:
-            files = [path for path in video_dir.iterdir() if path.is_file()]
-            if len(files) <= self.max_cached_videos:
+            all_files = [
+                path
+                for path in video_dir.iterdir()
+                if path.is_file() and path.suffix.lower() == ".mp4"
+            ]
+            if len(all_files) <= self.max_cached_videos:
                 return
-            files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-            for path in files[self.max_cached_videos :]:
+            removable = [
+                path for path in all_files if not media_is_active(path)
+            ]
+            removable.sort(key=lambda path: path.stat().st_mtime)
+            overflow = len(all_files) - self.max_cached_videos
+            for path in removable[:overflow]:
                 await asyncio.to_thread(path.unlink, missing_ok=True)
         except Exception as exc:
             logger.warning("[OpenAIVideo] 清理旧视频失败: %s", exc)
@@ -433,6 +484,9 @@ class OpenAIVideoService:
         await asyncio.to_thread(video_dir.mkdir, parents=True, exist_ok=True)
         final_path = video_dir / f"openai_{int(time.time())}_{uuid.uuid4().hex[:8]}.mp4"
         temp_path = final_path.with_suffix(".mp4.part")
+        active_paths = {final_path.resolve(), temp_path.resolve()}
+        for active_path in active_paths:
+            acquire_media(active_path)
         try:
             async with self._client(timeout=float(self.timeout)) as client:
                 async with client.stream(
@@ -478,6 +532,9 @@ class OpenAIVideoService:
         except Exception:
             temp_path.unlink(missing_ok=True)
             raise
+        finally:
+            for active_path in active_paths:
+                release_media(active_path)
 
     async def _poll(self, video_id: str) -> str:
         deadline = time.monotonic() + self.poll_timeout
@@ -522,6 +579,12 @@ class OpenAIVideoService:
             f"OpenAI Videos 轮询超时（{self.poll_timeout}s），video_id={video_id}"
         )
 
+    async def resume_video_url(self, upstream_task_id: str) -> str:
+        task_id = str(upstream_task_id or "").strip()
+        if not task_id:
+            raise ValueError("缺少 OpenAI Videos 上游任务 ID")
+        return await self._poll(task_id)
+
     async def generate_video_url(
         self,
         prompt: str,
@@ -530,6 +593,12 @@ class OpenAIVideoService:
         image_bytes_list: list[bytes] | None = None,
         image_urls: list[str] | None = None,
         preset: str | None = None,
+        seconds: str | None = None,
+        size: str | None = None,
+        resolution: str | None = None,
+        image_input_mode: str | None = None,
+        reference_mode: str | None = None,
+        on_task_accepted: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         del preset
         byte_items = list(image_bytes_list or ([] if image_bytes is None else [image_bytes]))
@@ -552,6 +621,19 @@ class OpenAIVideoService:
             prompt,
             primary_bytes,
             reference_urls=reference_urls,
+            seconds=seconds,
+            size=size,
+            resolution=resolution,
+            image_input_mode=image_input_mode or reference_mode,
         )
         logger.info("[OpenAIVideo] 任务已提交: video_id=%s", video_id)
-        return await self._poll(video_id)
+        if on_task_accepted is not None:
+            await on_task_accepted(video_id)
+        try:
+            return await self._poll(video_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise VideoTaskAcceptedError(
+                "OpenAI Videos", video_id, "轮询或下载", exc
+            ) from exc

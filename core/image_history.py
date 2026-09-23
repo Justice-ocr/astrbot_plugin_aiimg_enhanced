@@ -93,6 +93,28 @@ class ImageHistory:
                 conn.close()
         return await asyncio.to_thread(write)
 
+    async def read_for_preservation(self, scope: str, image_id: int) -> tuple[dict, bytes]:
+        def read():
+            conn = self._connect()
+            try:
+                with conn:
+                    # Hold the same lock as history eviction until the bytes are copied.
+                    conn.execute("BEGIN IMMEDIATE")
+                    row = conn.execute("SELECT * FROM images WHERE scope=? AND id=?", (scope, image_id)).fetchone()
+                    if row is None:
+                        raise ValueError("历史图片不存在或不属于当前会话")
+                    path = self._archive_path(row).resolve()
+                    if not path.is_relative_to(self.image_dir.resolve()) or not path.is_file():
+                        raise ValueError("历史图片已清理")
+                    with path.open("rb") as source:
+                        raw = source.read(50 * 1024 * 1024 + 1)
+                    if len(raw) > 50 * 1024 * 1024:
+                        raise ValueError("历史图片超过 50MB")
+                    return self._record(row), raw
+            finally:
+                conn.close()
+        return await asyncio.to_thread(read)
+
     async def list(self, scope: str, *, limit: int = 10) -> list[dict]:
         def read():
             conn = self._connect()

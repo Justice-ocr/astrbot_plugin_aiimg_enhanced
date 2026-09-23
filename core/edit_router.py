@@ -10,7 +10,7 @@ from astrbot.api import logger
 from .gitee_edit import GiteeEditBackend
 from .output_spec import parse_output
 from .provider_chain import as_dict, as_list, candidates_from_chain
-from .provider_registry import ProviderRegistry
+from .provider_registry import ProviderRegistry, leased_backend
 from .task_manager import update_task_state
 
 
@@ -200,51 +200,52 @@ class EditRouter:
                 final_size = out_size
                 final_res = out_res
 
-            for attempt in range(max_attempts):
-                try:
-                    update_task_state("generating")
-                    logger.info(
-                        "[edit] Provider=%s attempt=%s/%s",
-                        pid,
-                        attempt + 1,
-                        max_attempts,
-                    )
-                    edit_fn = getattr(backend_obj, "edit", None)
-                    if not callable(edit_fn):
-                        raise RuntimeError("Provider does not support edit()")
-                    if isinstance(backend_obj, GiteeEditBackend):
-                        result = await backend_obj.edit(
-                            prompt, images, task_types=final_task_types
+            async with leased_backend(self.registry, backend_obj):
+                for attempt in range(max_attempts):
+                    try:
+                        update_task_state("generating")
+                        logger.info(
+                            "[edit] Provider=%s attempt=%s/%s",
+                            pid,
+                            attempt + 1,
+                            max_attempts,
                         )
-                    else:
-                        effective_prompt = prompt
-                        conf = self.registry.get(pid) or {}
-                        if conf.get("__template_key") in {"nai_native", "openai_chat", "openai_images"} and conf.get("nai_translate_prompt", False):
-                            from .nai_prompt import translate_nai_prompt
-
-                            effective_prompt = await translate_nai_prompt(
-                                self.context, prompt, conf, session_id
+                        edit_fn = getattr(backend_obj, "edit", None)
+                        if not callable(edit_fn):
+                            raise RuntimeError("Provider does not support edit()")
+                        if isinstance(backend_obj, GiteeEditBackend):
+                            result = await backend_obj.edit(
+                                prompt, images, task_types=final_task_types
                             )
-                        result = await edit_fn(
-                            effective_prompt,
-                            images,
-                            size=final_size,
-                            resolution=final_res,
+                        else:
+                            effective_prompt = prompt
+                            conf = self.registry.get(pid) or {}
+                            if conf.get("__template_key") in {"nai_native", "openai_chat", "openai_images"} and conf.get("nai_translate_prompt", False):
+                                from .nai_prompt import translate_nai_prompt
+
+                                effective_prompt = await translate_nai_prompt(
+                                    self.context, prompt, conf, session_id
+                                )
+                            result = await edit_fn(
+                                effective_prompt,
+                                images,
+                                size=final_size,
+                                resolution=final_res,
+                            )
+                        if not result:
+                            raise RuntimeError("Provider returned empty edit result")
+                        logger.info(
+                            "[edit] Provider=%s success in %.2fs",
+                            pid,
+                            time.perf_counter() - t_start,
                         )
-                    if not result:
-                        raise RuntimeError("Provider returned empty edit result")
-                    logger.info(
-                        "[edit] Provider=%s success in %.2fs",
-                        pid,
-                        time.perf_counter() - t_start,
-                    )
-                    provider_tries.append({"pid": pid, "ok": True, "error": ""})
-                    return result, provider_tries
-                except Exception as e:
-                    last_error = e
-                    logger.warning("[edit] Provider=%s attempt=%s failed: %s", pid, attempt + 1, e)
-                    provider_tries.append({"pid": pid, "ok": False, "error": str(e)})
-                    if attempt + 1 < max_attempts:
-                        await asyncio.sleep(0.5 * (2**attempt))
+                        provider_tries.append({"pid": pid, "ok": True, "error": ""})
+                        return result, provider_tries
+                    except Exception as e:
+                        last_error = e
+                        logger.warning("[edit] Provider=%s attempt=%s failed: %s", pid, attempt + 1, e)
+                        provider_tries.append({"pid": pid, "ok": False, "error": str(e)})
+                        if attempt + 1 < max_attempts:
+                            await asyncio.sleep(0.5 * (2**attempt))
 
         raise RuntimeError(f"Edit failed: {last_error}") from last_error

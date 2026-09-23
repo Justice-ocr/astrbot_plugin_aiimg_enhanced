@@ -141,6 +141,31 @@ class ManagedTaskIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("<Picture 2>", kwargs["prompt"])
         self.assertIn("只参考服装和配饰", kwargs["prompt"])
 
+    async def test_accepted_video_task_does_not_try_backup_provider(self):
+        primary = AsyncMock(
+            side_effect=self.mod.VideoNoFallbackError(
+                "primary task was accepted but polling failed"
+            )
+        )
+        backup = AsyncMock(return_value="https://cdn.example.com/duplicate.mp4")
+        backends = {
+            "primary": types.SimpleNamespace(generate_video_url=primary),
+            "backup": types.SimpleNamespace(generate_video_url=backup),
+        }
+        self.plugin.registry = types.SimpleNamespace(
+            get_video_backend=lambda provider_id: backends[provider_id]
+        )
+        self.plugin._get_video_chain = lambda: ["primary", "backup"]
+        self.plugin._send_video_result = AsyncMock()
+
+        await self.plugin._async_generate_video(
+            self.event, "do not duplicate", "alice"
+        )
+
+        primary.assert_awaited_once()
+        backup.assert_not_awaited()
+        self.plugin._send_video_result.assert_not_awaited()
+
     async def test_successful_command_records_task_and_history(self):
         image_dir = self.root / "images"
         image_dir.mkdir()

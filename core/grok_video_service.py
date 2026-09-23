@@ -23,6 +23,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from astrbot.api import logger
+from .video_errors import VideoNoFallbackError, VideoSubmissionUnknownError
 
 
 def _clamp_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
@@ -409,10 +410,18 @@ class GrokVideoService:
         )
 
         async def _request_once() -> Any:
-            async with httpx.AsyncClient(
-                timeout=timeout, follow_redirects=True
-            ) as client:
-                resp = await client.post(self.api_url, json=payload, headers=headers)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=timeout, follow_redirects=True
+                ) as client:
+                    resp = await client.post(
+                        self.api_url, json=payload, headers=headers
+                    )
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                raise VideoSubmissionUnknownError(
+                    f"Grok 视频提交连接中断，任务可能已被接收，"
+                    f"不会自动重试: {exc}"
+                ) from exc
 
             if resp.status_code != 200:
                 detail = resp.text[:500]
@@ -468,8 +477,9 @@ class GrokVideoService:
                                 ]
                             }
                         return chunks[-1]
-                raise RuntimeError(
-                    f"API 响应 JSON 解析失败: {e}, body={resp.text[:200]}"
+                raise VideoSubmissionUnknownError(
+                    "Grok 视频返回成功状态但响应无法解析，"
+                    f"不会自动重试: body={resp.text[:200]}"
                 ) from e
 
         async def _request_with_retries() -> Any:
@@ -481,6 +491,8 @@ class GrokVideoService:
                         f"prompt={final_prompt[:60]}..."
                     )
                     return await _request_once()
+                except VideoNoFallbackError:
+                    raise
                 except Exception as e:
                     last_exc = e
                     if attempt >= self.max_retries:
@@ -507,13 +519,9 @@ class GrokVideoService:
                 return video_url
 
             last_parse_error = parse_error or "API 响应未包含视频 URL"
-            if attempt >= self.empty_response_retry:
-                break
-
-            delay = max(0, self.retry_delay) * (2**attempt) + random.uniform(0, 0.5)
-            logger.warning(
-                f"[GrokVideo] 响应无视频URL: {last_parse_error}，{delay:.1f}s 后重试..."
+            raise VideoSubmissionUnknownError(
+                "Grok 视频返回成功状态但没有视频 URL，"
+                f"不会自动重试: {last_parse_error}"
             )
-            await asyncio.sleep(delay)
 
         raise RuntimeError(f"Grok 视频生成失败: {last_parse_error}")

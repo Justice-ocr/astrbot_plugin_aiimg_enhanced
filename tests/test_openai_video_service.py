@@ -108,6 +108,30 @@ class OpenAIVideoServiceTests(unittest.IsolatedAsyncioTestCase):
             await backend._submit("test", None)
         self.assertEqual(len(calls), 1)
 
+    async def test_submit_timeout_is_not_retried(self):
+        backend = self.mod.OpenAIVideoService(settings={
+            "api_keys": ["secret"], "max_retries": 5,
+        })
+        calls = 0
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def post(self, url, **kwargs):
+                nonlocal calls
+                calls += 1
+                request = httpx.Request("POST", url)
+                raise httpx.ReadTimeout("submit timeout", request=request)
+
+        backend._client = lambda **kwargs: _Client()
+        with self.assertRaises(self.mod.VideoSubmissionUnknownError):
+            await backend._submit("test", None)
+        self.assertEqual(calls, 1)
+
     def setUp(self):
         self.mod = _load_module()
         self.backend = self.mod.OpenAIVideoService(
@@ -357,6 +381,26 @@ class OpenAIVideoServiceTests(unittest.IsolatedAsyncioTestCase):
         backend._poll = AsyncMock(return_value="video.mp4")
         result = await backend.generate_video_url("animate", b"\x89PNG\r\n\x1a\nimage")
         self.assertEqual(result, "video.mp4")
+
+    def test_json_fallback_preserves_extra_form_types(self):
+        backend = self.mod.OpenAIVideoService(settings={
+            "api_keys": ["secret"],
+            "extra_form": {
+                "enhance_prompt": False,
+                "camera": {"motion": "pan"},
+                "tags": ["cinematic", "daylight"],
+                "strength": 0.0,
+            },
+        })
+
+        payload = backend._json_payload_from_fields(
+            backend._multipart_fields("animate", None)
+        )
+
+        self.assertIs(payload["enhance_prompt"], False)
+        self.assertEqual(payload["camera"], {"motion": "pan"})
+        self.assertEqual(payload["tags"], ["cinematic", "daylight"])
+        self.assertEqual(payload["strength"], 0.0)
 
     async def test_415_fallback_only_in_auto_mode(self):
         for mode, expected_count in [("auto", 2), ("multipart", 1)]:

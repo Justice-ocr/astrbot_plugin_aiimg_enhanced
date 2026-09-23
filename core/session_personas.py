@@ -46,3 +46,20 @@ class SessionPersonas:
             finally:
                 conn.close()
         return await asyncio.to_thread(read)
+
+    async def clear_persona(self, persona: str) -> int:
+        """Remove stale selections after a persona is deleted."""
+        value = str(persona or "").strip()
+        if not value:
+            return 0
+
+        def write():
+            conn = self._connect()
+            try:
+                with conn:
+                    result = conn.execute("DELETE FROM selections WHERE persona=?", (value,))
+                    return int(result.rowcount)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(write)

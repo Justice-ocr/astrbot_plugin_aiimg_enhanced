@@ -10,10 +10,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,12 @@ import aiofiles
 import httpx
 
 from astrbot.api import logger
+from .media_leases import (
+    acquire_media,
+    hold_media,
+    media_is_active,
+    release_media,
+)
 from .task_manager import update_task_state
 
 from .net_safety import URLFetchPolicy, collect_trusted_origins, ensure_url_allowed, read_network_policy
@@ -70,7 +78,26 @@ class VideoManager:
         )
         self.cleanup_batch_ratio = 0.5
 
-    async def _resolve_video_url(self, url: str, *, timeout: httpx.Timeout) -> str:
+    @staticmethod
+    def _wrapper_video_url(data: Any) -> str:
+        if not isinstance(data, dict):
+            return ""
+        for key in ("url", "video_url", "download_url"):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        items = data.get("data")
+        if isinstance(items, list) and items and isinstance(items[0], dict):
+            return str(items[0].get("url") or "").strip()
+        return ""
+
+    async def _resolve_video_url(
+        self,
+        url: str,
+        *,
+        timeout: httpx.Timeout,
+        policy: URLFetchPolicy,
+    ) -> str:
         """Resolve a possibly indirect URL into a direct mp4 URL.
 
         Some providers return an HTML page or JSON wrapper that contains the real mp4 link.
@@ -81,41 +108,73 @@ class VideoManager:
         if u.lower().endswith(".mp4"):
             return u
 
-        # Try a lightweight GET and inspect content.
-        try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                resp = await client.get(u, headers={"Accept": "text/html,application/json"})
-                ct = (resp.headers.get("content-type") or "").lower()
-                text = resp.text or ""
+        current = u
+        redirects = 0
+        preview_limit = 512 * 1024
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            while True:
+                await ensure_url_allowed(current, policy=policy)
+                try:
+                    async with client.stream(
+                        "GET",
+                        current,
+                        headers={"Accept": "text/html,application/json,video/*"},
+                    ) as resp:
+                        if resp.status_code in {301, 302, 303, 307, 308}:
+                            if redirects >= self._media_max_redirects:
+                                raise RuntimeError("Too many redirects")
+                            location = (resp.headers.get("location") or "").strip()
+                            if not location:
+                                raise RuntimeError("Redirect without location")
+                            current = str(httpx.URL(current).join(location))
+                            redirects += 1
+                            continue
 
-                # JSON that contains url
-                if "application/json" in ct:
-                    try:
-                        data = resp.json()
-                        if isinstance(data, dict):
-                            for k in ("url", "video_url", "download_url"):
-                                v = str(data.get(k) or "").strip()
-                                if v.lower().endswith(".mp4"):
-                                    return v
-                            # OpenAI-like {data:[{url:...}]}
-                            d0 = (data.get("data") or [{}])[0]
-                            if isinstance(d0, dict):
-                                v = str(d0.get("url") or "").strip()
-                                if v.lower().endswith(".mp4"):
-                                    return v
-                    except Exception:
-                        pass
+                        resp.raise_for_status()
+                        content_type = (
+                            resp.headers.get("content-type") or ""
+                        ).lower()
+                        if content_type.startswith("video/"):
+                            return current
 
-                # HTML page that contains an mp4 link
-                if "text/html" in ct or text.lstrip().lower().startswith("<!doctype"):
-                    m = re.search(r"https?://[^\s\"']+?\.mp4", text)
-                    if m:
-                        return m.group(0)
+                        body = bytearray()
+                        async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
+                            if not chunk:
+                                continue
+                            remaining = preview_limit - len(body)
+                            if remaining <= 0:
+                                break
+                            body.extend(chunk[:remaining])
+                            if len(body) >= preview_limit:
+                                break
+                except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                    logger.debug(
+                        "[VideoManager] 视频包装页解析失败，按原 URL 下载: %s",
+                        exc,
+                    )
+                    return u
+                break
 
-        except Exception:
-            pass
+        text = bytes(body).decode("utf-8", errors="replace")
+        if "application/json" in content_type:
+            try:
+                candidate = self._wrapper_video_url(json.loads(text))
+                if candidate:
+                    return str(httpx.URL(current).join(candidate))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+
+        if "text/html" in content_type or text.lstrip().lower().startswith("<!doctype"):
+            match = re.search(r"https?://[^\s\"']+?\.mp4(?:\?[^\s\"']*)?", text)
+            if match:
+                return match.group(0)
 
         return u
+
+    @contextmanager
+    def hold_video(self, path: Path):
+        with hold_media(path) as resolved:
+            yield resolved
 
     async def download_video(self, url: str, *, timeout_seconds: int = 300) -> Path:
         update_task_state("downloading")
@@ -141,10 +200,17 @@ class VideoManager:
             dns_timeout_seconds=float(self._dns_timeout_seconds),
         )
 
+        active_paths = {path.resolve(), tmp_path.resolve()}
+        for active_path in active_paths:
+            acquire_media(active_path)
         t0 = time.perf_counter()
-        current = await self._resolve_video_url(str(url or "").strip(), timeout=timeout)
-        redirects = 0
         try:
+            current = await self._resolve_video_url(
+                str(url or "").strip(),
+                timeout=timeout,
+                policy=policy,
+            )
+            redirects = 0
             while True:
                 await ensure_url_allowed(current, policy=policy)
                 async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
@@ -179,32 +245,46 @@ class VideoManager:
             except Exception:
                 pass
             raise
+        else:
+            try:
+                await asyncio.to_thread(tmp_path.replace, path)
+            except Exception:
+                await asyncio.to_thread(tmp_path.rename, path)
 
-        try:
-            await asyncio.to_thread(tmp_path.replace, path)
-        except Exception:
-            # fallback copy if replace fails
-            await asyncio.to_thread(tmp_path.rename, path)
+            logger.info(
+                f"[VideoManager] 下载完成: path={path}, 耗时={time.perf_counter() - t0:.2f}s"
+            )
 
-        logger.info(
-            f"[VideoManager] 下载完成: path={path}, 耗时={time.perf_counter() - t0:.2f}s"
-        )
-
-        await self.cleanup_old_videos()
-        return path
+            await self.cleanup_old_videos()
+            return path
+        finally:
+            for active_path in active_paths:
+                release_media(active_path)
 
     async def cleanup_old_videos(self) -> None:
         if self.max_cached_videos <= 0:
             return
 
         try:
-            videos: list[Path] = list(self.video_dir.iterdir())
-            total = len(videos)
+            all_videos = [
+                path
+                for path in self.video_dir.iterdir()
+                if path.is_file()
+                and path.suffix.lower() == ".mp4"
+            ]
+            total = len(all_videos)
             if total <= self.max_cached_videos:
                 return
 
+            videos = [
+                path
+                for path in all_videos
+                if not media_is_active(path)
+            ]
             overflow = total - self.max_cached_videos
-            delete_count = max(1, int(overflow * self.cleanup_batch_ratio))
+            delete_count = min(len(videos), overflow)
+            if delete_count <= 0:
+                return
 
             stats = await asyncio.gather(
                 *[asyncio.to_thread(p.stat) for p in videos],

@@ -72,10 +72,15 @@ from .core.session_personas import SessionPersonas
 from .core.task_manager import TaskManager, managed_task, STATUS_LABELS
 from .core.nanobanana import NanoBananaService
 from .core.persona_manager import PersonaManager, PersonaProfile
-from .core.provider_registry import ProviderRegistry
+from .core.provider_registry import ProviderRegistry, leased_backend
 from .core.ref_store import ReferenceStore
 from .core.utils import close_session, get_images_from_event
 from .core.video_manager import VideoManager
+from .core.video_errors import VideoNoFallbackError
+from .core.studio.job_store import StudioJobStore
+from .core.studio.generation_service import StudioGenerationService
+from .core.studio.asset_store import StudioAssetStore
+from .core.studio.project_store import StudioProjectStore
 
 def _deep_merge(base: dict, override: dict) -> dict:
     """递归深度合并两个字典，override 的值覆盖 base，保留 base 中未被覆盖的字段。"""
@@ -155,6 +160,10 @@ class GiteeAIImagePlugin(
         self.image_history = ImageHistory(Path(self.data_dir))
         self.session_personas = SessionPersonas(self.data_dir)
         self.tasks = TaskManager()
+        self.studio_jobs = StudioJobStore(self.data_dir)
+        self.studio_assets = StudioAssetStore(self.data_dir)
+        self.studio_projects = StudioProjectStore(self.data_dir)
+        self.studio_generation = StudioGenerationService(self)
         # 持久化：AstrBot原生config对象（可能有save_config方法）
         self._native_config = config if hasattr(config, "save_config") else None
         # 持久化：自管理的JSON文件路径（兜底）
@@ -627,6 +636,12 @@ class GiteeAIImagePlugin(
             pass
 
     async def initialize(self):
+        interrupted_jobs = await self.studio_jobs.mark_interrupted()
+        if interrupted_jobs:
+            logger.warning(
+                "[StudioJob] 已将 %s 个上次进程遗留任务标记为 interrupted，不会自动重新提交",
+                interrupted_jobs,
+            )
         # 如果存在持久化的 JSON 文件，合并到 self.config（Pages保存的配置）
         persist_path = getattr(self, "_persist_config_path",
             str(pathlib.Path(self.data_dir) / "aiimg_persist_config.json"))
@@ -2975,13 +2990,14 @@ class GiteeAIImagePlugin(
                     video_path = await self.videomgr.download_video(
                         url, timeout_seconds=download_timeout
                     )
-                self.tasks.update("sending")
-                await asyncio.wait_for(
-                    event.send(
-                        event.chain_result([Video.fromFileSystem(str(video_path))])
-                    ),
-                    timeout=float(send_timeout),
-                )
+                with self.videomgr.hold_video(video_path):
+                    self.tasks.update("sending")
+                    await asyncio.wait_for(
+                        event.send(
+                            event.chain_result([Video.fromFileSystem(str(video_path))])
+                        ),
+                        timeout=float(send_timeout),
+                    )
                 return True
             except Exception as e:
                 logger.warning(f"[视频] 本地文件发送失败: {e}")
@@ -3344,43 +3360,51 @@ class GiteeAIImagePlugin(
                 try:
                     self.tasks.update("generating")
                     backend = self.registry.get_video_backend(pid)
-                    if getattr(backend, "supports_multiple_images", False):
-                        backend_image_bytes = image_bytes
-                        backend_image_bytes_list = image_bytes_list
-                        backend_image_urls = image_urls
-                        backend_prompt = prompt
-                        if (
-                            not had_image
-                            and getattr(backend, "supports_selfie_reference_fallback", False)
-                        ):
-                            if selfie_reference_inputs is None:
-                                selfie_reference_inputs = (
-                                    await self._get_video_selfie_reference_inputs(event)
-                                )
-                            fallback_bytes, fallback_urls, role_prompt = selfie_reference_inputs
-                            if fallback_bytes:
-                                backend_image_bytes = next(
-                                    (data for data in fallback_bytes if data), None
-                                )
-                                backend_image_bytes_list = fallback_bytes
-                                backend_image_urls = fallback_urls
-                                backend_prompt = f"{prompt}\n\n{role_prompt}"
-                        candidate_url = await backend.generate_video_url(
-                            prompt=backend_prompt,
-                            image_bytes=backend_image_bytes,
-                            image_bytes_list=backend_image_bytes_list,
-                            image_urls=backend_image_urls,
-                        )
-                    else:
-                        candidate_url = await backend.generate_video_url(
-                            prompt=prompt, image_bytes=image_bytes
-                        )
+                    async with leased_backend(self.registry, backend):
+                        if getattr(backend, "supports_multiple_images", False):
+                            backend_image_bytes = image_bytes
+                            backend_image_bytes_list = image_bytes_list
+                            backend_image_urls = image_urls
+                            backend_prompt = prompt
+                            if (
+                                not had_image
+                                and getattr(backend, "supports_selfie_reference_fallback", False)
+                            ):
+                                if selfie_reference_inputs is None:
+                                    selfie_reference_inputs = (
+                                        await self._get_video_selfie_reference_inputs(event)
+                                    )
+                                fallback_bytes, fallback_urls, role_prompt = selfie_reference_inputs
+                                if fallback_bytes:
+                                    backend_image_bytes = next(
+                                        (data for data in fallback_bytes if data), None
+                                    )
+                                    backend_image_bytes_list = fallback_bytes
+                                    backend_image_urls = fallback_urls
+                                    backend_prompt = f"{prompt}\n\n{role_prompt}"
+                            candidate_url = await backend.generate_video_url(
+                                prompt=backend_prompt,
+                                image_bytes=backend_image_bytes,
+                                image_bytes_list=backend_image_bytes_list,
+                                image_urls=backend_image_urls,
+                            )
+                        else:
+                            candidate_url = await backend.generate_video_url(
+                                prompt=prompt, image_bytes=image_bytes
+                            )
                     candidate_url = str(candidate_url or "").strip()
                     if not candidate_url:
                         raise RuntimeError("Provider returned empty video url")
                     video_url = candidate_url
                     used_pid = pid
                     break
+                except VideoNoFallbackError as e:
+                    logger.warning(
+                        "[视频] Provider=%s 已提交任务但后续失败，停止备用服务商: %s",
+                        pid,
+                        e,
+                    )
+                    raise
                 except Exception as e:
                     last_error = e
                     logger.warning("[视频] Provider=%s 失败: %s", pid, e)
@@ -3670,6 +3694,7 @@ class GiteeAIImagePlugin(
     # ==================== Bot 自拍（参考照） ====================
 
     async def terminate(self):
+        await self.studio_generation.close()
         await self.tasks.close()
         self.debouncer.clear_all()
         try:

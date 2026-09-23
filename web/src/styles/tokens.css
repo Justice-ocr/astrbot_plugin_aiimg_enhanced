@@ -1,0 +1,93 @@
+:root {
+  --hue: 196;
+  --primary-color: oklch(62% 0.13 var(--hue));
+  --primary-color-lighten: oklch(94% 0.025 var(--hue));
+  --primary-color-hover: oklch(90% 0.035 var(--hue));
+  --primary-color-transparent: oklch(62% 0.13 var(--hue) / 14%);
+  --accent-coral: oklch(66% 0.16 28);
+  --accent-amber: oklch(75% 0.14 82);
+  --text-color: oklch(27% 0.018 240);
+  --text-color-lighten: oklch(50% 0.02 240);
+  --border-color: oklch(88% 0.018 220);
+  --card-color: oklch(100% 0 0);
+  --card-color-transparent: oklch(100% 0 0 / 88%);
+  --background-color: oklch(97% 0.012 205);
+  --surface-muted: oklch(95% 0.014 215);
+  --danger-color: oklch(58% 0.18 25);
+  --shadow-color: oklch(20% 0.02 240 / 8%);
+  --brand-font: "Segoe UI", "Noto Sans SC", sans-serif;
+  --primary-font: "Segoe UI", "Noto Sans SC", sans-serif;
+  --code-font: "Cascadia Code", "SFMono-Regular", monospace;
+  --topbar-height: 64px;
+  --sidebar-width: 224px;
+  --page-width-xl: 1480px;
+}
+
+:root[data-theme="dark"] {
+  --primary-color: oklch(72% 0.12 var(--hue));
+  --primary-color-lighten: oklch(30% 0.045 var(--hue));
+  --primary-color-hover: oklch(35% 0.05 var(--hue));
+  --primary-color-transparent: oklch(72% 0.12 var(--hue) / 16%);
+  --accent-coral: oklch(72% 0.15 28);
+  --accent-amber: oklch(79% 0.13 82);
+  --text-color: oklch(94% 0.006 220);
+  --text-color-lighten: oklch(73% 0.018 220);
+  --border-color: oklch(34% 0.022 220);
+  --card-color: oklch(23% 0.022 225);
+  --card-color-transparent: oklch(23% 0.022 225 / 90%);
+  --background-color: oklch(17% 0.018 225);
+  --surface-muted: oklch(27% 0.022 225);
+  --danger-color: oklch(70% 0.17 25);
+  --shadow-color: oklch(0% 0 0 / 22%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--background-color);
+  color: var(--text-color);
+  font-family: var(--primary-font);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background-color);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+button,
+a,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

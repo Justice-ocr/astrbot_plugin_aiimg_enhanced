@@ -77,7 +77,7 @@ class TaskManager:
             item.state = "cancelling"
             item.worker.cancel()
 
-    async def run(self, scope, kind, prompt, operation, *, persona=""):
+    async def run(self, scope, kind, prompt, operation, *, persona="", requires_delivery=True):
         if self.current() is not None:
             return await operation()
         # Keep terminal history bounded without discarding active tasks.
@@ -99,11 +99,12 @@ class TaskManager:
         item.worker = asyncio.create_task(execute())
         try:
             result = await item.worker
-            item.state = "completed" if item.sent and item.sent == item.generated and not item.failed else (
-                "partial" if item.sent else "failed"
+            successful = item.sent if requires_delivery else item.generated
+            item.state = "completed" if successful and successful == item.generated and not item.failed else (
+                "partial" if successful else "failed"
             )
             if item.state == "failed":
-                item.error = "未成功发送结果；若已生成，可在历史中重发"
+                item.error = "未成功发送结果；若已生成，可在历史中重发" if requires_delivery else "未成功生成结果"
             return result
         except asyncio.CancelledError:
             item.state = "cancelled"

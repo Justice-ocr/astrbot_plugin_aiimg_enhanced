@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 from astrbot.api import logger
 from .image_format import guess_image_mime_and_ext
+from .video_errors import VideoNoFallbackError, VideoSubmissionUnknownError
 
 def _clamp_int(v: Any, default: int, min_value: int, max_value: int) -> int:
     try:
@@ -91,20 +92,25 @@ class Grok2ApiVideoService:
         )
 
         async def _request_once() -> Any:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                if image_bytes:
-                    mime, ext = guess_image_mime_and_ext(image_bytes)
-                    files = {
-                        "input_reference": (f"image.{ext}", image_bytes, mime)
-                    }
-                    resp = await client.post(self.api_url, headers=headers, data=data_fields, files=files)
-                else:
-                    # if no image, grok2api likely expects json but we can do json too
-                    headers_json = dict(headers)
-                    headers_json["Content-Type"] = "application/json"
-                    payload = dict(data_fields)
-                    payload["n"] = 1
-                    resp = await client.post(self.api_url, headers=headers_json, json=payload)
+            try:
+                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                    if image_bytes:
+                        mime, ext = guess_image_mime_and_ext(image_bytes)
+                        files = {
+                            "input_reference": (f"image.{ext}", image_bytes, mime)
+                        }
+                        resp = await client.post(self.api_url, headers=headers, data=data_fields, files=files)
+                    else:
+                        headers_json = dict(headers)
+                        headers_json["Content-Type"] = "application/json"
+                        payload = dict(data_fields)
+                        payload["n"] = 1
+                        resp = await client.post(self.api_url, headers=headers_json, json=payload)
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                raise VideoSubmissionUnknownError(
+                    f"Grok2API 视频提交连接中断，任务可能已被接收，"
+                    f"不会自动重试: {exc}"
+                ) from exc
 
             if resp.status_code != 200:
                 detail = resp.text[:500]
@@ -116,7 +122,10 @@ class Grok2ApiVideoService:
             try:
                 return resp.json()
             except Exception as e:
-                raise RuntimeError(f"API 响应 JSON 解析失败: {e}, body={resp.text[:200]}") from e
+                raise VideoSubmissionUnknownError(
+                    f"Grok2API 视频返回成功状态但响应无法解析，"
+                    f"不会自动重试: body={resp.text[:200]}"
+                ) from e
 
         t_start = time.perf_counter()
         
@@ -138,7 +147,12 @@ class Grok2ApiVideoService:
                     logger.info(f"[Grok2ApiVideo] 成功: 耗时={t_end - t_start:.2f}s, url={video_url[:80]}...")
                     return video_url
                 
-                raise RuntimeError(f"API 响应未包含视频 URL: {str(data)[:200]}")
+                raise VideoSubmissionUnknownError(
+                    "Grok2API 视频返回成功状态但没有视频 URL，"
+                    f"不会自动重试: {str(data)[:200]}"
+                )
+            except VideoNoFallbackError:
+                raise
             except Exception as e:
                 last_exc = e
                 if attempt >= self.max_retries:

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Awaitable, Callable
 
 import httpx
 
 from astrbot.api import logger
 
 from .openai_video_service import OpenAIVideoService, _is_http_url
+from .video_errors import VideoSubmissionUnknownError, VideoTaskAcceptedError
 
 
 class XaiVideoService(OpenAIVideoService):
@@ -57,7 +59,9 @@ class XaiVideoService(OpenAIVideoService):
 
     async def generate_video_url(
         self, prompt, image_bytes=None, *, image_bytes_list=None,
-        image_urls=None, preset=None,
+        image_urls=None, preset=None, seconds=None, duration=None,
+        aspect_ratio=None, resolution=None, reference_mode=None,
+        on_task_accepted: Callable[[str], Awaitable[None]] | None = None,
     ):
         prompt = str(prompt or "").strip()
         if not prompt:
@@ -65,37 +69,75 @@ class XaiVideoService(OpenAIVideoService):
         images = list(image_bytes_list or ([image_bytes] if image_bytes else []))
         urls = list(image_urls or [])
         count = max(len(images), len(urls))
-        if self.reference_mode == "text" and count:
+        selected_mode = str(reference_mode or self.reference_mode).strip().lower()
+        if selected_mode not in {"reference", "image", "text"}:
+            raise ValueError("无效的 xAI 参考图模式")
+        selected_duration = int(str(duration or seconds or self.duration))
+        if not 1 <= selected_duration <= 15:
+            raise ValueError("xAI 视频时长须为 1–15 秒")
+        selected_ratio = str(aspect_ratio or self.aspect_ratio)
+        if selected_ratio not in {"auto", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"}:
+            raise ValueError("无效的 xAI 视频画幅")
+        selected_resolution = str(resolution or self.resolution).lower()
+        if selected_resolution not in {"480p", "720p", "1080p"}:
+            raise ValueError("xAI 分辨率支持 480p / 720p / 1080p")
+        if selected_mode == "text" and count:
             raise ValueError("纯文生视频模式不接受参考图")
-        if count > 7 or (self.reference_mode == "image" and count > 1):
+        if count > 7 or (selected_mode == "image" and count > 1):
             raise ValueError("xAI 首帧模式最多 1 张图片，参考图模式最多 7 张")
-        if self.resolution == "1080p":
+        if selected_resolution == "1080p":
             if self.model != "grok-imagine-video-1.5":
                 raise ValueError("1080p 仅对 grok-imagine-video-1.5 开放")
-            if count and self.reference_mode == "reference":
+            if count and selected_mode == "reference":
                 raise ValueError("xAI 多参考图模式最高支持 720p")
         refs = await self._prepare_reference_urls(images, urls)
         payload = {
-            "model": self.model, "prompt": prompt, "duration": self.duration,
-            "resolution": self.resolution,
+            "model": self.model, "prompt": prompt, "duration": selected_duration,
+            "resolution": selected_resolution,
         }
-        if self.aspect_ratio != "auto":
-            payload["aspect_ratio"] = self.aspect_ratio
+        if selected_ratio != "auto":
+            payload["aspect_ratio"] = selected_ratio
         if refs:
-            if self.reference_mode == "image":
+            if selected_mode == "image":
                 payload["image"] = {"url": refs[0]}
             else:
                 payload["reference_images"] = [{"url": url} for url in refs]
         # Do not automatically retry a potentially billable submission.
-        async with self._client(timeout=float(self.timeout)) as client:
-            response = await client.post(self._create_url(), headers=self._headers(), json=payload)
+        try:
+            async with self._client(timeout=float(self.timeout)) as client:
+                response = await client.post(
+                    self._create_url(), headers=self._headers(), json=payload
+                )
+        except asyncio.CancelledError:
+            raise
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise VideoSubmissionUnknownError(
+                f"xAI 视频提交连接中断，任务可能已被接收，不会自动重试: {exc}"
+            ) from exc
         if response.status_code not in {200, 201, 202}:
             raise RuntimeError(f"xAI 视频提交失败 HTTP {response.status_code}: {self._error_detail(response.json())}" if "application/json" in response.headers.get("content-type", "") else f"xAI 视频提交失败 HTTP {response.status_code}")
-        request_id = str(response.json().get("request_id") or "").strip()
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise VideoSubmissionUnknownError(
+                "xAI 视频提交成功但响应无法解析，不会自动重试"
+            ) from exc
+        request_id = str(data.get("request_id") or "").strip()
         if not request_id:
-            raise RuntimeError("xAI 视频响应缺少 request_id")
+            raise VideoSubmissionUnknownError(
+                "xAI 视频提交成功但响应缺少 request_id，不会自动重试"
+            )
         logger.info("[XaiVideo] 任务已提交: request_id=%s", request_id)
-        return await self._poll(request_id)
+        if on_task_accepted is not None:
+            await on_task_accepted(request_id)
+        try:
+            return await self._poll(request_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise VideoTaskAcceptedError(
+                "xAI Video", request_id, "轮询", exc
+            ) from exc
 
     async def _poll(self, request_id):
         deadline = time.monotonic() + self.poll_timeout
@@ -144,3 +186,9 @@ class XaiVideoService(OpenAIVideoService):
                         f"xAI 完成响应缺少可用视频地址（video/url/video_url/metadata）, request_id={request_id}"
                     )
         raise RuntimeError(f"xAI 视频轮询超时, request_id={request_id}")
+
+    async def resume_video_url(self, upstream_task_id: str) -> str:
+        request_id = str(upstream_task_id or "").strip()
+        if not request_id:
+            raise ValueError("缺少 xAI 上游 request_id")
+        return await self._poll(request_id)

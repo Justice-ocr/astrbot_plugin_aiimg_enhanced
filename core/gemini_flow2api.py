@@ -26,6 +26,7 @@ import aiohttp
 from astrbot.api import logger
 
 from .image_format import guess_image_mime_and_ext
+from .video_errors import VideoSubmissionUnknownError
 
 _MD_IMAGE_RE = re.compile(r"!\[.*?\]\((.*?)\)")
 _DATA_IMAGE_RE = re.compile(r"(data:image/[^\s)]+)")
@@ -1291,7 +1292,13 @@ class Flow2ApiVideoBackend:
             "stream": True,
         }
 
-        content_text = await self._request_stream_text(payload, headers)
+        try:
+            content_text = await self._request_stream_text(payload, headers)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            raise VideoSubmissionUnknownError(
+                f"Flow2API 视频提交连接中断，任务可能已被接收，"
+                f"不会自动重试: {exc}"
+            ) from exc
         ref = _extract_first_video_ref(content_text)
         if ref:
             return _rewrite_flow2api_media_ref(ref, endpoint_url=self.api_url)
@@ -1299,4 +1306,7 @@ class Flow2ApiVideoBackend:
         if img:
             raise RuntimeError("Flow2API 返回了图片而不是视频")
         snippet = (content_text or "").strip().replace("\n", " ")[:200]
-        raise RuntimeError(f"Flow2API 未返回视频：{snippet}")
+        raise VideoSubmissionUnknownError(
+            f"Flow2API 视频返回成功状态但没有视频 URL，"
+            f"不会自动重试: {snippet}"
+        )

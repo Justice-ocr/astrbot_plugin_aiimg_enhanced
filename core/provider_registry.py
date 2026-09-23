@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,16 @@ def _as_dict(value: Any) -> dict:
 def _is_http_url(value: Any) -> bool:
     s = str(value or "").strip().lower()
     return s.startswith("http://") or s.startswith("https://")
+
+
+@asynccontextmanager
+async def leased_backend(registry: Any, backend: object):
+    lease = getattr(registry, "lease_backend", None)
+    if callable(lease):
+        async with lease(backend):
+            yield backend
+        return
+    yield backend
 
 
 _TEMPLATE_KEY_ALIASES: dict[str, str] = {
@@ -111,8 +123,45 @@ class ProviderRegistry:
         self._providers: dict[str, dict] = {}
         self._backends: dict[str, object] = {}
         self._video_backends: dict[str, object] = {}
+        self._backend_leases: dict[int, int] = {}
+        self._retired_backends: dict[int, object] = {}
 
         self._load_providers()
+
+    async def _close_backend(self, backend: object) -> None:
+        close = getattr(backend, "close", None)
+        if not callable(close):
+            return
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:
+            logger.warning("[ProviderRegistry] 关闭旧后端失败: %s", exc)
+
+    @asynccontextmanager
+    async def lease_backend(self, backend: object):
+        key = id(backend)
+        self._backend_leases[key] = self._backend_leases.get(key, 0) + 1
+        try:
+            yield backend
+        finally:
+            count = self._backend_leases.get(key, 0) - 1
+            if count > 0:
+                self._backend_leases[key] = count
+            else:
+                self._backend_leases.pop(key, None)
+                retired = self._retired_backends.pop(key, None)
+                if retired is not None:
+                    await self._close_backend(retired)
+
+    async def retire_backends(self, backends: list[object]) -> None:
+        unique = {id(backend): backend for backend in backends}
+        for key, backend in unique.items():
+            if self._backend_leases.get(key, 0) > 0:
+                self._retired_backends[key] = backend
+            else:
+                await self._close_backend(backend)
 
     @classmethod
     def _normalize_template_key(cls, raw: Any) -> str:
@@ -776,19 +825,12 @@ class ProviderRegistry:
         return backend
 
     async def close(self) -> None:
-        for backend in list(self._backends.values()):
-            close = getattr(backend, "close", None)
-            if callable(close):
-                try:
-                    await close()
-                except Exception:
-                    pass
-        for backend in list(self._video_backends.values()):
-            close = getattr(backend, "close", None)
-            if callable(close):
-                try:
-                    await close()
-                except Exception:
-                    pass
+        backends = [
+            *self._backends.values(),
+            *self._video_backends.values(),
+            *self._retired_backends.values(),
+        ]
         self._backends.clear()
         self._video_backends.clear()
+        self._retired_backends.clear()
+        await self.retire_backends(backends)

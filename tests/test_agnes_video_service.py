@@ -185,10 +185,18 @@ class AgnesVideoServiceTests(unittest.IsolatedAsyncioTestCase):
             )
 
             self.backend._install_astrbot_file_service_magic(file_service)
+            self.mod.mark_repeatable_file_token(
+                file_service, "token", image_path
+            )
 
             self.assertEqual(await file_service.handle_file("token"), str(image_path))
             self.assertEqual(await file_service.handle_file("token"), str(image_path))
             self.assertIn("token", file_service.staged_files)
+
+            await file_service.handle_file("other")
+            file_service._aiimg_repeatable_file_tokens_original.assert_awaited_once_with(
+                "other"
+            )
 
     async def test_temporary_astrbot_reference_is_cleaned_after_failure(self):
         with tempfile.TemporaryDirectory() as tmp:

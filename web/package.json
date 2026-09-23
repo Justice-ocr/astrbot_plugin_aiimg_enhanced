@@ -1,0 +1,23 @@
+{
+  "name": "aiimg-enhanced-studio",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "astro dev",
+    "check": "astro check",
+    "build": "astro build"
+  },
+  "dependencies": {
+    "@astrojs/check": "0.9.10",
+    "@astrojs/react": "6.0.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "astro": "7.3.3",
+    "gifenc": "1.0.3",
+    "lucide-react": "0.468.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "5.7.3"
+  }
+}

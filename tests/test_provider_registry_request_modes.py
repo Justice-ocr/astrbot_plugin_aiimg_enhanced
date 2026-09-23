@@ -452,5 +452,29 @@ class ProviderRegistryRequestModeTests(unittest.TestCase):
         self.assertEqual(backend.kwargs["data_dir"], Path("/tmp/plugin-data"))
 
 
+class ProviderRegistryLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retired_backend_closes_after_active_lease(self):
+        mod = _load_module()
+        registry = mod.ProviderRegistry(
+            config={"providers": []},
+            imgr=object(),
+            data_dir=Path("/tmp"),
+        )
+
+        class _ClosableBackend:
+            def __init__(self):
+                self.closed = 0
+
+            async def close(self):
+                self.closed += 1
+
+        backend = _ClosableBackend()
+        async with registry.lease_backend(backend):
+            await registry.retire_backends([backend])
+            self.assertEqual(backend.closed, 0)
+
+        self.assertEqual(backend.closed, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

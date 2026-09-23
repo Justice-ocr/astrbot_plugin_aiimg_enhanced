@@ -7,7 +7,7 @@ from astrbot.api import logger
 
 from .output_spec import parse_output
 from .provider_chain import as_dict, as_list, candidates_from_chain
-from .provider_registry import ProviderRegistry
+from .provider_registry import ProviderRegistry, leased_backend
 from .task_manager import update_task_state
 
 
@@ -105,22 +105,27 @@ class ImageDrawService:
 
             t0 = time.perf_counter()
             try:
-                update_task_state("generating")
-                gen = getattr(backend, "generate", None)
-                if not callable(gen):
-                    raise RuntimeError("Provider does not support generate()")
-                effective_prompt = prompt
-                provider_conf = self.registry.get(pid) or {}
-                if (
-                    provider_conf.get("__template_key") in {"nai_gateway", "nai_native", "openai_chat", "openai_images"}
-                    and provider_conf.get("nai_translate_prompt", False)
-                ):
-                    from .nai_prompt import translate_nai_prompt
+                async with leased_backend(self.registry, backend):
+                    update_task_state("generating")
+                    gen = getattr(backend, "generate", None)
+                    if not callable(gen):
+                        raise RuntimeError("Provider does not support generate()")
+                    effective_prompt = prompt
+                    provider_conf = self.registry.get(pid) or {}
+                    if (
+                        provider_conf.get("__template_key") in {"nai_gateway", "nai_native", "openai_chat", "openai_images"}
+                        and provider_conf.get("nai_translate_prompt", False)
+                    ):
+                        from .nai_prompt import translate_nai_prompt
 
-                    effective_prompt = await translate_nai_prompt(
-                        self.context, prompt, provider_conf, session_id
+                        effective_prompt = await translate_nai_prompt(
+                            self.context, prompt, provider_conf, session_id
+                        )
+                    result = await gen(
+                        effective_prompt,
+                        size=final_size,
+                        resolution=final_res,
                     )
-                result = await gen(effective_prompt, size=final_size, resolution=final_res)
                 if not result:
                     raise RuntimeError("Provider returned empty generate result")
                 logger.info(
