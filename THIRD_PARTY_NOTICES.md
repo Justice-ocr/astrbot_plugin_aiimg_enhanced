@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This project is preparing a unified Web Studio using the following projects as pinned references. The initial shell is independently implemented from the documented Yukina structure; no Yukina media or Nova source has been copied into the plugin.
+This project includes a unified Web Studio derived in part from the pinned Yukina template and informed by Nova Image Studio interaction patterns.
 
 ## Yukina
 
@@ -9,7 +9,7 @@ This project is preparing a unified Web Studio using the following projects as p
 - Code license: MIT
 - Copyright: 2024 WhitePaper233
 
-The Studio layout and theme organization are independently adapted from this MIT-licensed reference. The MIT notice is preserved here. Visual assets are tracked separately because their usage rights may differ from the repository code license.
+The Studio shell directly adapts Yukina's BaseLayout, MainLayout, NavBar, SideBar, GlobalStyles and loading-animation structure. The upstream favicon is redistributed in modified integration context with the user's confirmed authorization to modify and redistribute Yukina materials. The complete upstream MIT license is included at `web/public/licenses/YUKINA-LICENSE.txt`.
 
 ## Nova Image Studio
 
@@ -17,7 +17,7 @@ The Studio layout and theme organization are independently adapted from this MIT
 - Reference commit: b8cd44cc083a0429f8df6a7c9fc5b935b7ae0731
 - License: GNU Affero General Public License v3.0
 
-Nova currently serves as a feature and interaction reference. No Nova source has been imported. License obligations must be resolved before derivative code is distributed or hosted.
+Nova currently serves as a feature and interaction reference. No Nova source has been imported.
 
 ## Detailed manifest
 

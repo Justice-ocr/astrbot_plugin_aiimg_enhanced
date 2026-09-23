@@ -75,6 +75,7 @@ class PagesAPIMixin:
             ("save_studio_preferences", self._pages_save_studio_preferences, ["POST"], "保存Studio设置"),
             ("save_studio_presets", self._pages_save_studio_presets, ["POST"], "保存Studio预设"),
             ("save_studio_provider", self._pages_save_studio_provider, ["POST"], "保存Studio服务商"),
+            ("delete_studio_provider", self._pages_delete_studio_provider, ["POST"], "删除Studio服务商"),
             (
                 "get_provider_capabilities",
                 self._pages_get_provider_capabilities,
@@ -1639,16 +1640,22 @@ class PagesAPIMixin:
             providers = self.config.setdefault("providers", [])
             if not isinstance(providers, list):
                 raise ValueError("服务商配置无效")
+            creating = bool(data.get("create"))
+            original_id = str(data.get("original_id") or provider_id).strip()
             index = next(
                 (idx for idx, item in enumerate(providers)
-                 if isinstance(item, dict) and str(item.get("id") or "").strip() == provider_id),
+                 if isinstance(item, dict) and str(item.get("id") or "").strip() == (provider_id if creating else original_id)),
                 -1,
             )
-            creating = bool(data.get("create"))
             if index < 0 and not creating:
                 raise ValueError("服务商不存在")
             if index >= 0 and creating:
                 raise ValueError("服务商 ID 已存在")
+            if not creating and any(
+                isinstance(item, dict) and str(item.get("id") or "").strip() == provider_id
+                for idx, item in enumerate(providers) if idx != index
+            ):
+                raise ValueError("服务商 ID 已被占用")
 
             current = copy.deepcopy(providers[index]) if index >= 0 else copy.deepcopy(incoming)
             merged = copy.deepcopy(current)
@@ -1688,6 +1695,8 @@ class PagesAPIMixin:
                 providers[index] = normalized
             else:
                 providers.append(normalized)
+            if not creating and original_id != provider_id:
+                self._replace_studio_provider_references(original_id, provider_id)
             await self._reload_registry_after_provider_change()
             self._safe_update_config()
             return jsonify({
@@ -1700,6 +1709,68 @@ class PagesAPIMixin:
         except Exception as exc:
             logger.error("[Pages] save_studio_provider 失败: %s", exc, exc_info=True)
             return jsonify({"success": False, "error": "服务商保存失败"}), 500
+
+    async def _pages_delete_studio_provider(self):
+        try:
+            data = await request.get_json(force=True) or {}
+            provider_id = str(data.get("provider_id") or "").strip()
+            expected = str(data.get("revision") or "").strip()
+            if not provider_id:
+                raise ValueError("服务商 ID 无效")
+            if not expected or expected != await self._pages_get_studio_revision_value():
+                return jsonify({"success": False, "error": "配置已被其他页面修改，请刷新后重试"}), 409
+            providers = self.config.get("providers", [])
+            if not isinstance(providers, list):
+                raise ValueError("服务商配置无效")
+            remaining = [
+                item for item in providers
+                if not isinstance(item, dict) or str(item.get("id") or "").strip() != provider_id
+            ]
+            if len(remaining) == len(providers):
+                raise ValueError("服务商不存在")
+            self.config["providers"] = remaining
+            self._replace_studio_provider_references(provider_id, "")
+            await self._reload_registry_after_provider_change()
+            self._safe_update_config()
+            return jsonify({"success": True, "revision": await self._pages_get_studio_revision_value()})
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        except Exception as exc:
+            logger.error("[Pages] delete_studio_provider 失败: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "服务商删除失败"}), 500
+
+    def _replace_studio_provider_references(self, old_id: str, new_id: str) -> None:
+        reference_keys = {"provider_id", "nai_llm_provider_id", "llm_provider_id"}
+
+        def visit(value):
+            if isinstance(value, dict):
+                for key, child in list(value.items()):
+                    if key == "chain" and isinstance(child, list):
+                        replacement = []
+                        for item in child:
+                            if item == old_id:
+                                if new_id:
+                                    replacement.append(new_id)
+                                continue
+                            if isinstance(item, dict) and item.get("provider_id") == old_id:
+                                if new_id:
+                                    item["provider_id"] = new_id
+                                    replacement.append(item)
+                                continue
+                            replacement.append(item)
+                        value[key] = replacement
+                    elif key in reference_keys and child == old_id:
+                        value[key] = new_id
+                    else:
+                        visit(child)
+            elif isinstance(value, list):
+                for child in value:
+                    visit(child)
+
+        visit(self.config.get("features", {}))
+        for provider in self.config.get("providers", []):
+            if isinstance(provider, dict):
+                visit(provider)
 
     async def _pages_get_studio_revision_value(self) -> str:
         source = self.config if isinstance(self.config, dict) else {}

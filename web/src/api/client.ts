@@ -283,14 +283,24 @@ export async function saveStudioProvider(
   revision = "",
   secretUpdates: Record<string, unknown> = {},
   create = false,
+  originalId = String(provider.id || ""),
 ): Promise<ProviderConfig> {
   const result = await requireSuccess<any>(getBridge().apiPost("save_studio_provider", {
     provider,
     revision,
     secret_updates: secretUpdates,
     create,
+    original_id: originalId,
   }));
   return result.provider as ProviderConfig;
+}
+
+export async function deleteStudioProvider(providerId: string, revision: string): Promise<string> {
+  const result = await requireSuccess<{ revision: string }>(getBridge().apiPost("delete_studio_provider", {
+    provider_id: providerId,
+    revision,
+  }));
+  return result.revision;
 }
 
 export async function deleteStudioProject(id: string, revision?: number): Promise<void> {

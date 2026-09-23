@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
-import { PROVIDER_TEMPLATES } from "../../../pages/LegacySettings/provider_catalog.js";
+import { PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "../../../pages/LegacySettings/provider_catalog.js";
 import {
   cancelTask,
   cancelStudioJob,
@@ -55,6 +55,7 @@ import {
   loadPersonaReferencePreview,
   loadStudioSnapshot,
   deleteStudioPersona,
+  deleteStudioProvider,
   pinStudioAsset,
   preserveHistoryAsset,
   resumeStudioJob,
@@ -424,8 +425,9 @@ function CreateView({
             </select>
             {(mode === "edit" || mode === "video") && (
               <label className="file-picker">
-                <span>添加参考图（已选 {referenceAssetIds.length} 张）</span>
-                <input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={uploading || submitting || referenceAssetIds.length >= referenceLimit} onChange={(event) => void onReferenceChange(event)} />
+                <span>{uploading ? "参考图上传中" : `添加参考图（已选 ${referenceAssetIds.length} 张）`}</span>
+                <span className="file-picker-button">选择图片</span>
+                <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={uploading || submitting || referenceAssetIds.length >= referenceLimit} onChange={(event) => void onReferenceChange(event)} />
               </label>
             )}
             {(mode === "edit" || mode === "video") && referenceAssetIds.length > 0 && <div className="reference-slots">
@@ -1076,7 +1078,8 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       const current = nodesRef.current;
       if (current.length >= 500) throw new Error("画布最多支持 500 个节点");
       if (current.some((node) => node.asset_id === managed.asset_id)) return;
-      const node: CanvasNode = { id: globalThis.crypto.randomUUID(), type: "asset", asset_id: managed.asset_id, x: (80 - view.x) / view.zoom, y: (80 - view.y) / view.zoom, scale: 1, rotation: 0 };
+      const offset = current.length * 28;
+      const node: CanvasNode = { id: globalThis.crypto.randomUUID(), type: "asset", asset_id: managed.asset_id, x: (80 + offset - view.x) / view.zoom, y: (80 + offset - view.y) / view.zoom, scale: 1, rotation: 0 };
       setHistory((previous) => [...previous, { nodes: cloneCanvasNodes(current), edges: [...edgesRef.current] }].slice(-50));
       setNodes([...current, node]);
       dirtyRef.current = true;
@@ -1218,13 +1221,15 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
     setGenerationResolution(choice.parameters.resolutions?.default || "");
   }, [generationProvider]);
 
-  function zoomView(factor: number) {
+  function zoomView(factor: number, anchorX?: number, anchorY?: number) {
     dirtyRef.current = true;
-    const width = boardRef.current?.clientWidth || 600;
-    const height = boardRef.current?.clientHeight || 560;
+    const board = boardRef.current;
+    const rect = board?.getBoundingClientRect();
+    const x = anchorX ?? (rect?.width || 600) / 2;
+    const y = anchorY ?? (rect?.height || 560) / 2;
     setView((current) => {
       const zoom = Math.max(0.1, Math.min(4, current.zoom * factor));
-      return { zoom, x: width / 2 - (width / 2 - current.x) * zoom / current.zoom, y: height / 2 - (height / 2 - current.y) * zoom / current.zoom };
+      return { zoom, x: x - (x - current.x) * zoom / current.zoom, y: y - (y - current.y) * zoom / current.zoom };
     });
   }
 
@@ -1364,7 +1369,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
 
   return (
     <section className="workspace">
-      <div className="workspace-heading"><div><span className="section-kicker">CANVAS</span><h1>无限画布</h1></div><div className="composer-actions"><input className="project-name" value={name} onChange={(event) => { dirtyRef.current = true; setName(event.target.value); }} aria-label="项目名称" /><button type="button" className="primary-action" disabled={busy || generationBusy || !scope} onClick={() => void save()}>{busy ? "保存中" : "保存项目"}</button></div></div>
+      <div className="workspace-heading canvas-heading"><div><span className="section-kicker">CANVAS</span><h1>无限画布</h1></div><div className="canvas-project-actions"><input className="project-name" value={name} onChange={(event) => { dirtyRef.current = true; setName(event.target.value); }} aria-label="项目名称" /><button type="button" className="primary-action" disabled={busy || generationBusy || !scope} onClick={() => void save()}>{busy ? "保存中" : "保存项目"}</button></div></div>
       <div className="canvas-toolbar" role="toolbar" aria-label="画布编辑工具">
         <button type="button" className="icon-button" aria-pressed={!panMode} title="选择节点" onClick={() => setPanMode(false)}><MousePointer2 size={17} /><span className="sr-only">选择节点</span></button>
         <button type="button" className="icon-button" aria-pressed={panMode} title="平移画布" onClick={() => setPanMode(true)}><Hand size={17} /><span className="sr-only">平移画布</span></button>
@@ -1427,6 +1432,11 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       </div>)}
       <div className="canvas-layout">
         <div ref={boardRef} className="canvas-board" aria-label="画布" tabIndex={0}
+          onWheel={(event) => {
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            zoomView(event.deltaY < 0 ? 1.1 : 1 / 1.1, event.clientX - rect.left, event.clientY - rect.top);
+          }}
           onKeyDown={(event) => {
             if (event.target !== event.currentTarget) return;
             const step = event.shiftKey ? 50 : 10;
@@ -1439,9 +1449,11 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
           }}
           onPointerDown={(event) => {
             if (generationBusy || (event.button !== 0 && event.button !== 1)) return;
+            setSelectedNodeId("");
+            const shouldPan = event.button === 1 || panMode;
+            if (!shouldPan) return;
             event.preventDefault();
             event.currentTarget.focus();
-            setSelectedNodeId("");
             panRef.current = { x: event.clientX, y: event.clientY, before: view };
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
@@ -1954,7 +1966,7 @@ function PromptsView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot;
       {operation === "reverse" && <label className="stack-field"><span>图片素材</span><select value={assetId} disabled={busy} onChange={(event) => setAssetId(event.target.value)}><option value="">选择图片</option>{snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).map((item) => <option key={item.asset_id} value={item.asset_id}>{item.filename}</option>)}</select></label>}
     </div>
     <div className="prompt-editor"><label htmlFor="prompt-source">原始提示词</label><textarea id="prompt-source" value={draft} onChange={(event) => setDraft(event.target.value)} rows={4} maxLength={8000} /></div>
-    <button type="button" className="primary-action" disabled={busy || !scope || !providerId || (operation === "reverse" ? !assetId : !draft.trim())} onClick={() => void transform()}>{busy ? "处理中" : "调用模型"}</button>
+    <div className="prompt-call-action"><button type="button" className="primary-action" disabled={busy || !scope || !providerId || (operation === "reverse" ? !assetId : !draft.trim())} onClick={() => void transform()}>{busy ? "处理中" : "调用模型"}</button></div>
     {error && <p role="alert" className="task-error">{error}</p>}
     {result && <div className="prompt-editor"><label htmlFor="prompt-result">处理结果</label><textarea id="prompt-result" value={result} onChange={(event) => setResult(event.target.value)} rows={5} /><button type="button" className="primary-action" disabled={!result.trim()} onClick={() => usePrompt(result.trim())}>带入创作</button></div>}
     <div className="prompt-library-toolbar"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索预设" aria-label="搜索预设" /></div>
@@ -2821,6 +2833,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   const providers = snapshot.config.providers || [];
   const [templatePanelOpen, setTemplatePanelOpen] = useState(false);
   const [templateKey, setTemplateKey] = useState("openai_images");
+  const [templateMedia, setTemplateMedia] = useState<"image" | "video">("image");
   const [newProviderId, setNewProviderId] = useState("");
   const [selectedId, setSelectedId] = useState(String(providers[0]?.id || ""));
   const [draft, setDraft] = useState<Record<string, unknown>>({});
@@ -2870,7 +2883,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   }
 
   function renderField(key: string, value: unknown) {
-    if (key === "id" || key === "label" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
+    if (key === "label" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
     const options = providerSelectOptions[key];
     if (typeof value === "boolean") return <label className="provider-toggle" key={key}><input type="checkbox" checked={value} disabled={busy} onChange={(event) => updateField(key, event.target.checked)} /><span><strong>{providerFieldLabel(key)}</strong><small>{value ? "已启用" : "已关闭"}</small></span></label>;
     if (options) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><select value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}>{options.map(([option, label]) => <option key={option} value={option}>{label}</option>)}</select></label>;
@@ -2881,7 +2894,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     const inputType = /url|path|endpoint/i.test(key) ? "url" : "text";
     return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span>{multiline
       ? <textarea rows={3} value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)} />
-      : <input type={inputType} value={String(value ?? "")} disabled={busy || key === "id"} onChange={(event) => updateField(key, event.target.value)} />}</label>;
+      : <input type={inputType} value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)} />}</label>;
   }
 
   async function save() {
@@ -2898,7 +2911,8 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
           updates[key] = { value };
         }
       });
-      await saveStudioProvider(draft, snapshot.configRevision, updates);
+      await saveStudioProvider(draft, snapshot.configRevision, updates, false, selected.id);
+      if (String(draft.id || "") !== selected.id) setSelectedId(String(draft.id || ""));
       setStatus("已保存");
       onRefresh();
     } catch (reason) {
@@ -2907,6 +2921,27 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
       setBusy(false);
     }
   }
+
+  async function removeProvider() {
+    if (!selected || busy || !window.confirm(`删除服务商「${selected.id}」？相关服务商链和引用配置会一并清理。`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await deleteStudioProvider(selected.id, snapshot.configRevision || "");
+      setSelectedId("");
+      setStatus("服务商已删除");
+      onRefresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "服务商删除失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const templateEntries = Object.entries(PROVIDER_TEMPLATES as Record<string, { label?: string }>);
+  const imageTemplates = templateEntries.filter(([key]) => !VIDEO_PROVIDER_TYPES.has(key));
+  const videoTemplates = templateEntries.filter(([key]) => VIDEO_PROVIDER_TYPES.has(key));
+  const availableTemplates = templateMedia === "video" ? videoTemplates : imageTemplates;
 
   async function createFromTemplate() {
     const template = (PROVIDER_TEMPLATES as Record<string, Record<string, unknown>>)[templateKey];
@@ -2934,7 +2969,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
 
   return <section className="workspace">
     <div className="workspace-heading"><div><span className="section-kicker">PROVIDERS</span><h1>服务商</h1><p>维护连接参数与凭据；调用链路在“设置”页配置。</p></div><button type="button" className="secondary-action" onClick={() => { setTemplatePanelOpen((open) => !open); setError(""); }}><ImagePlus size={16} aria-hidden="true" />{templatePanelOpen ? "关闭模板面板" : "添加服务商模板"}</button></div>
-    {templatePanelOpen && <section className="provider-template-panel"><div className="subsection-heading"><div><h3>添加服务商</h3><p>选择协议模板并设置唯一 ID，密钥可在创建后填写。</p></div></div><div className="provider-template-controls"><label className="stack-field"><span>协议模板</span><select value={templateKey} disabled={busy} onChange={(event) => setTemplateKey(event.target.value)}>{Object.entries(PROVIDER_TEMPLATES as Record<string, { label?: string }>).map(([key, template]) => <option key={key} value={key}>{key} · {template.label || key}</option>)}</select></label><label className="stack-field"><span>服务商 ID</span><input value={newProviderId} maxLength={120} disabled={busy} placeholder="例如：openai_primary" onChange={(event) => setNewProviderId(event.target.value)} /></label><button type="button" className="primary-action" disabled={busy || !newProviderId.trim()} onClick={() => void createFromTemplate()}><Save size={16} />创建模板</button></div>{error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}</section>}
+    {templatePanelOpen && <section className="provider-template-panel"><div className="subsection-heading"><div><h3>添加服务商</h3><p>选择图片或视频协议模板，并设置唯一 ID。</p></div></div><div className="template-media-switch" role="group" aria-label="模板媒体类型"><button type="button" aria-pressed={templateMedia === "image"} disabled={busy} onClick={() => { setTemplateMedia("image"); setTemplateKey(imageTemplates[0]?.[0] || ""); }}>图片</button><button type="button" aria-pressed={templateMedia === "video"} disabled={busy} onClick={() => { setTemplateMedia("video"); setTemplateKey(videoTemplates[0]?.[0] || ""); }}>视频</button></div><div className="provider-template-controls"><label className="stack-field"><span>{templateMedia === "video" ? "视频" : "图片"}协议模板</span><select value={availableTemplates.some(([key]) => key === templateKey) ? templateKey : ""} disabled={busy} onChange={(event) => setTemplateKey(event.target.value)}><option value="">选择{templateMedia === "video" ? "视频" : "图片"}协议模板</option>{availableTemplates.map(([key, template]) => <option key={key} value={key}>{key} · {template.label || key}</option>)}</select></label><label className="stack-field"><span>服务商 ID</span><input value={newProviderId} maxLength={120} disabled={busy} placeholder="例如：openai_primary" onChange={(event) => setNewProviderId(event.target.value)} /></label><button type="button" className="primary-action" disabled={busy || !newProviderId.trim() || !templateKey} onClick={() => void createFromTemplate()}><Save size={16} />创建模板</button></div>{error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}</section>}
     <div className="provider-editor-layout">
       <aside className="provider-list" aria-label="服务商列表">
         <div className="provider-list-heading"><strong>已添加的服务商</strong><span>{providers.length}</span></div>
@@ -2947,7 +2982,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
       </aside>
       <div className="provider-workspace">
         {selected ? <>
-          <div className="provider-detail-heading"><div><span className="section-kicker">{selected.__template_key || selected.__type || "PROVIDER"}</span><h2>{selected.id}</h2><p>{selected.model || "请填写模型名称"}</p></div><span className={providerIsConfigured(selected) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(selected) ? "配置完整，未测试连通性" : "需要补充配置"}</span></div>
+        <div className="provider-detail-heading"><div><span className="section-kicker">{selected.__template_key || selected.__type || "PROVIDER"}</span><h2>{selected.id}</h2><p>{selected.model || "请填写模型名称"}</p></div><span className={providerIsConfigured(selected) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(selected) ? "配置完整，未测试连通性" : "需要补充配置"}</span></div>
           <div className="provider-field-grid">{Object.entries(draft).map(([key, value]) => renderField(key, value))}</div>
           {Object.keys(secretDraft).length > 0 && <section className="provider-secret-section"><div className="subsection-heading"><div><h3>访问凭据</h3><p>现有密钥不会回显；留空保持不变，输入内容将替换。</p></div></div><div className="provider-secret-grid">{Object.entries(secretDraft).map(([key, item]) => <label className="stack-field" key={key}><span>{providerFieldLabel(key)}{selected[`${key}_configured`] ? <em className="credential-present">已保存</em> : <em className="credential-missing">未设置</em>}</span>{key === "api_keys"
             ? <textarea rows={3} value={item.value} disabled={busy || item.clear} placeholder={selected.api_keys_configured ? "留空以保留现有密钥；多个密钥每行一项" : "每行填写一个 API Key"} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} />
@@ -2955,7 +2990,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
             {Boolean(selected[`${key}_configured`]) && <span className="check-row"><input type="checkbox" checked={item.clear} disabled={busy} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], clear: event.target.checked, value: "" } }))} />清除此凭据</span>}</label>)}</div></section>}
           <details className="provider-advanced" open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}><summary>高级 JSON 编辑</summary><p>用于模板未覆盖的字段。保存时仍保留未识别配置；不要在此填写密钥。</p><textarea className="code-editor" rows={12} value={rawJson} spellCheck={false} onChange={(event) => { setRawJson(event.target.value); try { const parsed = JSON.parse(event.target.value); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(); setDraft(parsed); setError(""); setStatus("未保存"); } catch { setError("高级 JSON 格式无效"); } }} /></details>
           {error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}
-          <div className="provider-savebar"><span className={status === "已保存" && !providerDirty ? "save-state saved" : "save-state"}>{error ? "请先修正 JSON" : providerDirty ? "有未保存的更改" : status || "配置已同步"}</span><button type="button" className="primary-action" disabled={busy || Boolean(error) || !providerDirty} onClick={() => void save()}><Save size={16} />{busy ? "保存中" : "保存服务商"}</button></div>
+          <div className="provider-savebar"><span className={status === "已保存" && !providerDirty ? "save-state saved" : "save-state"}>{error ? "请先修正 JSON" : providerDirty ? "有未保存的更改" : status || "配置已同步"}</span><div className="composer-actions"><button type="button" className="secondary-action danger-action" disabled={busy} onClick={() => void removeProvider()}><Trash2 size={16} />删除服务商</button><button type="button" className="primary-action" disabled={busy || Boolean(error) || !providerDirty} onClick={() => void save()}><Save size={16} />{busy ? "保存中" : "保存服务商"}</button></div></div>
         </> : providers.length > 0 && <div className="empty-state">选择服务商以查看和编辑配置。</div>}
       </div>
     </div>
@@ -3147,7 +3182,7 @@ export default function StudioApp() {
           {menuOpen ? <X size={21} /> : <ChevronRight size={21} />}
         </button>
         <a className="studio-brand" href="#/create">
-          <img src="./logo.png" alt="" />
+          <img className="brand-symbol" src="./yukina-favicon.svg" alt="" />
           <span>AI绘图站</span>
         </a>
         <span className="topbar-route">{activeRoute.label}</span>
@@ -3181,6 +3216,13 @@ export default function StudioApp() {
       </header>
 
       <aside className={"studio-sidebar " + (menuOpen ? "open" : "")}>
+        <div className="sidebar-profile">
+          <img src="./yukina-favicon.svg" alt="" />
+          <div>
+            <strong>{snapshot.sessions.find((session) => session.scope === activeScope)?.title || "AIIMG Studio"}</strong>
+            <small>{activeRoute.label}工作区</small>
+          </div>
+        </div>
         <nav aria-label="工作台导航">
           {routes.map((item) => {
             const Icon = item.icon;
@@ -3197,7 +3239,7 @@ export default function StudioApp() {
           })}
         </nav>
         <div className="sidebar-foot">
-          <img src="./logo.png" alt="" />
+          <img className="brand-symbol small" src="./yukina-favicon.svg" alt="" />
           <div>
             <strong>AIIMG Studio</strong>
             <small>v4.12.3</small>

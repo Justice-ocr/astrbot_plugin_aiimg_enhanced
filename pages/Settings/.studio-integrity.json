@@ -1,9 +1,11 @@
 {
-  "source": "733affa957e221830e1a6b356480dde780d91069a1ccfaceec8e0c92ced693ea",
+  "source": "ebfd55b1a08cf34f7a6f25b46d86c0aa670a0dcdc2cfe0835b25c32bcdd5c1e9",
   "files": {
-    "assets/studio.css": "8700c8d3c11b69870838c07b4a07cbde27b769ec5a317a19a0baec523d734c18",
-    "assets/studio.js": "63a49c7af97fc5223908d796a62f751ef4d019bdb4588d919c58ab602dfb0877",
-    "index.html": "02eba55b81fbceacfc98c17044b29a7f4226304d211047f29974ca3edeb58342",
-    "logo.png": "29f087f43e51e3901ad284e7e15b3cd7266c0f36ad8f18ab66673c81181bd31a"
+    "assets/studio.css": "4289b63468be55820c74a1201a02877008a87c39832600608735c6815dbdb4d5",
+    "assets/studio.js": "562c2579e60b5d857cd8236be7c4f893005ba694890f5ce633dc8d9ab33eef68",
+    "index.html": "ebd6f5a0a5744f496fa5a0fab86aa81d21c335b7f7b412e0012af7bae43b3496",
+    "licenses/YUKINA-LICENSE.txt": "c3f2be3bee27f7248b180fabc28fb9b77be50a41118d7067a9fd362db9e3e46b",
+    "logo.png": "29f087f43e51e3901ad284e7e15b3cd7266c0f36ad8f18ab66673c81181bd31a",
+    "yukina-favicon.svg": "47c9bbba7517b86369532bfa1ac2b2ce430f13c0aa0d5b74a9f4a953efa6858c"
   }
 }
