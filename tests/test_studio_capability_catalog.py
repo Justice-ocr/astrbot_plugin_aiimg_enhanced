@@ -12,6 +12,7 @@ def test_video_templates_keep_distinct_reference_and_resolution_rules():
         "model": "grok-imagine-video-1.5",
         "xai_reference_mode": "reference",
     })
+    assert xai["label"] == xai["provider_id"] == "xai"
     assert _modes(xai)["image"]["max_images"] == 1
     assert _modes(xai)["reference"]["max_images"] == 7
     assert _modes(xai)["reference"]["resolutions"] == ["480p", "720p"]

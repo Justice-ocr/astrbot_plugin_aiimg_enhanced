@@ -507,7 +507,7 @@ function CreateView({
               <option value="">自动选择服务商</option>
               {providers.map((provider) => (
                 <option key={provider.provider_id} value={provider.provider_id}>
-                  {provider.label || provider.provider_id}
+                  {provider.provider_id}
                 </option>
               ))}
             </select>
@@ -1403,7 +1403,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
           setGenerationProvider("");
         }}><option value="draw">文生图</option><option value="edit">参考图改图</option></select></label>
         <label className="stack-field"><span>画布生成服务商</span><select value={generationProvider} disabled={generationBusy || !!generationRequest.current || !!selectedNode?.submission_key} onChange={(event) => setGenerationProvider(event.target.value)}>
-          <option value="">选择服务商</option>{generationProviders.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.label || item.provider_id}</option>)}
+          <option value="">选择服务商</option>{generationProviders.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.provider_id}</option>)}
         </select></label>
         <label className="stack-field"><span>生成提示词</span><textarea rows={2} maxLength={8000} value={generationPrompt} disabled={generationBusy || !!generationRequest.current || !!selectedNode?.submission_key} onChange={(event) => setGenerationPrompt(event.target.value)} /></label>
         {!!selectedProvider?.parameters.sizes?.values.length && <label className="stack-field"><span>尺寸</span><select value={generationSize} disabled={generationBusy || !!selectedNode?.submission_key} onChange={(event) => setGenerationSize(event.target.value)}>{selectedProvider.parameters.sizes.values.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
@@ -1864,7 +1864,7 @@ function GifView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; sco
         </div>
         <aside className="runtime-summary">
           <h2>生成新帧</h2>
-          <label className="stack-field"><span>服务商</span><select value={frameProvider} disabled={busy} onChange={(event) => setFrameProvider(event.target.value)}><option value="">选择服务商</option>{frameProviders.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.label || item.provider_id}</option>)}</select></label>
+          <label className="stack-field"><span>服务商</span><select value={frameProvider} disabled={busy} onChange={(event) => setFrameProvider(event.target.value)}><option value="">选择服务商</option>{frameProviders.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.provider_id}</option>)}</select></label>
           <label className="stack-field"><span>提示词</span><textarea rows={3} value={framePrompt} disabled={busy} onChange={(event) => setFramePrompt(event.target.value)} /></label>
           <button type="button" className="secondary-action" disabled={busy || !scope || !frameProvider || !framePrompt.trim() || selected.length >= 60} onClick={() => void generateFrame()}>生成帧</button>
           {((project?.document.frame_jobs as Array<{ key: string; prompt: string; provider_id: string; job_id?: string; result_asset_id?: string }> | undefined) || []).map((entry) => {
@@ -2368,7 +2368,7 @@ function DesignView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
         {sliceAssets.length > 0 && <div className="asset-select-grid">{sliceAssets.map((id) => <button type="button" className="asset-select" key={id} onClick={() => setAssetId(id)} title="将切片用作主图"><AssetPreview item={images.find((asset) => asset.asset_id === id) || { asset_id: id, scope, media_type: "image", filename: id, created_at: 0 }} /></button>)}</div>}
         <a className="secondary-action" href="#/assets">查看素材</a>
         <h2>双图参考修补</h2>
-        <label className="stack-field"><span>服务商</span><select value={repairProvider} disabled={busy} onChange={(event) => setRepairProvider(event.target.value)}><option value="">选择支持双图改图的服务商</option>{repairProviders.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.label || item.provider_id}</option>)}</select></label>
+        <label className="stack-field"><span>服务商</span><select value={repairProvider} disabled={busy} onChange={(event) => setRepairProvider(event.target.value)}><option value="">选择支持双图改图的服务商</option>{repairProviders.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.provider_id}</option>)}</select></label>
         <label className="stack-field"><span>遮罩参考图</span><select value={maskAssetId} disabled={busy} onChange={(event) => setMaskAssetId(event.target.value)}><option value="">选择素材</option>{images.map((item) => <option key={item.asset_id} value={item.asset_id}>{item.filename}</option>)}</select></label>
         <label className="secondary-action">上传遮罩参考图<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => void uploadMask(event)} /></label>
         <label className="stack-field"><span>修补提示词</span><textarea rows={3} value={repairPrompt} disabled={busy} onChange={(event) => setRepairPrompt(event.target.value)} /></label>
@@ -2789,7 +2789,7 @@ const providerSecretFields = new Set([
   "cookie_list", "authorization", "password", "secret", "graphql_api_key", "third_party_token",
 ]);
 const providerFieldLabels: Record<string, string> = {
-  id: "服务商 ID", label: "显示名称", api_url: "API 地址", base_url: "API 地址", model: "模型名称",
+  id: "服务商 ID", api_url: "API 地址", base_url: "API 地址", model: "模型名称",
   timeout: "请求超时（秒）", max_retries: "最大重试次数", use_proxy: "启用代理", proxy_url: "代理地址",
   default_size: "默认图片尺寸", default_resolution: "默认分辨率", size: "默认尺寸", resolution: "默认分辨率",
   generate_request_mode: "文生图请求模式", edit_request_mode: "改图请求模式", video_request_mode: "视频请求模式",
@@ -2808,7 +2808,7 @@ function providerFieldLabel(key: string): string {
   return key.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
 }
 
-function providerIsReady(provider: ProviderConfig): boolean {
+function providerIsConfigured(provider: ProviderConfig): boolean {
   const endpoint = String(provider.api_url || provider.base_url || provider.full_generate_url || provider.endpoint || "").trim();
   const model = String(provider.model || "").trim();
   const anonymous = String(provider.__template_key || "").includes("anonymous");
@@ -2866,7 +2866,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   }
 
   function renderField(key: string, value: unknown) {
-    if (key === "id" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
+    if (key === "id" || key === "label" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
     const options = providerSelectOptions[key];
     if (typeof value === "boolean") return <label className="provider-toggle" key={key}><input type="checkbox" checked={value} disabled={busy} onChange={(event) => updateField(key, event.target.checked)} /><span><strong>{providerFieldLabel(key)}</strong><small>{value ? "已启用" : "已关闭"}</small></span></label>;
     if (options) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><select value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}>{options.map(([option, label]) => <option key={option} value={option}>{label}</option>)}</select></label>;
@@ -2910,15 +2910,15 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
       <aside className="provider-list" aria-label="服务商列表">
         <div className="provider-list-heading"><strong>已添加的服务商</strong><span>{providers.length}</span></div>
         {providers.map((provider) => <button type="button" className={String(provider.id) === selectedId ? "provider-row active" : "provider-row"} key={provider.id} onClick={() => choose(provider)}>
-          <span className="provider-mark" aria-hidden="true">{String(provider.label || provider.id).slice(0, 1).toUpperCase()}</span>
-          <span className="provider-row-copy"><strong>{provider.label || provider.id}</strong><small>{provider.model || "未指定模型"} · {provider.__template_key || provider.__type || "自定义"}</small></span>
-          <span className={providerIsReady(provider) ? "provider-state ready" : "provider-state"}>{providerIsReady(provider) ? "可用" : "待配置"}</span>
+          <span className="provider-mark" aria-hidden="true">{String(provider.id).slice(0, 1).toUpperCase()}</span>
+          <span className="provider-row-copy"><strong>{provider.id}</strong><small>{provider.model || "未指定模型"} · {provider.__template_key || provider.__type || "自定义"}</small></span>
+          <span className={providerIsConfigured(provider) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(provider) ? "配置完整" : "待配置"}</span>
         </button>)}
         {providers.length === 0 && <div className="empty-state">尚未添加服务商<a href="../LegacySettings/">前往添加模板</a></div>}
       </aside>
       <div className="provider-workspace">
         {selected ? <>
-          <div className="provider-detail-heading"><div><span className="section-kicker">{selected.__template_key || selected.__type || "PROVIDER"}</span><h2>{selected.label || selected.id}</h2><p>{selected.model || "请填写模型名称"} <span>·</span> ID：{selected.id}</p></div><span className={providerIsReady(selected) ? "provider-state ready" : "provider-state"}>{providerIsReady(selected) ? "连接信息齐全" : "需要补充配置"}</span></div>
+          <div className="provider-detail-heading"><div><span className="section-kicker">{selected.__template_key || selected.__type || "PROVIDER"}</span><h2>{selected.id}</h2><p>{selected.model || "请填写模型名称"}</p></div><span className={providerIsConfigured(selected) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(selected) ? "配置完整，未测试连通性" : "需要补充配置"}</span></div>
           <div className="provider-field-grid">{Object.entries(draft).map(([key, value]) => renderField(key, value))}</div>
           {Object.keys(secretDraft).length > 0 && <section className="provider-secret-section"><div className="subsection-heading"><div><h3>访问凭据</h3><p>现有密钥不会回显；留空保持不变，输入内容将替换。</p></div></div><div className="provider-secret-grid">{Object.entries(secretDraft).map(([key, item]) => <label className="stack-field" key={key}><span>{providerFieldLabel(key)}{selected[`${key}_configured`] ? <em className="credential-present">已保存</em> : <em className="credential-missing">未设置</em>}</span>{key === "api_keys"
             ? <textarea rows={3} value={item.value} disabled={busy || item.clear} placeholder={selected.api_keys_configured ? "留空以保留现有密钥；多个密钥每行一项" : "每行填写一个 API Key"} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} />
@@ -3014,7 +3014,7 @@ function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
         const selectedIds = new Set(chain.map((entry) => entry.provider_id));
         return <article className="feature-route" key={id}><div className="feature-route-heading"><div><h3>{featureLabels[id]}</h3><small>{chain.length ? `${chain.length} 个服务商` : "未配置服务商"}</small></div><label className="switch-control"><input type="checkbox" checked={featureEnabled(id)} onChange={(event) => setFeature(id, event.target.checked)} /><span>启用</span></label></div>
           <label className="tool-toggle"><input type="checkbox" checked={features[id]?.llm_tool_enabled !== false} onChange={(event) => setFeatures((current) => ({ ...current, [id]: { ...current[id], llm_tool_enabled: event.target.checked } }))} />允许 AI 工具调用</label>
-          <div className="route-list">{chain.map((entry, index) => <div className="route-row" key={`${id}-${index}`}><span className={index === 0 ? "route-priority primary" : "route-priority"}>{index === 0 ? "主用" : `备用 ${index}`}</span><select aria-label={`${featureLabels[id]} 服务商 ${index + 1}`} value={entry.provider_id} disabled={saving || !providerOptions.length} onChange={(event) => setChain(id, chain.map((item, position) => position === index ? { ...item, provider_id: event.target.value } : item))}><option value="">选择服务商</option>{providerOptions.filter((provider: ProviderConfig) => provider.id === entry.provider_id || !selectedIds.has(provider.id)).map((provider: ProviderConfig) => <option key={provider.id} value={provider.id}>{provider.label || provider.id}</option>)}</select><button type="button" className="icon-button" title="上移" aria-label="上移" disabled={saving || index === 0} onClick={() => { const next = [...chain]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; setChain(id, next); }}><ArrowUp size={16} /></button><button type="button" className="icon-button" title="下移" aria-label="下移" disabled={saving || index === chain.length - 1} onClick={() => { const next = [...chain]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; setChain(id, next); }}><ArrowDown size={16} /></button><button type="button" className="icon-button danger" title="移除" aria-label="移除" disabled={saving} onClick={() => setChain(id, chain.filter((_, position) => position !== index))}><X size={16} /></button></div>)}
+          <div className="route-list">{chain.map((entry, index) => <div className="route-row" key={`${id}-${index}`}><span className={index === 0 ? "route-priority primary" : "route-priority"}>{index === 0 ? "主用" : `备用 ${index}`}</span><select aria-label={`${featureLabels[id]} 服务商 ${index + 1}`} value={entry.provider_id} disabled={saving || !providerOptions.length} onChange={(event) => setChain(id, chain.map((item, position) => position === index ? { ...item, provider_id: event.target.value } : item))}><option value="">选择服务商</option>{providerOptions.filter((provider: ProviderConfig) => provider.id === entry.provider_id || !selectedIds.has(provider.id)).map((provider: ProviderConfig) => <option key={provider.id} value={provider.id}>{provider.id}</option>)}</select><button type="button" className="icon-button" title="上移" aria-label="上移" disabled={saving || index === 0} onClick={() => { const next = [...chain]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; setChain(id, next); }}><ArrowUp size={16} /></button><button type="button" className="icon-button" title="下移" aria-label="下移" disabled={saving || index === chain.length - 1} onClick={() => { const next = [...chain]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; setChain(id, next); }}><ArrowDown size={16} /></button><button type="button" className="icon-button danger" title="移除" aria-label="移除" disabled={saving} onClick={() => setChain(id, chain.filter((_, position) => position !== index))}><X size={16} /></button></div>)}
             {chain.length === 0 && <p className="route-empty">此功能没有服务商链，不会执行生成请求。</p>}
           </div>
           <button type="button" className="text-action" disabled={saving || chain.length >= providerOptions.length || !providerOptions.some((provider: ProviderConfig) => !selectedIds.has(provider.id))} onClick={() => { const next = providerOptions.find((provider: ProviderConfig) => !selectedIds.has(provider.id)); if (next) setChain(id, [...chain, { provider_id: next.id }]); }}>＋ 添加备用服务商</button>

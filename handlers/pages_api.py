@@ -1679,6 +1679,7 @@ class PagesAPIMixin:
                 merged[key] = value
 
             merged["id"] = provider_id
+            merged["label"] = provider_id
             providers[index] = PagesConfigService.normalize_provider(merged)
             await self._reload_registry_after_provider_change()
             self._safe_update_config()

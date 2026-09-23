@@ -173,7 +173,7 @@ def _base(provider: dict[str, Any], template_key: str) -> dict[str, Any]:
     )
     return {
         "provider_id": str(provider.get("id") or "").strip(),
-        "label": str(provider.get("label") or provider.get("id") or "").strip(),
+        "label": str(provider.get("id") or "").strip(),
         "model": str(provider.get("model") or "").strip(),
         "template_key": template_key,
         "source": "template",
