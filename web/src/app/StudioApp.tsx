@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleStop,
+  Copy,
   Download,
   FolderOpen,
   Hand,
@@ -12,6 +13,7 @@ import {
   Maximize,
   ImagePlus,
   Image as ImageIcon,
+  Upload,
   Moon,
   Pause,
   Play,
@@ -965,6 +967,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   const [generationResolution, setGenerationResolution] = useState("");
   const [generationBusy, setGenerationBusy] = useState(false);
   const [generationArmed, setGenerationArmed] = useState(false);
+  const [assetUploadBusy, setAssetUploadBusy] = useState(false);
   const generationRequest = useRef<Record<string, unknown> | null>(null);
   const dirtyRef = useRef(false);
   const projectRevisionRef = useRef(project?.revision || 0);
@@ -1103,12 +1106,37 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       setStatus("素材已加入画布");
       if (asset.source === "history") onRefresh();
     } catch (reason) {
-      if (version === importVersion.current) window.alert(reason instanceof Error ? reason.message : "导入图片失败");
+      if (version === importVersion.current) setStatus(reason instanceof Error ? reason.message : "导入图片失败");
     } finally {
       if (version === importVersion.current) {
         importing.current = false;
         setImportBusy(false);
       }
+    }
+  }
+
+  async function uploadCanvasAssets(files: File[]) {
+    if (busy || generationBusy || assetUploadBusy || !scope) return;
+    const images = files
+      .filter((file) => file.type.startsWith("image/"))
+      .slice(0, Math.max(0, 12 - importedAssets.length));
+    if (!images.length) {
+      setStatus("请选择 PNG、JPEG、WebP 或 GIF 图片");
+      return;
+    }
+    setAssetUploadBusy(true);
+    setStatus(`正在上传 ${images.length} 张图片`);
+    try {
+      for (const file of images) {
+        const asset = await uploadStudioAsset(file, scope);
+        await addAsset(asset);
+      }
+      onRefresh();
+      setStatus(`已将 ${images.length} 张图片加入画布`);
+    } catch (reason) {
+      setStatus(reason instanceof Error ? reason.message : "画布图片上传失败");
+    } finally {
+      setAssetUploadBusy(false);
     }
   }
 
@@ -1133,6 +1161,23 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
 
   function removeSelected() {
     removeNode(selectedNodeId);
+  }
+
+  function copySelected() {
+    const selected = nodes.find((node) => node.id === selectedNodeId);
+    if (!selected || generationBusy || nodes.length >= 500) return;
+    const copy: CanvasNode = {
+      ...selected,
+      id: globalThis.crypto.randomUUID(),
+      x: selected.x + 40,
+      y: selected.y + 40,
+      job_id: undefined,
+      submission_key: undefined,
+      ...(selected.type === "generation" ? { asset_id: "", reference_asset_ids: [] } : {}),
+    };
+    commit([...nodes, copy]);
+    setSelectedNodeId(copy.id);
+    setStatus("已复制选中图层");
   }
 
   function undo() {
@@ -1395,6 +1440,21 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       <div className="canvas-toolbar" role="toolbar" aria-label="画布编辑工具">
         <button type="button" className="icon-button" aria-pressed={!panMode} title="选择节点" onClick={() => setPanMode(false)}><MousePointer2 size={17} /><span className="sr-only">选择节点</span></button>
         <button type="button" className="icon-button" aria-pressed={panMode} title="平移画布" onClick={() => setPanMode(true)}><Hand size={17} /><span className="sr-only">平移画布</span></button>
+        <label className="secondary-action canvas-upload-action">
+          <Upload size={16} aria-hidden="true" />
+          {assetUploadBusy ? "上传中" : "上传图片"}
+          <input
+            className="sr-only"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            multiple
+            disabled={assetUploadBusy || busy || generationBusy || !scope}
+            onChange={(event) => {
+              void uploadCanvasAssets(Array.from(event.target.files || []));
+              event.target.value = "";
+            }}
+          />
+        </label>
         <button type="button" className="icon-button" title="缩小视图" onClick={() => zoomView(1 / 1.2)}><ZoomOut size={17} /><span className="sr-only">缩小视图</span></button>
         <span>{Math.round(view.zoom * 100)}%</span>
         <button type="button" className="icon-button" title="放大视图" onClick={() => zoomView(1.2)}><ZoomIn size={17} /><span className="sr-only">放大视图</span></button>
@@ -1419,6 +1479,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
         <button type="button" className="icon-button" onClick={() => updateSelected({ scale: Math.min(3, (selectedNode?.scale || 1) + 0.1) })} disabled={!selectedNode} title="放大节点"><ZoomIn size={17} /><span className="sr-only">放大节点</span></button>
         <button type="button" className="icon-button" onClick={() => updateSelected({ rotation: (selectedNode?.rotation || 0) - 15 })} disabled={!selectedNode} title="向左旋转"><RotateCcw size={17} /><span className="sr-only">向左旋转</span></button>
         <button type="button" className="icon-button" onClick={() => updateSelected({ rotation: (selectedNode?.rotation || 0) + 15 })} disabled={!selectedNode} title="向右旋转"><RotateCw size={17} /><span className="sr-only">向右旋转</span></button>
+        <button type="button" className="icon-button" onClick={copySelected} disabled={!selectedNode || generationBusy || nodes.length >= 500} title="复制图层"><Copy size={17} /><span className="sr-only">复制图层</span></button>
         <span className="toolbar-divider" />
         <button type="button" className="icon-button danger" onClick={removeSelected} disabled={!selectedNode} title="删除节点"><Trash2 size={17} /><span className="sr-only">删除节点</span></button>
         <span className="canvas-selection">{selectedNode ? `已选中 · ${Math.round(selectedNode.scale * 100)}% · ${Math.round(selectedNode.rotation)}°` : "未选择节点"}</span>
@@ -1437,7 +1498,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
         <label className="stack-field"><span>生成提示词</span><textarea rows={2} maxLength={8000} value={generationPrompt} disabled={generationBusy || !!generationRequest.current || !!selectedNode?.submission_key} onChange={(event) => { setGenerationPrompt(event.target.value); setGenerationArmed(false); }} /></label>
         {!!selectedProvider?.parameters.sizes?.values.length && <label className="stack-field"><span>尺寸</span><select value={generationSize} disabled={generationBusy || !!selectedNode?.submission_key} onChange={(event) => setGenerationSize(event.target.value)}>{selectedProvider.parameters.sizes.values.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
         {!!selectedProvider?.parameters.resolutions?.values.length && <label className="stack-field"><span>分辨率</span><select value={generationResolution} disabled={generationBusy || !!selectedNode?.submission_key} onChange={(event) => setGenerationResolution(event.target.value)}>{selectedProvider.parameters.resolutions.values.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
-        <button type="button" className="icon-button" disabled={busy || generationBusy || nodes.length >= 500} title="添加生成节点" onClick={addGenerationDraft}><ImagePlus size={17} /><span className="sr-only">添加生成节点</span></button>
+        <button type="button" className="secondary-action canvas-add-generation" disabled={busy || generationBusy || nodes.length >= 500} title="添加生成节点" onClick={addGenerationDraft}><ImagePlus size={16} />添加生成节点</button>
         <button type="button" className={generationArmed ? "primary-action confirm-action" : "primary-action"} disabled={busy || generationBusy || !generationProvider || !generationPrompt.trim() || !!selectedNode?.job_id} onClick={() => void generateOnCanvas()}>{generationBusy ? "提交中" : generationArmed ? "确认生成" : selectedNode?.submission_key ? "核对并重试" : generationMode === "edit" ? "生成改图" : "生成图片"}</button>
       </div>
       <div className="canvas-connections">
@@ -1459,6 +1520,20 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
             event.preventDefault();
             const rect = event.currentTarget.getBoundingClientRect();
             zoomView(event.deltaY < 0 ? 1.1 : 1 / 1.1, event.clientX - rect.left, event.clientY - rect.top);
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const assetId = event.dataTransfer.getData("text/studio-asset");
+            if (assetId) {
+              const asset = snapshot.assets.find((item) => item.asset_id === assetId);
+              if (asset) void addAsset(asset);
+              return;
+            }
+            void uploadCanvasAssets(Array.from(event.dataTransfer.files || []));
           }}
           onKeyDown={(event) => {
             if (event.target !== event.currentTarget) return;
@@ -1511,7 +1586,29 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
           })}
           </div>
         </div>
-        <aside className="canvas-assets"><h2>当前会话素材</h2>{snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).map((asset) => <button type="button" className="asset-picker-row" key={asset.asset_id} onClick={() => void addAsset(asset)}><AssetPreview item={asset} history={snapshot.history} /><span>{asset.filename}</span></button>)}{snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).length === 0 && <div className="empty-state">当前会话暂无图片素材</div>}</aside>
+        <aside className="canvas-assets">
+          <div className="canvas-assets-heading">
+            <h2>当前会话素材</h2>
+            <small>点击或拖入画布</small>
+          </div>
+          {snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).map((asset) => (
+            <button
+              type="button"
+              className="asset-picker-row"
+              draggable
+              key={asset.asset_id}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "copy";
+                event.dataTransfer.setData("text/studio-asset", asset.asset_id);
+              }}
+              onClick={() => void addAsset(asset)}
+            >
+              <AssetPreview item={asset} history={snapshot.history} />
+              <span>{asset.filename}</span>
+            </button>
+          ))}
+          {snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).length === 0 && <div className="empty-state">当前会话暂无图片素材</div>}
+        </aside>
       </div>
     </section>
   );
