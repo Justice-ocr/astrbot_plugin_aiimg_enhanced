@@ -13,7 +13,7 @@ This is a release checklist, not a request for a large test suite. Reuse existin
 - Image history remains capped at 100 and displays newest-first with session and generation time.
 - Session persona selection remains isolated by AstrBot session.
 - Studio job, asset and project reads/writes require a known matching session scope; missing or invented scopes are rejected.
-- Legacy Settings remains available until Studio has completed one stable release cycle.
+- Legacy Settings remains available at `pages/LegacySettings` until Studio has completed one stable release cycle.
 
 ## Minimal automated checks
 

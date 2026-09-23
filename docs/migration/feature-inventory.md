@@ -54,7 +54,7 @@ Tool names and schemas are public compatibility surfaces and may not be changed 
 | W07 | Managed tasks and cancellation | operations.js and Pages API | migrate/implemented | Tasks |
 | W08 | Global image history, search, details and download | history.js and Pages API | migrate/implemented | Assets / History |
 | W09 | Output-size catalog | output_sizes.js and output_sizes.json | migrate/code complete, unverified | Create parameters; legacy catalog retained in Settings |
-| W10 | Legacy Settings | pages/Settings | retain | Fallback route |
+| W10 | Legacy Settings | pages/LegacySettings | retain | Fallback route |
 
 Existing Pages APIs retained during migration:
 

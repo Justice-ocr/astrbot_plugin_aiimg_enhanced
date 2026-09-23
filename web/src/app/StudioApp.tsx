@@ -2828,7 +2828,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
           <span className="section-kicker">PROVIDERS</span>
           <h1>服务商</h1>
         </div>
-        <a className="secondary-action" href="../Settings/">
+        <a className="secondary-action" href="../LegacySettings/">
           旧版设置
           <ChevronRight size={16} aria-hidden="true" />
         </a>
@@ -2927,7 +2927,7 @@ function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
     }
   }
 
-  return <section className="workspace"><div className="workspace-heading"><div><span className="section-kicker">SETTINGS</span><h1>工作台设置</h1></div><a className="secondary-action" href="../Settings/">完整旧版设置<ChevronRight size={16} aria-hidden="true" /></a></div>
+  return <section className="workspace"><div className="workspace-heading"><div><span className="section-kicker">SETTINGS</span><h1>工作台设置</h1></div><a className="secondary-action" href="../LegacySettings/">完整旧版设置<ChevronRight size={16} aria-hidden="true" /></a></div>
     <div className="settings-grid">
       <div className="tool-panel"><h2>功能</h2>
         {["draw", "edit", "selfie", "video"].map((id) => <div key={id}>
@@ -3113,7 +3113,7 @@ export default function StudioApp() {
           </div>
         ) : (
           snapshot.config.features?.studio?.enabled === false && route !== "settings" ? (
-            <section className="workspace"><h1>Studio 已关闭</h1><a className="secondary-action" href="../Settings/">打开旧版设置</a><button type="button" className="secondary-action" onClick={() => setRoute("settings")}>工作台设置</button></section>
+            <section className="workspace"><h1>Studio 已关闭</h1><a className="secondary-action" href="../LegacySettings/">打开旧版设置</a><button type="button" className="secondary-action" onClick={() => setRoute("settings")}>工作台设置</button></section>
           ) : <>
             {route === "create" && <CreateView snapshot={snapshot} scope={activeScope} onScopeChange={changeActiveScope} onSubmitted={() => void refresh()} />}
             {route === "canvas" && <CanvasView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { artifactDigests, sourceDigest } from "./studio_integrity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const target = path.join(root, "pages", "Studio");
+const target = path.join(root, "pages", "Settings");
 const manifest = JSON.parse(await readFile(path.join(target, ".studio-integrity.json"), "utf8"));
 const source = await sourceDigest(root);
 const files = await artifactDigests(target);

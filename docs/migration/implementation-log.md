@@ -4,7 +4,7 @@
 
 - Python compilation completed successfully. The focused high-risk suite passed 34 tests covering Studio stores/capabilities, session personas, history, managed tasks, page configuration and video path safety.
 - `pnpm install --frozen-lockfile --offline`, Astro diagnostics and the production build completed successfully. The repository has no lint script or lint configuration, so no new lint framework was introduced for this release.
-- The production build was atomically installed to `pages/Studio`; the source/lockfile/artifact integrity manifest matches, `git diff --check` reported no whitespace errors, and the focused secret/path scan found no matches.
+- The production build was atomically installed to the default `pages/Settings` entry; the former Settings page is retained at `pages/LegacySettings`. The source/lockfile/artifact integrity manifest matches, `git diff --check` reported no whitespace errors, and the focused secret/path scan found no matches.
 - Browser checks covered every Studio route at 1440x900 and representative installed-artifact pages at 390x844. A design-sidebar overflow and an incomplete preview API fixture were fixed; the final installed design, GIF and settings views have no main-content horizontal overflow or console diagnostics.
 - No running AstrBot test instance or authorized provider credentials were available. Real page-bridge routing, chat delivery and paid image/video generation remain explicitly unverified.
 - `_conf_schema.json` remains an unrelated local modification and was not edited as part of the Studio work.

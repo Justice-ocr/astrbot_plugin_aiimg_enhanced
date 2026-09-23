@@ -15,9 +15,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
 const source = path.join(root, "web", "dist");
 const pages = path.join(root, "pages");
-const target = path.join(pages, "Studio");
-const temporary = path.join(pages, ".Studio.next");
-const backup = path.join(pages, ".Studio.previous");
+const target = path.join(pages, "Settings");
+const temporary = path.join(pages, ".Settings.next");
+const backup = path.join(pages, ".Settings.previous");
 
 function assertChild(parent, child) {
   const relative = path.relative(parent, child);
