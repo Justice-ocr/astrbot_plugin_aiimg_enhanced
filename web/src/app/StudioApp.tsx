@@ -31,6 +31,7 @@ import {
   Video,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
 import {
   cancelTask,
   cancelStudioJob,
@@ -1674,7 +1675,7 @@ function GifView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; sco
       if ([...cache.values()].reduce((sum, uri) => sum + Math.ceil(uri.length * 3 / 4), 0) > 100 * 1024 * 1024) {
         throw new Error("GIF 输入总量不能超过 100MB");
       }
-      const worker = new Worker(new URL("../features/gif/encode.worker.ts", import.meta.url), { type: "module" });
+      const worker = new GifEncodeWorker();
       workerRef.current = worker;
       const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
         abortEncoding.current = reject;
@@ -3120,7 +3121,7 @@ export default function StudioApp() {
           <img src="./logo.png" alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.12.1</small>
+            <small>v4.12.2</small>
           </div>
         </div>
       </aside>

@@ -23,6 +23,9 @@ export async function sourceDigest(root) {
     "web/package.json",
     "web/package-lock.json",
     "web/pnpm-lock.yaml",
+    "web/tsconfig.json",
+    "web/vite.studio.config.ts",
+    "scripts/build_studio.mjs",
   ];
   for (const name of files.sort()) {
     hash.update(name).update("\0").update(await readFile(path.join(root, name))).update("\0");

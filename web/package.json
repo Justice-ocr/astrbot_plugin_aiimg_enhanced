@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "astro dev",
     "check": "astro check",
-    "build": "astro build"
+    "build": "astro build && vite build --config vite.studio.config.ts"
   },
   "dependencies": {
     "@astrojs/check": "0.9.10",

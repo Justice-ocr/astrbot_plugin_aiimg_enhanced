@@ -7,6 +7,7 @@ dist/
 build/
 web/node_modules/
 web/dist/
+/dist-studio/
 web/.astro/
 .env
 aiimg_persist_config.json

@@ -1,12 +1,9 @@
 {
-  "source": "7808ede1fb09041efd2b6900762034abc54326abb364c270fe2a777386bd84d8",
+  "source": "8b117a04df9f7482212b8fef1a3a0e3b6d557a85f6353e9d9df8c4e835bf5dc4",
   "files": {
-    "assets/client.02KvyX6a.js": "bf17a4cec393cba0d44a67b1e991c8d6e2b52e98ba5ac7f5ac0b05ef13c06223",
-    "assets/client.BZ20pz4g.js": "89dacd51da912b39e85cd865690b7a0f6c730c71fce14970cafd93b48dd4a4a9",
-    "assets/encode.worker-UqJLgAfX.js": "f0a56e6f14f3dae880ec3432dbe07720dea8dfae78ebcb6186403478ed06dacf",
-    "assets/index.B_La-GS5.css": "8907d4d5429425c8664c9a0b976b6c6a41f9f0a478f5b1c6039bcc8126e5d167",
-    "assets/index.astro_astro_type_script_index_0_lang.CfumvbA4.js": "701108c766b556ac528d49c2ff593551b7d209587821453bd74386e647797bd6",
-    "index.html": "ecf6a7046c68cca764f33625193ed47ff9989d53972871091d59b9a0adbd0a13",
+    "assets/studio.css": "87acf048b1b34de9b09069db3a8bfcead770bda0c3099d5a7ae5866a6efad07b",
+    "assets/studio.js": "cccff6d564da186fcc77c35887175de6ed7d231d669ac897ae21bfb7ad2c9377",
+    "index.html": "9f07e442c3ae660787a54af4a77ecd6b31f74175d7d6dc9a0d305d840b24c926",
     "logo.png": "29f087f43e51e3901ad284e7e15b3cd7266c0f36ad8f18ab66673c81181bd31a"
   }
 }
