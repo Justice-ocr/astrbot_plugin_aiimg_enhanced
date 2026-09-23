@@ -983,6 +983,14 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   edgesRef.current = edges;
   const panRef = useRef<{ x: number; y: number; before: typeof view } | null>(null);
   const dragRef = useRef<{ id: string; startX: number; startY: number; before: CanvasEdit; moved: boolean } | null>(null);
+  const assetPointerDragRef = useRef<{
+    asset: StudioAsset;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    listeners?: { move: (event: PointerEvent) => void; up: (event: PointerEvent) => void };
+  } | null>(null);
+  const suppressAssetClickRef = useRef(false);
 
   function openProject(next: StudioProject | null) {
     importVersion.current += 1;
@@ -1020,6 +1028,14 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
     setImportedAssets([]);
     setBusy(false);
   }, [scope]);
+  useEffect(() => () => {
+    const listeners = assetPointerDragRef.current?.listeners;
+    if (listeners) {
+      window.removeEventListener("pointermove", listeners.move);
+      window.removeEventListener("pointerup", listeners.up);
+    }
+    assetPointerDragRef.current = null;
+  }, []);
   useEffect(() => () => { importVersion.current += 1; }, []);
   useEffect(() => {
     if (!project) return;
@@ -1139,6 +1155,51 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
     } finally {
       setAssetUploadBusy(false);
     }
+  }
+
+  function beginAssetPointerDrag(event: ReactPointerEvent<HTMLElement>, asset: StudioAsset) {
+    if (event.button !== 0 || busy || generationBusy || assetUploadBusy) return;
+    const drag = {
+      asset,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+    const move = (moveEvent: PointerEvent) => {
+      const current = assetPointerDragRef.current;
+      if (!current) return;
+      const distance = Math.hypot(moveEvent.clientX - current.startX, moveEvent.clientY - current.startY);
+      if (!current.moved && distance < 6) return;
+      current.moved = true;
+      suppressAssetClickRef.current = true;
+      const board = boardRef.current;
+      const rect = board?.getBoundingClientRect();
+      const inside = !!rect
+        && moveEvent.clientX >= rect.left
+        && moveEvent.clientX <= rect.right
+        && moveEvent.clientY >= rect.top
+        && moveEvent.clientY <= rect.bottom;
+      setCanvasDropActive(inside);
+    };
+    const up = (upEvent: PointerEvent) => {
+      const current = assetPointerDragRef.current;
+      if (!current) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      assetPointerDragRef.current = null;
+      setCanvasDropActive(false);
+      const board = boardRef.current;
+      const rect = board?.getBoundingClientRect();
+      const inside = !!rect
+        && upEvent.clientX >= rect.left
+        && upEvent.clientX <= rect.right
+        && upEvent.clientY >= rect.top
+        && upEvent.clientY <= rect.bottom;
+      if (current.moved && inside) void addAsset(current.asset);
+    };
+    assetPointerDragRef.current = { ...drag, listeners: { move, up } };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   }
 
   function moveNode(index: number, direction: -1 | 1) {
@@ -1609,20 +1670,22 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
               role="button"
               tabIndex={0}
               className="asset-picker-row"
-              draggable
+              draggable={false}
               key={asset.asset_id}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "copy";
-                event.dataTransfer.setData("text/studio-asset", asset.asset_id);
-                event.dataTransfer.setData("text/plain", asset.asset_id);
-              }}
+              onPointerDown={(event) => beginAssetPointerDrag(event, asset)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
                   void addAsset(asset);
                 }
               }}
-              onClick={() => void addAsset(asset)}
+              onClick={() => {
+                if (suppressAssetClickRef.current) {
+                  suppressAssetClickRef.current = false;
+                  return;
+                }
+                void addAsset(asset);
+              }}
             >
               <AssetPreview item={asset} history={snapshot.history} />
               <span>{asset.filename}</span>

@@ -692,6 +692,8 @@
   background: transparent;
   text-align: left;
   cursor: pointer;
+  user-select: none;
+  touch-action: none;
 }
 
 .asset-picker-row:hover { background: var(--primary-color-lighten); }
