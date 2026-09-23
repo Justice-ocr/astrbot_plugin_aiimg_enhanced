@@ -1588,6 +1588,16 @@
   color: var(--danger-color);
 }
 
+.danger-confirm {
+  border-color: var(--danger-color);
+  color: white;
+  background: var(--danger-color);
+}
+
+.confirm-action {
+  box-shadow: 0 0 0 3px var(--primary-color-transparent);
+}
+
 .error-banner {
   display: flex;
   align-items: center;

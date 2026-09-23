@@ -964,6 +964,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   const [generationSize, setGenerationSize] = useState("");
   const [generationResolution, setGenerationResolution] = useState("");
   const [generationBusy, setGenerationBusy] = useState(false);
+  const [generationArmed, setGenerationArmed] = useState(false);
   const generationRequest = useRef<Record<string, unknown> | null>(null);
   const dirtyRef = useRef(false);
   const projectRevisionRef = useRef(project?.revision || 0);
@@ -986,6 +987,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
     setStatus("");
     generationRequest.current = null;
     setGenerationBusy(false);
+    setGenerationArmed(false);
     setGenerationPrompt("");
     setProjectJobs([]);
     setEdgeFrom("");
@@ -1066,7 +1068,15 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   }
 
   async function addAsset(asset: StudioAsset) {
-    if (busy || generationBusy || importing.current || asset.scope !== scope || asset.media_type !== "image") return;
+    if (busy || generationBusy || importing.current) return;
+    if (asset.scope !== scope) {
+      setStatus("该素材不属于当前会话，请切换到对应会话后再加入画布");
+      return;
+    }
+    if (asset.media_type !== "image") {
+      setStatus("无限画布当前只支持图片素材");
+      return;
+    }
     const version = importVersion.current;
     importing.current = true;
     setImportBusy(true);
@@ -1077,7 +1087,12 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       setImportedAssets((current) => [...current.filter((item) => item.asset_id !== managed.asset_id), managed]);
       const current = nodesRef.current;
       if (current.length >= 500) throw new Error("画布最多支持 500 个节点");
-      if (current.some((node) => node.asset_id === managed.asset_id)) return;
+      const existing = current.find((node) => node.asset_id === managed.asset_id);
+      if (existing) {
+        setSelectedNodeId(existing.id);
+        setStatus("该素材已在画布中，已为你选中对应节点");
+        return;
+      }
       const offset = current.length * 28;
       const node: CanvasNode = { id: globalThis.crypto.randomUUID(), type: "asset", asset_id: managed.asset_id, x: (80 + offset - view.x) / view.zoom, y: (80 + offset - view.y) / view.zoom, scale: 1, rotation: 0 };
       setHistory((previous) => [...previous, { nodes: cloneCanvasNodes(current), edges: [...edgesRef.current] }].slice(-50));
@@ -1085,6 +1100,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       dirtyRef.current = true;
       setSelectedNodeId(node.id);
       setFuture([]);
+      setStatus("素材已加入画布");
       if (asset.source === "history") onRefresh();
     } catch (reason) {
       if (version === importVersion.current) window.alert(reason instanceof Error ? reason.message : "导入图片失败");
@@ -1193,6 +1209,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
     };
     commit([...nodes, node]);
     setSelectedNodeId(node.id);
+    setGenerationArmed(false);
   }
 
   function connectSelected() {
@@ -1211,6 +1228,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
     setGenerationMode(selected.mode || "draw");
     setGenerationSize(selected.size || "");
     setGenerationResolution(selected.resolution || "");
+    setGenerationArmed(false);
   }, [selectedNodeId]);
 
   useEffect(() => {
@@ -1301,8 +1319,12 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       setStatus("改图参考素材最多 9 张");
       return;
     }
-    if (!existingNode?.submission_key &&
-        !window.confirm(`通过 ${generationProvider} 生成 1 张图片，费用以服务商账单为准。继续？`)) return;
+    if (!existingNode?.submission_key && !generationArmed) {
+      setGenerationArmed(true);
+      setStatus(`将通过 ${generationProvider} 生成 1 张图片；再次点击“确认生成”后提交`);
+      return;
+    }
+    setGenerationArmed(false);
     const node: CanvasNode = existingNode ? {
       ...existingNode, submission_key: key,
       prompt: generationPrompt.trim(), provider_id: generationProvider,
@@ -1407,15 +1429,16 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
         <label className="stack-field"><span>模式</span><select value={generationMode} disabled={generationBusy || !!selectedNode?.submission_key} onChange={(event) => {
           setGenerationMode(event.target.value as "draw" | "edit");
           setGenerationProvider("");
+          setGenerationArmed(false);
         }}><option value="draw">文生图</option><option value="edit">参考图改图</option></select></label>
-        <label className="stack-field"><span>画布生成服务商</span><select value={generationProvider} disabled={generationBusy || !!generationRequest.current || !!selectedNode?.submission_key} onChange={(event) => setGenerationProvider(event.target.value)}>
+        <label className="stack-field"><span>画布生成服务商</span><select value={generationProvider} disabled={generationBusy || !!generationRequest.current || !!selectedNode?.submission_key} onChange={(event) => { setGenerationProvider(event.target.value); setGenerationArmed(false); }}>
           <option value="">选择服务商</option>{generationProviders.map((item) => <option key={item.provider_id} value={item.provider_id}>{item.provider_id}</option>)}
         </select></label>
-        <label className="stack-field"><span>生成提示词</span><textarea rows={2} maxLength={8000} value={generationPrompt} disabled={generationBusy || !!generationRequest.current || !!selectedNode?.submission_key} onChange={(event) => setGenerationPrompt(event.target.value)} /></label>
+        <label className="stack-field"><span>生成提示词</span><textarea rows={2} maxLength={8000} value={generationPrompt} disabled={generationBusy || !!generationRequest.current || !!selectedNode?.submission_key} onChange={(event) => { setGenerationPrompt(event.target.value); setGenerationArmed(false); }} /></label>
         {!!selectedProvider?.parameters.sizes?.values.length && <label className="stack-field"><span>尺寸</span><select value={generationSize} disabled={generationBusy || !!selectedNode?.submission_key} onChange={(event) => setGenerationSize(event.target.value)}>{selectedProvider.parameters.sizes.values.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
         {!!selectedProvider?.parameters.resolutions?.values.length && <label className="stack-field"><span>分辨率</span><select value={generationResolution} disabled={generationBusy || !!selectedNode?.submission_key} onChange={(event) => setGenerationResolution(event.target.value)}>{selectedProvider.parameters.resolutions.values.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
         <button type="button" className="icon-button" disabled={busy || generationBusy || nodes.length >= 500} title="添加生成节点" onClick={addGenerationDraft}><ImagePlus size={17} /><span className="sr-only">添加生成节点</span></button>
-        <button type="button" className="primary-action" disabled={busy || generationBusy || !generationProvider || !generationPrompt.trim() || !!selectedNode?.job_id} onClick={() => void generateOnCanvas()}>{generationBusy ? "提交中" : selectedNode?.submission_key ? "核对并重试" : generationMode === "edit" ? "生成改图" : "生成图片"}</button>
+        <button type="button" className={generationArmed ? "primary-action confirm-action" : "primary-action"} disabled={busy || generationBusy || !generationProvider || !generationPrompt.trim() || !!selectedNode?.job_id} onClick={() => void generateOnCanvas()}>{generationBusy ? "提交中" : generationArmed ? "确认生成" : selectedNode?.submission_key ? "核对并重试" : generationMode === "edit" ? "生成改图" : "生成图片"}</button>
       </div>
       <div className="canvas-connections">
         <label className="stack-field"><span>连线起点</span><select value={edgeFrom} disabled={generationBusy} onChange={(event) => setEdgeFrom(event.target.value)}><option value="">选择节点</option>{nodes.map((node, index) => <option key={node.id} value={node.id}>节点 {index + 1} · {node.type === "generation" ? "生成" : "素材"}</option>)}</select></label>
@@ -1488,7 +1511,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
           })}
           </div>
         </div>
-        <aside className="canvas-assets"><h2>素材</h2>{snapshot.assets.filter((item) => item.media_type === "image").map((asset) => <button type="button" className="asset-picker-row" key={asset.asset_id} onClick={() => addAsset(asset)}><AssetPreview item={asset} history={snapshot.history} /><span>{asset.filename}</span></button>)}{snapshot.assets.length === 0 && <div className="empty-state">暂无图片素材</div>}</aside>
+        <aside className="canvas-assets"><h2>当前会话素材</h2>{snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).map((asset) => <button type="button" className="asset-picker-row" key={asset.asset_id} onClick={() => void addAsset(asset)}><AssetPreview item={asset} history={snapshot.history} /><span>{asset.filename}</span></button>)}{snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).length === 0 && <div className="empty-state">当前会话暂无图片素材</div>}</aside>
       </div>
     </section>
   );
@@ -2843,6 +2866,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   const [rawJson, setRawJson] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [deleteArmed, setDeleteArmed] = useState(false);
   const selected = providers.find((provider) => String(provider.id) === selectedId);
   const secretKeys = (provider?: ProviderConfig) => Object.keys(provider || {}).filter((key) => providerSecretFields.has(key));
   const providerDirty = Boolean(selected) && (
@@ -2859,6 +2883,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     setSecretDraft(secrets);
     setStatus("");
     setError("");
+    setDeleteArmed(false);
   }
 
   useEffect(() => {
@@ -2880,6 +2905,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     });
     setStatus("未保存");
     setError("");
+    setDeleteArmed(false);
   }
 
   function renderField(key: string, value: unknown) {
@@ -2912,6 +2938,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
         }
       });
       await saveStudioProvider(draft, snapshot.configRevision, updates, false, selected.id);
+      setDeleteArmed(false);
       if (String(draft.id || "") !== selected.id) setSelectedId(String(draft.id || ""));
       setStatus("已保存");
       onRefresh();
@@ -2923,7 +2950,13 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   }
 
   async function removeProvider() {
-    if (!selected || busy || !window.confirm(`删除服务商「${selected.id}」？相关服务商链和引用配置会一并清理。`)) return;
+    if (!selected || busy) return;
+    if (!deleteArmed) {
+      setDeleteArmed(true);
+      setStatus(`将删除服务商「${selected.id}」及其调用链引用；再次点击确认删除`);
+      return;
+    }
+    setDeleteArmed(false);
     setBusy(true);
     setError("");
     try {
@@ -2990,7 +3023,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
             {Boolean(selected[`${key}_configured`]) && <span className="check-row"><input type="checkbox" checked={item.clear} disabled={busy} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], clear: event.target.checked, value: "" } }))} />清除此凭据</span>}</label>)}</div></section>}
           <details className="provider-advanced" open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}><summary>高级 JSON 编辑</summary><p>用于模板未覆盖的字段。保存时仍保留未识别配置；不要在此填写密钥。</p><textarea className="code-editor" rows={12} value={rawJson} spellCheck={false} onChange={(event) => { setRawJson(event.target.value); try { const parsed = JSON.parse(event.target.value); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(); setDraft(parsed); setError(""); setStatus("未保存"); } catch { setError("高级 JSON 格式无效"); } }} /></details>
           {error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}
-          <div className="provider-savebar"><span className={status === "已保存" && !providerDirty ? "save-state saved" : "save-state"}>{error ? "请先修正 JSON" : providerDirty ? "有未保存的更改" : status || "配置已同步"}</span><div className="composer-actions"><button type="button" className="secondary-action danger-action" disabled={busy} onClick={() => void removeProvider()}><Trash2 size={16} />删除服务商</button><button type="button" className="primary-action" disabled={busy || Boolean(error) || !providerDirty} onClick={() => void save()}><Save size={16} />{busy ? "保存中" : "保存服务商"}</button></div></div>
+          <div className="provider-savebar"><span className={status === "已保存" && !providerDirty ? "save-state saved" : "save-state"}>{error ? "请先修正 JSON" : providerDirty ? "有未保存的更改" : status || "配置已同步"}</span><div className="composer-actions"><button type="button" className={deleteArmed ? "secondary-action danger-action danger-confirm" : "secondary-action danger-action"} disabled={busy} onClick={() => void removeProvider()}><Trash2 size={16} />{deleteArmed ? "确认删除" : "删除服务商"}</button>{deleteArmed && <button type="button" className="secondary-action" disabled={busy} onClick={() => { setDeleteArmed(false); setStatus(""); }}>取消</button>}<button type="button" className="primary-action" disabled={busy || Boolean(error) || !providerDirty} onClick={() => void save()}><Save size={16} />{busy ? "保存中" : "保存服务商"}</button></div></div>
         </> : providers.length > 0 && <div className="empty-state">选择服务商以查看和编辑配置。</div>}
       </div>
     </div>
