@@ -84,6 +84,30 @@ import { readRoute, routeHref, routes, type RouteId } from "./routes";
 import { PresetEditor } from "../features/prompts/PresetEditor";
 import { buildStaticPreview } from "../features/design/static-preview";
 
+function readLocalSetting(key: string): string {
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLocalSetting(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // AstrBot plugin pages may run without storage access.
+  }
+}
+
+function removeLocalSetting(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // AstrBot plugin pages may run without storage access.
+  }
+}
+
 const EMPTY_SNAPSHOT: StudioSnapshot = {
   config: {},
   capabilities: [],
@@ -194,7 +218,7 @@ function CreateView({
   const [mode, setMode] = useState<CreateMode>("image");
   const [providerId, setProviderId] = useState("");
   const [prompt, setPrompt] = useState(() => (
-    typeof window === "undefined" ? "" : window.localStorage.getItem("aiimg-studio-prompt-draft") || ""
+    typeof window === "undefined" ? "" : readLocalSetting("aiimg-studio-prompt-draft")
   ));
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -234,7 +258,7 @@ function CreateView({
       ? `当前参考模式需要至少 ${activeReferenceMode.min_images} 张图片` : "";
 
   useEffect(() => {
-    if (prompt) localStorage.removeItem("aiimg-studio-prompt-draft");
+    if (prompt) removeLocalSetting("aiimg-studio-prompt-draft");
   }, []);
 
   useEffect(() => {
@@ -1915,7 +1939,7 @@ function PromptsView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot;
   })).filter((item) => `${item.name} ${item.prompt}`.toLowerCase().includes(query.toLowerCase()));
 
   function usePrompt(prompt: string) {
-    localStorage.setItem("aiimg-studio-prompt-draft", prompt);
+    writeLocalSetting("aiimg-studio-prompt-draft", prompt);
     window.location.hash = "#/create";
   }
 
@@ -3028,7 +3052,7 @@ export default function StudioApp() {
     const next = !dark;
     setDark(next);
     document.documentElement.dataset.theme = next ? "dark" : "light";
-    localStorage.setItem("aiimg-studio-theme", next ? "dark" : "light");
+    writeLocalSetting("aiimg-studio-theme", next ? "dark" : "light");
   }
 
   return (
@@ -3096,7 +3120,7 @@ export default function StudioApp() {
           <img src="./logo.png" alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.12.0</small>
+            <small>v4.12.1</small>
           </div>
         </div>
       </aside>

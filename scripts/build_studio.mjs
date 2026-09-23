@@ -50,7 +50,9 @@ await cp(source, temporary, { recursive: true });
 
 const indexPath = path.join(temporary, "index.html");
 const html = await readFile(indexPath, "utf8");
-const portableHtml = html.replaceAll('="/assets/', '="./assets/');
+const portableHtml = html
+  .replaceAll('="/assets/', '="./assets/')
+  .replaceAll('=".//assets/', '="./assets/');
 await writeFile(indexPath, portableHtml, "utf8");
 await writeFile(path.join(temporary, ".studio-integrity.json"), JSON.stringify({
   source: await sourceDigest(root),

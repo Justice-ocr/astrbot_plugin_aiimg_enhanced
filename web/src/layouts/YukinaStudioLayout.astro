@@ -15,7 +15,12 @@ const { title } = Astro.props;
     <meta name="theme-color" content="#f4f8f8" />
     <title>{title}</title>
     <script is:inline>
-      const savedTheme = localStorage.getItem("aiimg-studio-theme");
+      let savedTheme = "";
+      try {
+        savedTheme = localStorage.getItem("aiimg-studio-theme") || "";
+      } catch {
+        // AstrBot plugin pages may run in an opaque-origin sandbox.
+      }
       const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       document.documentElement.dataset.theme = savedTheme || (prefersDark ? "dark" : "light");
 

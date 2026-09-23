@@ -1,10 +1,12 @@
 ---
 import StudioLayout from "../layouts/YukinaStudioLayout.astro";
-import StudioApp from "../app/StudioApp";
 import "../styles/tokens.css";
 import "../styles/yukina-shell.css";
 ---
 
 <StudioLayout title="AI绘图站">
-  <StudioApp client:load />
+  <div id="studio-root">
+    <div class="studio-boot" role="status">正在启动 AIIMG Studio...</div>
+  </div>
+  <script src="../app/client.tsx"></script>
 </StudioLayout>
