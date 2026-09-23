@@ -414,6 +414,7 @@
 
 .asset-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 4px;
   margin-top: 4px;
@@ -610,6 +611,19 @@
 }
 .canvas-project-actions .project-name { min-width: 0; }
 .canvas-project-actions .primary-action { flex: 0 0 auto; width: auto; white-space: nowrap; }
+
+.canvas-workspace {
+  display: flex;
+  flex-direction: column;
+}
+
+.canvas-workspace > .canvas-heading { order: 1; }
+.canvas-workspace > .canvas-toolbar { order: 2; }
+.canvas-workspace > [role="status"] { order: 3; }
+.canvas-workspace > .canvas-layout { order: 4; }
+.canvas-workspace > .video-options { order: 5; }
+.canvas-workspace > .canvas-connections { order: 6; }
+.canvas-workspace > .composer-actions { order: 7; }
 
 .prompt-call-action { display: flex; justify-content: flex-start; margin: 12px 0; }
 .prompt-call-action .primary-action { width: auto; }
@@ -1785,7 +1799,13 @@
 
 @media (max-width: 600px) {
   .workspace-heading {
+    flex-wrap: wrap;
     align-items: center;
+  }
+
+  .workspace-heading > :first-child {
+    min-width: 0;
+    flex: 1 1 220px;
   }
 
   .workspace-heading h1 {
@@ -1805,6 +1825,12 @@
   .canvas-project-actions { width: 100%; }
   .canvas-project-actions .project-name { flex: 1 1 auto; }
   .canvas-project-actions .primary-action { width: auto; }
+  .canvas-heading {
+    align-items: stretch;
+  }
+  .canvas-heading > :first-child {
+    flex-basis: 100%;
+  }
 
   .composer-actions select,
   .primary-action {
@@ -1859,6 +1885,10 @@
   .history-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+  }
+
+  .asset-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .history-copy {

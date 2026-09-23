@@ -89,6 +89,7 @@ import type {
 import { readRoute, routeHref, routes, type RouteId } from "./routes";
 import { PresetEditor } from "../features/prompts/PresetEditor";
 import { buildStaticPreview } from "../features/design/static-preview";
+import brandIcon from "../assets/yukina-favicon.svg?inline";
 
 function readLocalSetting(key: string): string {
   try {
@@ -1514,7 +1515,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   }
 
   return (
-    <section className="workspace">
+    <section className="workspace canvas-workspace">
       <div className="workspace-heading canvas-heading"><div><span className="section-kicker">CANVAS</span><h1>无限画布</h1></div><div className="canvas-project-actions"><input className="project-name" value={name} onChange={(event) => { dirtyRef.current = true; setName(event.target.value); }} aria-label="项目名称" /><button type="button" className="primary-action" disabled={busy || generationBusy || !scope} onClick={() => void save()}>{busy ? "保存中" : "保存项目"}</button></div></div>
       <div className="canvas-toolbar" role="toolbar" aria-label="画布编辑工具">
         <button type="button" className="icon-button" aria-pressed={!panMode} title="选择节点" onClick={() => setPanMode(false)}><MousePointer2 size={17} /><span className="sr-only">选择节点</span></button>
@@ -3423,7 +3424,7 @@ export default function StudioApp() {
           {menuOpen ? <X size={21} /> : <ChevronRight size={21} />}
         </button>
         <a className="studio-brand" href="#/create">
-          <img className="brand-symbol" src="./yukina-favicon.svg" alt="" />
+          <img className="brand-symbol" src={brandIcon} alt="" />
           <span>AI绘图站</span>
         </a>
         <span className="topbar-route">{activeRoute.label}</span>
@@ -3458,7 +3459,7 @@ export default function StudioApp() {
 
       <aside className={"studio-sidebar " + (menuOpen ? "open" : "")}>
         <div className="sidebar-profile">
-          <img src="./yukina-favicon.svg" alt="" />
+          <img src={brandIcon} alt="" />
           <div>
             <strong>{snapshot.sessions.find((session) => session.scope === activeScope)?.title || "AIIMG Studio"}</strong>
             <small>{activeRoute.label}工作区</small>
@@ -3480,7 +3481,7 @@ export default function StudioApp() {
           })}
         </nav>
         <div className="sidebar-foot">
-          <img className="brand-symbol small" src="./yukina-favicon.svg" alt="" />
+          <img className="brand-symbol small" src={brandIcon} alt="" />
           <div>
             <strong>AIIMG Studio</strong>
             <small>v4.12.3</small>
