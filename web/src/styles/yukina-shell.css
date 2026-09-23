@@ -682,7 +682,7 @@
 .asset-picker-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 32px;
   align-items: center;
   gap: 8px;
   padding: 6px;
@@ -691,14 +691,27 @@
   color: var(--text-color);
   background: transparent;
   text-align: left;
-  cursor: pointer;
   user-select: none;
   touch-action: none;
 }
 
 .asset-picker-row:hover { background: var(--primary-color-lighten); }
-.asset-picker-row:active { cursor: grabbing; }
-.asset-picker-row:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
+.canvas-asset-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: grab;
+}
+.canvas-asset-main:active { cursor: grabbing; }
+.canvas-asset-main:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+.canvas-asset-add { min-width: 32px; width: 32px; height: 32px; padding: 0; }
 .asset-picker-row img, .asset-picker-row .media-placeholder { width: 42px; height: 42px; object-fit: cover; border-radius: 4px; }
 .asset-picker-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 

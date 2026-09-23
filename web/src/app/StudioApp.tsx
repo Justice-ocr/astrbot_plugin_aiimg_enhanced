@@ -114,6 +114,20 @@ function removeLocalSetting(key: string): void {
   }
 }
 
+function newStudioId(): string {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 const EMPTY_SNAPSHOT: StudioSnapshot = {
   config: {},
   capabilities: [],
@@ -315,7 +329,7 @@ function CreateView({
     setSubmitError("");
     try {
       await createStudioJob({
-        idempotency_key: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+        idempotency_key: newStudioId(),
         scope,
         kind: mode === "video" ? "video" : "image",
         mode: mode === "image" ? "draw" : mode,
@@ -1114,7 +1128,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
         return;
       }
       const offset = current.length * 28;
-      const node: CanvasNode = { id: globalThis.crypto.randomUUID(), type: "asset", asset_id: managed.asset_id, x: (80 + offset - view.x) / view.zoom, y: (80 + offset - view.y) / view.zoom, scale: 1, rotation: 0 };
+      const node: CanvasNode = { id: newStudioId(), type: "asset", asset_id: managed.asset_id, x: (80 + offset - view.x) / view.zoom, y: (80 + offset - view.y) / view.zoom, scale: 1, rotation: 0 };
       setHistory((previous) => [...previous, { nodes: cloneCanvasNodes(current), edges: [...edgesRef.current] }].slice(-50));
       setNodes([...current, node]);
       dirtyRef.current = true;
@@ -1188,6 +1202,9 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       window.removeEventListener("pointerup", up);
       assetPointerDragRef.current = null;
       setCanvasDropActive(false);
+      if (current.moved) {
+        window.setTimeout(() => { suppressAssetClickRef.current = false; }, 0);
+      }
       const board = boardRef.current;
       const rect = board?.getBoundingClientRect();
       const inside = !!rect
@@ -1230,7 +1247,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
     if (!selected || generationBusy || nodes.length >= 500) return;
     const copy: CanvasNode = {
       ...selected,
-      id: globalThis.crypto.randomUUID(),
+      id: newStudioId(),
       x: selected.x + 40,
       y: selected.y + 40,
       job_id: undefined,
@@ -1308,7 +1325,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   function addGenerationDraft() {
     if (generationBusy || busy || importing.current || nodes.length >= 500) return;
     const node: CanvasNode = {
-      id: globalThis.crypto.randomUUID(), type: "generation", asset_id: "",
+      id: newStudioId(), type: "generation", asset_id: "",
       x: (100 - view.x) / view.zoom, y: (100 - view.y) / view.zoom,
       scale: 1, rotation: 0, prompt: generationPrompt.trim(),
       provider_id: generationProvider, size: generationSize, resolution: generationResolution,
@@ -1322,7 +1339,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   function connectSelected() {
     if (!selectedNodeId || !edgeFrom || edgeFrom === selectedNodeId) return;
     if (edges.some((edge) => edge.from === edgeFrom && edge.to === selectedNodeId)) return;
-    commitEdges([...edges, { id: globalThis.crypto.randomUUID(), from: edgeFrom, to: selectedNodeId }]);
+    commitEdges([...edges, { id: newStudioId(), from: edgeFrom, to: selectedNodeId }]);
     setEdgeFrom("");
   }
 
@@ -1412,7 +1429,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       setStatus("这个节点已有任务；请新建生成节点以发起另一张图片");
       return;
     }
-    const key = existingNode?.submission_key || globalThis.crypto.randomUUID();
+    const key = existingNode?.submission_key || newStudioId();
     const references = existingNode?.submission_key
       ? existingNode.reference_asset_ids || []
       : edges.filter((edge) => edge.to === existingNode?.id)
@@ -1438,7 +1455,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
       size: generationSize, resolution: generationResolution,
       mode: generationMode, reference_asset_ids: generationMode === "edit" ? references : [],
     } : {
-      id: globalThis.crypto.randomUUID(), type: "generation", asset_id: "",
+      id: newStudioId(), type: "generation", asset_id: "",
       x: (100 - view.x) / view.zoom, y: (100 - view.y) / view.zoom,
       scale: 1, rotation: 0, submission_key: key,
       prompt: generationPrompt.trim(), provider_id: generationProvider,
@@ -1667,28 +1684,38 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
           </div>
           {snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).map((asset) => (
             <div
-              role="button"
-              tabIndex={0}
               className="asset-picker-row"
-              draggable={false}
               key={asset.asset_id}
               onPointerDown={(event) => beginAssetPointerDrag(event, asset)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  void addAsset(asset);
-                }
-              }}
-              onClick={() => {
-                if (suppressAssetClickRef.current) {
-                  suppressAssetClickRef.current = false;
-                  return;
-                }
-                void addAsset(asset);
-              }}
             >
-              <AssetPreview item={asset} history={snapshot.history} />
-              <span>{asset.filename}</span>
+              <button
+                type="button"
+                className="canvas-asset-main"
+                onClick={() => {
+                  if (suppressAssetClickRef.current) {
+                    suppressAssetClickRef.current = false;
+                    return;
+                  }
+                  void addAsset(asset);
+                }}
+              >
+                <AssetPreview item={asset} history={snapshot.history} />
+                <span>{asset.filename}</span>
+              </button>
+              <button
+                type="button"
+                className="icon-button canvas-asset-add"
+                title="加入画布"
+                aria-label={`加入画布：${asset.filename}`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => {
+                  suppressAssetClickRef.current = false;
+                  void addAsset(asset);
+                }}
+              >
+                <ImagePlus size={15} aria-hidden="true" />
+                <span className="sr-only">加入画布</span>
+              </button>
             </div>
           ))}
           {snapshot.assets.filter((item) => item.media_type === "image" && item.scope === scope).length === 0 && <div className="empty-state">当前会话暂无图片素材</div>}
@@ -1944,7 +1971,7 @@ function GifView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; sco
     setBusy(true);
     setGifStatus("");
     try {
-      const key = entry?.key || globalThis.crypto.randomUUID();
+      const key = entry?.key || newStudioId();
       const entries = (project?.document.frame_jobs as Array<Record<string, unknown>> | undefined) || [];
       const saved = entry ? project! : await persistGif([...entries, { key, prompt, provider_id: providerId }]);
       if (version !== operationVersion.current) return;
@@ -2350,7 +2377,7 @@ function DesignView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
     try {
       const reference = existing ? String((existing.reference_asset_ids as string[])[0]) : await managedReference(version);
       if (!reference || version !== operationVersion.current) return;
-      const key = String(existing?.key || globalThis.crypto.randomUUID());
+      const key = String(existing?.key || newStudioId());
       const entry = existing || {
         type: "repair", key, prompt: repairPrompt.trim(), provider_id: repairProvider,
         reference_asset_ids: [reference, maskAssetId], mask_asset_id: maskAssetId,
