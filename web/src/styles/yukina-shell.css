@@ -971,6 +971,23 @@
   align-items: start;
 }
 
+.provider-template-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  margin: 0 0 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-color);
+}
+
+.provider-template-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
 .provider-list {
   min-width: 0;
   overflow: hidden;
@@ -1622,6 +1639,10 @@
   }
 
   .provider-editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-template-controls {
     grid-template-columns: 1fr;
   }
 

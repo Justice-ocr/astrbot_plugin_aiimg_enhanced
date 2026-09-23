@@ -35,9 +35,9 @@
             revision: "preview-revision",
             config: {
               providers: [
-                { id: "gitee", label: "Gitee Images", model: "z-image-turbo", __template_key: "gitee_images", api_keys: [], api_keys_configured: true },
-                { id: "agnes", label: "Agnes Video", model: "agnes-video-2.5-flash", __template_key: "agnes_video", api_keys: [], api_keys_configured: true },
-                { id: "nai", label: "NovelAI", model: "nai-diffusion-4-5-full", __template_key: "nai_native", api_keys: [], api_keys_configured: false },
+                { id: "gitee", label: "gitee", model: "z-image-turbo", __template_key: "gitee_images", api_keys: [], api_keys_configured: true },
+                { id: "agnes", label: "agnes", model: "agnes-video-2.5-flash", __template_key: "agnes_video", api_keys: [], api_keys_configured: true },
+                { id: "nai", label: "nai", model: "nai-diffusion-4-5-full", __template_key: "nai_native", api_keys: [], api_keys_configured: false },
               ],
               features: {
                 draw: { enabled: true, llm_tool_enabled: true, presets: ["窗台小鸟:a small white bird on a windowsill"], chain: [{ provider_id: "gitee" }] },
@@ -60,7 +60,7 @@
             success: true,
             items: [
               {
-                provider_id: "gitee", label: "Gitee Images", model: "z-image-turbo", template_key: "gitee_images", source: "template",
+                provider_id: "gitee", label: "gitee", model: "z-image-turbo", template_key: "gitee_images", source: "template",
                 protocol: { id: "gitee-images", last_verified: "2026-09-22" },
                 operations: { image_generate: "supported", image_edit: "unsupported", video_generate: "unsupported" },
                 references: { status: "unsupported", active_mode: "", modes: [] },
@@ -69,7 +69,7 @@
                 cancellation: { local: "supported", upstream: "unsupported" },
               },
               {
-                provider_id: "agnes", label: "Agnes Video", model: "agnes-video-2.5-flash", template_key: "agnes_video", source: "template",
+                provider_id: "agnes", label: "agnes", model: "agnes-video-2.5-flash", template_key: "agnes_video", source: "template",
                 protocol: { id: "agnes-videos-v1", last_verified: "2026-09-22" },
                 operations: { image_generate: "unsupported", image_edit: "unsupported", video_generate: "supported" },
                 references: { status: "supported", active_mode: "auto", modes: [{ id: "keyframe", label: "关键帧", status: "supported", min_images: 1, max_images: 1, accepted_media_types: ["image/jpeg", "image/png", "image/webp"] }, { id: "reference_images", label: "多图参考", status: "supported", min_images: 2, max_images: 5, accepted_media_types: ["image/jpeg", "image/png", "image/webp"] }] },
@@ -78,7 +78,7 @@
                 cancellation: { local: "supported", upstream: "unsupported" },
               },
               {
-                provider_id: "nai", label: "NovelAI", model: "nai-diffusion-4-5-full", template_key: "nai_native", source: "template",
+                provider_id: "nai", label: "nai", model: "nai-diffusion-4-5-full", template_key: "nai_native", source: "template",
                 protocol: { id: "novelai-native-compatible", last_verified: "2026-09-22" },
                 operations: { image_generate: "supported", image_edit: "supported", video_generate: "unsupported" },
                 references: { status: "supported", active_mode: "vibe", modes: [{ id: "img2img", label: "重绘", status: "supported", min_images: 1, max_images: 1, accepted_media_types: ["image/jpeg", "image/png", "image/webp"] }, { id: "vibe", label: "Vibe 参考", status: "supported", min_images: 1, max_images: 9, accepted_media_types: ["image/jpeg", "image/png", "image/webp"] }] },

@@ -282,11 +282,13 @@ export async function saveStudioProvider(
   provider: Record<string, unknown>,
   revision = "",
   secretUpdates: Record<string, unknown> = {},
+  create = false,
 ): Promise<ProviderConfig> {
   const result = await requireSuccess<any>(getBridge().apiPost("save_studio_provider", {
     provider,
     revision,
     secret_updates: secretUpdates,
+    create,
   }));
   return result.provider as ProviderConfig;
 }

@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
+import { PROVIDER_TEMPLATES } from "../../../pages/LegacySettings/provider_catalog.js";
 import {
   cancelTask,
   cancelStudioJob,
@@ -2818,6 +2819,9 @@ function providerIsConfigured(provider: ProviderConfig): boolean {
 
 function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRefresh: () => void }) {
   const providers = snapshot.config.providers || [];
+  const [templatePanelOpen, setTemplatePanelOpen] = useState(false);
+  const [templateKey, setTemplateKey] = useState("openai_images");
+  const [newProviderId, setNewProviderId] = useState("");
   const [selectedId, setSelectedId] = useState(String(providers[0]?.id || ""));
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, { value: string; clear: boolean }>>({});
@@ -2904,8 +2908,33 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     }
   }
 
+  async function createFromTemplate() {
+    const template = (PROVIDER_TEMPLATES as Record<string, Record<string, unknown>>)[templateKey];
+    const id = newProviderId.trim();
+    if (!template || !/^[a-zA-Z0-9_.-]{1,120}$/.test(id)) {
+      setError("请输入有效的服务商 ID（字母、数字、点、下划线或连字符）");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const provider = { ...template, id, label: id, __template_key: templateKey };
+      await saveStudioProvider(provider, snapshot.configRevision, {}, true);
+      setTemplatePanelOpen(false);
+      setNewProviderId("");
+      setSelectedId(id);
+      setStatus("模板已添加");
+      onRefresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "添加模板失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return <section className="workspace">
-    <div className="workspace-heading"><div><span className="section-kicker">PROVIDERS</span><h1>服务商</h1><p>维护连接参数与凭据；调用链路在“设置”页配置。</p></div><a className="secondary-action" href="../LegacySettings/">管理模板<ChevronRight size={16} aria-hidden="true" /></a></div>
+    <div className="workspace-heading"><div><span className="section-kicker">PROVIDERS</span><h1>服务商</h1><p>维护连接参数与凭据；调用链路在“设置”页配置。</p></div><button type="button" className="secondary-action" onClick={() => { setTemplatePanelOpen((open) => !open); setError(""); }}><ImagePlus size={16} aria-hidden="true" />{templatePanelOpen ? "关闭模板面板" : "添加服务商模板"}</button></div>
+    {templatePanelOpen && <section className="provider-template-panel"><div className="subsection-heading"><div><h3>添加服务商</h3><p>选择协议模板并设置唯一 ID，密钥可在创建后填写。</p></div></div><div className="provider-template-controls"><label className="stack-field"><span>协议模板</span><select value={templateKey} disabled={busy} onChange={(event) => setTemplateKey(event.target.value)}>{Object.entries(PROVIDER_TEMPLATES as Record<string, { label?: string }>).map(([key, template]) => <option key={key} value={key}>{key} · {template.label || key}</option>)}</select></label><label className="stack-field"><span>服务商 ID</span><input value={newProviderId} maxLength={120} disabled={busy} placeholder="例如：openai_primary" onChange={(event) => setNewProviderId(event.target.value)} /></label><button type="button" className="primary-action" disabled={busy || !newProviderId.trim()} onClick={() => void createFromTemplate()}><Save size={16} />创建模板</button></div>{error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}</section>}
     <div className="provider-editor-layout">
       <aside className="provider-list" aria-label="服务商列表">
         <div className="provider-list-heading"><strong>已添加的服务商</strong><span>{providers.length}</span></div>
@@ -2914,7 +2943,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
           <span className="provider-row-copy"><strong>{provider.id}</strong><small>{provider.model || "未指定模型"} · {provider.__template_key || provider.__type || "自定义"}</small></span>
           <span className={providerIsConfigured(provider) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(provider) ? "配置完整" : "待配置"}</span>
         </button>)}
-        {providers.length === 0 && <div className="empty-state">尚未添加服务商<a href="../LegacySettings/">前往添加模板</a></div>}
+        {providers.length === 0 && <div className="empty-state">尚未添加服务商，请使用上方“添加服务商模板”。</div>}
       </aside>
       <div className="provider-workspace">
         {selected ? <>
@@ -2927,7 +2956,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
           <details className="provider-advanced" open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}><summary>高级 JSON 编辑</summary><p>用于模板未覆盖的字段。保存时仍保留未识别配置；不要在此填写密钥。</p><textarea className="code-editor" rows={12} value={rawJson} spellCheck={false} onChange={(event) => { setRawJson(event.target.value); try { const parsed = JSON.parse(event.target.value); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(); setDraft(parsed); setError(""); setStatus("未保存"); } catch { setError("高级 JSON 格式无效"); } }} /></details>
           {error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}
           <div className="provider-savebar"><span className={status === "已保存" && !providerDirty ? "save-state saved" : "save-state"}>{error ? "请先修正 JSON" : providerDirty ? "有未保存的更改" : status || "配置已同步"}</span><button type="button" className="primary-action" disabled={busy || Boolean(error) || !providerDirty} onClick={() => void save()}><Save size={16} />{busy ? "保存中" : "保存服务商"}</button></div>
-        </> : <div className="empty-state">从旧版设置添加模板后，在这里填写连接参数。</div>}
+        </> : providers.length > 0 && <div className="empty-state">选择服务商以查看和编辑配置。</div>}
       </div>
     </div>
   </section>;
@@ -3007,7 +3036,7 @@ function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
     },
   });
   return <section className="workspace settings-workspace">
-    <div className="workspace-heading"><div><span className="section-kicker">SETTINGS</span><h1>工作台设置</h1><p>配置功能开关、服务商优先级和运行限制。</p></div><a className="secondary-action" href="../LegacySettings/">更多插件选项<ChevronRight size={16} aria-hidden="true" /></a></div>
+    <div className="workspace-heading"><div><span className="section-kicker">SETTINGS</span><h1>工作台设置</h1><p>配置功能开关、服务商优先级和运行限制。</p></div></div>
     <section className="settings-section"><div className="settings-section-heading"><div><span className="section-kicker">ROUTING</span><h2>功能与服务商链</h2></div><small>从上到下依次尝试；第一项为主用服务商。</small></div>
       <div className="feature-grid">{["draw", "edit", "selfie", "video"].map((id) => {
         const chain = chainFor(id);
@@ -3188,7 +3217,7 @@ export default function StudioApp() {
           </div>
         ) : (
           snapshot.config.features?.studio?.enabled === false && route !== "settings" ? (
-            <section className="workspace"><h1>Studio 已关闭</h1><a className="secondary-action" href="../LegacySettings/">打开旧版设置</a><button type="button" className="secondary-action" onClick={() => setRoute("settings")}>工作台设置</button></section>
+            <section className="workspace"><h1>Studio 已关闭</h1><button type="button" className="secondary-action" onClick={() => setRoute("settings")}>工作台设置</button></section>
           ) : <>
             {route === "create" && <CreateView snapshot={snapshot} scope={activeScope} onScopeChange={changeActiveScope} onSubmitted={() => void refresh()} />}
             {route === "canvas" && <CanvasView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}

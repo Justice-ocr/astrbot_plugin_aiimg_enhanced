@@ -1644,10 +1644,13 @@ class PagesAPIMixin:
                  if isinstance(item, dict) and str(item.get("id") or "").strip() == provider_id),
                 -1,
             )
-            if index < 0:
-                raise ValueError("服务商不存在，请先在旧版设置中创建模板")
+            creating = bool(data.get("create"))
+            if index < 0 and not creating:
+                raise ValueError("服务商不存在")
+            if index >= 0 and creating:
+                raise ValueError("服务商 ID 已存在")
 
-            current = copy.deepcopy(providers[index])
+            current = copy.deepcopy(providers[index]) if index >= 0 else copy.deepcopy(incoming)
             merged = copy.deepcopy(current)
             for key, value in incoming.items():
                 key = str(key)
@@ -1680,7 +1683,11 @@ class PagesAPIMixin:
 
             merged["id"] = provider_id
             merged["label"] = provider_id
-            providers[index] = PagesConfigService.normalize_provider(merged)
+            normalized = PagesConfigService.normalize_provider(merged)
+            if index >= 0:
+                providers[index] = normalized
+            else:
+                providers.append(normalized)
             await self._reload_registry_after_provider_change()
             self._safe_update_config()
             return jsonify({
