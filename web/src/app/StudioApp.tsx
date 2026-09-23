@@ -17,6 +17,7 @@ import {
   Play,
   Redo2,
   RefreshCw,
+  Save,
   RotateCcw,
   RotateCw,
   Send,
@@ -2783,113 +2784,153 @@ function PersonasView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
   );
 }
 
+const providerSecretFields = new Set([
+  "api_key", "api_keys", "apikey", "token", "access_token", "refresh_token", "cookie", "cookies",
+  "cookie_list", "authorization", "password", "secret", "graphql_api_key", "third_party_token",
+]);
+const providerFieldLabels: Record<string, string> = {
+  id: "服务商 ID", label: "显示名称", api_url: "API 地址", base_url: "API 地址", model: "模型名称",
+  timeout: "请求超时（秒）", max_retries: "最大重试次数", use_proxy: "启用代理", proxy_url: "代理地址",
+  default_size: "默认图片尺寸", default_resolution: "默认分辨率", size: "默认尺寸", resolution: "默认分辨率",
+  generate_request_mode: "文生图请求模式", edit_request_mode: "改图请求模式", video_request_mode: "视频请求模式",
+  supports_edit: "支持改图", supports_video: "支持视频", extra_body: "额外请求参数",
+  endpoint: "接口路径", submit_path: "提交路径", query_path: "查询路径", download_path: "下载路径",
+  image_field: "参考图字段名", reference_field: "参考图字段名", aspect_ratio: "默认画幅", default_duration: "默认时长（秒）",
+};
+const providerSelectOptions: Record<string, Array<[string, string]>> = {
+  generate_request_mode: [["auto", "自动"], ["stream", "流式"], ["non_stream", "非流式"]],
+  edit_request_mode: [["auto", "自动"], ["stream", "流式"], ["non_stream", "非流式"]],
+  video_request_mode: [["auto", "自动"], ["multipart", "Multipart"], ["json", "JSON"]],
+};
+
+function providerFieldLabel(key: string): string {
+  if (providerFieldLabels[key]) return providerFieldLabels[key];
+  return key.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function providerIsReady(provider: ProviderConfig): boolean {
+  const endpoint = String(provider.api_url || provider.base_url || provider.full_generate_url || provider.endpoint || "").trim();
+  const model = String(provider.model || "").trim();
+  const anonymous = String(provider.__template_key || "").includes("anonymous");
+  const hasSecret = Object.keys(provider).some((key) => providerSecretFields.has(key) && Boolean(provider[`${key}_configured`]));
+  return Boolean(endpoint && model && (anonymous || hasSecret));
+}
+
 function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRefresh: () => void }) {
   const providers = snapshot.config.providers || [];
   const [selectedId, setSelectedId] = useState(String(providers[0]?.id || ""));
-  const [draftJson, setDraftJson] = useState("");
+  const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, { value: string; clear: boolean }>>({});
   const [busy, setBusy] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [rawJson, setRawJson] = useState("");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
   const selected = providers.find((provider) => String(provider.id) === selectedId);
+  const secretKeys = (provider?: ProviderConfig) => Object.keys(provider || {}).filter((key) => providerSecretFields.has(key));
+  const providerDirty = Boolean(selected) && (
+    JSON.stringify(draft) !== JSON.stringify(selected) ||
+    Object.values(secretDraft).some((item) => item.clear || Boolean(item.value.trim()))
+  );
 
-  function secretKeys(provider?: ProviderConfig): string[] {
-    if (!provider) return [];
-    return Object.keys(provider).filter((key) => {
-      const lower = key.toLowerCase();
-      return !key.endsWith("_configured") && (
-        lower.includes("api_key") || lower === "apikey" || lower.includes("token") ||
-        lower.includes("secret") || lower.includes("password") || lower.includes("authorization") ||
-        lower.includes("cookie")
-      );
-    });
+  function loadProvider(provider?: ProviderConfig) {
+    const next = provider ? { ...provider } : {};
+    setDraft(next);
+    setRawJson(JSON.stringify(next, null, 2));
+    const secrets: Record<string, { value: string; clear: boolean }> = {};
+    secretKeys(provider).forEach((key) => { secrets[key] = { value: "", clear: false }; });
+    setSecretDraft(secrets);
+    setStatus("");
+    setError("");
   }
 
   useEffect(() => {
-    const next = providers.find((provider) => String(provider.id) === selectedId) || providers[0];
-    const nextId = String(next?.id || "");
-    setSelectedId(nextId);
-    setDraftJson(next ? JSON.stringify(next, null, 2) : "");
-    const nextSecrets: Record<string, { value: string; clear: boolean }> = {};
-    secretKeys(next).forEach((key) => { nextSecrets[key] = { value: "", clear: false }; });
-    setSecretDraft(nextSecrets);
-  }, [selectedId, snapshot.configRevision]);
+    const current = providers.find((provider) => String(provider.id) === selectedId) || providers[0];
+    setSelectedId(String(current?.id || ""));
+    loadProvider(current);
+  }, [snapshot.configRevision]);
 
   function choose(provider: ProviderConfig) {
     setSelectedId(String(provider.id));
-    setDraftJson(JSON.stringify(provider, null, 2));
-    const nextSecrets: Record<string, { value: string; clear: boolean }> = {};
-    secretKeys(provider).forEach((key) => { nextSecrets[key] = { value: "", clear: false }; });
-    setSecretDraft(nextSecrets);
+    loadProvider(provider);
+  }
+
+  function updateField(key: string, value: unknown) {
+    setDraft((current) => {
+      const next = { ...current, [key]: value };
+      setRawJson(JSON.stringify(next, null, 2));
+      return next;
+    });
+    setStatus("未保存");
+    setError("");
+  }
+
+  function renderField(key: string, value: unknown) {
+    if (key === "id" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
+    const options = providerSelectOptions[key];
+    if (typeof value === "boolean") return <label className="provider-toggle" key={key}><input type="checkbox" checked={value} disabled={busy} onChange={(event) => updateField(key, event.target.checked)} /><span><strong>{providerFieldLabel(key)}</strong><small>{value ? "已启用" : "已关闭"}</small></span></label>;
+    if (options) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><select value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}>{options.map(([option, label]) => <option key={option} value={option}>{label}</option>)}</select></label>;
+    if (typeof value === "number") return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><input type="number" value={value} disabled={busy} onChange={(event) => updateField(key, event.target.value === "" ? "" : Number(event.target.value))} /></label>;
+    if (Array.isArray(value)) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)} <small>每行一项</small></span><textarea rows={Math.min(5, Math.max(2, value.length))} value={value.map(String).join("\n")} disabled={busy} onChange={(event) => updateField(key, event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>;
+    if (value && typeof value === "object") return null;
+    const multiline = /prompt|template|body|instruction|header/i.test(key);
+    const inputType = /url|path|endpoint/i.test(key) ? "url" : "text";
+    return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span>{multiline
+      ? <textarea rows={3} value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)} />
+      : <input type={inputType} value={String(value ?? "")} disabled={busy || key === "id"} onChange={(event) => updateField(key, event.target.value)} />}</label>;
   }
 
   async function save() {
+    if (!selected) return;
     setBusy(true);
+    setError("");
     try {
-      const provider = JSON.parse(draftJson) as Record<string, unknown>;
-      if (!provider || typeof provider !== "object" || !provider.id) throw new Error("服务商 JSON 无效");
       const updates: Record<string, unknown> = {};
       Object.entries(secretDraft).forEach(([key, item]) => {
         if (item.clear) updates[key] = { clear: true };
         else if (item.value.trim()) {
           let value: unknown = item.value;
-          if (item.value.trim().startsWith("[")) {
-            try { value = JSON.parse(item.value); } catch { throw new Error(`${key} 的列表格式无效`); }
-          }
+          if (key === "api_keys") value = item.value.trim().startsWith("[") ? JSON.parse(item.value) : item.value.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
           updates[key] = { value };
         }
       });
-      await saveStudioProvider(provider, snapshot.configRevision, updates);
+      await saveStudioProvider(draft, snapshot.configRevision, updates);
+      setStatus("已保存");
       onRefresh();
     } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : "服务商保存失败");
+      setError(reason instanceof Error ? reason.message : "服务商保存失败");
     } finally {
       setBusy(false);
     }
   }
 
-  return (
-    <section className="workspace">
-      <div className="workspace-heading">
-        <div>
-          <span className="section-kicker">PROVIDERS</span>
-          <h1>服务商</h1>
-        </div>
-        <a className="secondary-action" href="../LegacySettings/">
-          旧版设置
-          <ChevronRight size={16} aria-hidden="true" />
-        </a>
+  return <section className="workspace">
+    <div className="workspace-heading"><div><span className="section-kicker">PROVIDERS</span><h1>服务商</h1><p>维护连接参数与凭据；调用链路在“设置”页配置。</p></div><a className="secondary-action" href="../LegacySettings/">管理模板<ChevronRight size={16} aria-hidden="true" /></a></div>
+    <div className="provider-editor-layout">
+      <aside className="provider-list" aria-label="服务商列表">
+        <div className="provider-list-heading"><strong>已添加的服务商</strong><span>{providers.length}</span></div>
+        {providers.map((provider) => <button type="button" className={String(provider.id) === selectedId ? "provider-row active" : "provider-row"} key={provider.id} onClick={() => choose(provider)}>
+          <span className="provider-mark" aria-hidden="true">{String(provider.label || provider.id).slice(0, 1).toUpperCase()}</span>
+          <span className="provider-row-copy"><strong>{provider.label || provider.id}</strong><small>{provider.model || "未指定模型"} · {provider.__template_key || provider.__type || "自定义"}</small></span>
+          <span className={providerIsReady(provider) ? "provider-state ready" : "provider-state"}>{providerIsReady(provider) ? "可用" : "待配置"}</span>
+        </button>)}
+        {providers.length === 0 && <div className="empty-state">尚未添加服务商<a href="../LegacySettings/">前往添加模板</a></div>}
+      </aside>
+      <div className="provider-workspace">
+        {selected ? <>
+          <div className="provider-detail-heading"><div><span className="section-kicker">{selected.__template_key || selected.__type || "PROVIDER"}</span><h2>{selected.label || selected.id}</h2><p>{selected.model || "请填写模型名称"} <span>·</span> ID：{selected.id}</p></div><span className={providerIsReady(selected) ? "provider-state ready" : "provider-state"}>{providerIsReady(selected) ? "连接信息齐全" : "需要补充配置"}</span></div>
+          <div className="provider-field-grid">{Object.entries(draft).map(([key, value]) => renderField(key, value))}</div>
+          {Object.keys(secretDraft).length > 0 && <section className="provider-secret-section"><div className="subsection-heading"><div><h3>访问凭据</h3><p>现有密钥不会回显；留空保持不变，输入内容将替换。</p></div></div><div className="provider-secret-grid">{Object.entries(secretDraft).map(([key, item]) => <label className="stack-field" key={key}><span>{providerFieldLabel(key)}{selected[`${key}_configured`] ? <em className="credential-present">已保存</em> : <em className="credential-missing">未设置</em>}</span>{key === "api_keys"
+            ? <textarea rows={3} value={item.value} disabled={busy || item.clear} placeholder={selected.api_keys_configured ? "留空以保留现有密钥；多个密钥每行一项" : "每行填写一个 API Key"} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} />
+            : <input type="password" autoComplete="new-password" value={item.value} disabled={busy || item.clear} placeholder={selected[`${key}_configured`] ? "留空以保留现有凭据" : "输入凭据"} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} />}
+            {Boolean(selected[`${key}_configured`]) && <span className="check-row"><input type="checkbox" checked={item.clear} disabled={busy} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], clear: event.target.checked, value: "" } }))} />清除此凭据</span>}</label>)}</div></section>}
+          <details className="provider-advanced" open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}><summary>高级 JSON 编辑</summary><p>用于模板未覆盖的字段。保存时仍保留未识别配置；不要在此填写密钥。</p><textarea className="code-editor" rows={12} value={rawJson} spellCheck={false} onChange={(event) => { setRawJson(event.target.value); try { const parsed = JSON.parse(event.target.value); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(); setDraft(parsed); setError(""); setStatus("未保存"); } catch { setError("高级 JSON 格式无效"); } }} /></details>
+          {error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}
+          <div className="provider-savebar"><span className={status === "已保存" && !providerDirty ? "save-state saved" : "save-state"}>{error ? "请先修正 JSON" : providerDirty ? "有未保存的更改" : status || "配置已同步"}</span><button type="button" className="primary-action" disabled={busy || Boolean(error) || !providerDirty} onClick={() => void save()}><Save size={16} />{busy ? "保存中" : "保存服务商"}</button></div>
+        </> : <div className="empty-state">从旧版设置添加模板后，在这里填写连接参数。</div>}
       </div>
-      <div className="provider-editor-layout">
-        <div className="provider-list">
-        {providers.map((provider) => (
-          <button type="button" className={String(provider.id) === selectedId ? "provider-row active" : "provider-row"} key={provider.id} onClick={() => choose(provider)}>
-            <span className="provider-mark" aria-hidden="true">
-              {provider.id.slice(0, 1).toUpperCase()}
-            </span>
-            <div>
-              <strong>{provider.label || provider.id}</strong>
-              <small>
-                {provider.model || "未指定模型"} ·{" "}
-                {provider.__template_key || provider.__type || "自定义"}
-              </small>
-            </div>
-            <span className="status-dot">已配置</span>
-          </button>
-        ))}
-        {providers.length === 0 && (
-          <div className="empty-state">暂无服务商</div>
-        )}
-        </div>
-        <div className="tool-panel provider-editor">
-          {selected ? <>
-            <div className="panel-heading"><h2>编辑模板：{selected.label || selected.id}</h2><button type="button" className="primary-action" disabled={busy} onClick={() => void save()}>{busy ? "保存中" : "保存服务商"}</button></div>
-            <p className="capability-notice">普通字段使用 JSON 完整保存，未知字段不会被删除。敏感字段不会回显，只有填写替换值或勾选清空才会修改。</p>
-            <label className="stack-field"><span>模板字段</span><textarea className="code-editor" rows={18} value={draftJson} onChange={(event) => setDraftJson(event.target.value)} spellCheck={false} /></label>
-            {Object.keys(secretDraft).length > 0 && <div className="secret-editor"><h3>敏感字段</h3>{Object.entries(secretDraft).map(([key, item]) => <label className="stack-field" key={key}><span>{key}{selected[`${key}_configured`] ? " · 已配置" : ""}</span><input type={key.toLowerCase().includes("password") || key.toLowerCase().includes("token") || key.toLowerCase().includes("key") ? "password" : "text"} value={item.value} disabled={item.clear} placeholder="留空表示保持原值" onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} /><span className="check-row"><input type="checkbox" checked={item.clear} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], clear: event.target.checked, value: "" } }))} />明确清空</span></label>)}</div>}
-          </> : <div className="empty-state">选择一个服务商开始编辑。</div>}
-        </div>
-      </div>
-    </section>
-  );
+    </div>
+  </section>;
 }
 
 function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRefresh: () => void }) {
@@ -2904,6 +2945,7 @@ function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
     max_user_video_concurrency: Number(config.max_user_video_concurrency ?? 1),
   }));
   const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => {
     setFeatures(config.features || {});
@@ -2934,6 +2976,7 @@ function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
 
   async function save() {
     setSaving(true);
+    setSaveMessage("");
     try {
       const providerIds = new Set((config.providers || []).map((item: ProviderConfig) => item.id));
       for (const id of ["draw", "edit", "selfie", "video"]) {
@@ -2944,48 +2987,55 @@ function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
       await saveStudioPreferences({
         revision: snapshot.configRevision, features, storage, network, reply_config: reply, ...limits,
       });
+      setSaveMessage("设置已保存");
       onRefresh();
     } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : "设置保存失败");
+      setSaveMessage(reason instanceof Error ? reason.message : "设置保存失败");
     } finally {
       setSaving(false);
     }
   }
 
-  return <section className="workspace"><div className="workspace-heading"><div><span className="section-kicker">SETTINGS</span><h1>工作台设置</h1></div><a className="secondary-action" href="../LegacySettings/">完整旧版设置<ChevronRight size={16} aria-hidden="true" /></a></div>
-    <div className="settings-grid">
-      <div className="tool-panel"><h2>功能</h2>
-        {["draw", "edit", "selfie", "video"].map((id) => <div key={id}>
-          <label className="check-row"><input type="checkbox" checked={featureEnabled(id)} onChange={(event) => setFeature(id, event.target.checked)} />{({ draw: "文生图", edit: "改图", selfie: "自拍", video: "视频" } as Record<string, string>)[id]}</label>
-          <label className="check-row"><input type="checkbox" checked={features[id]?.llm_tool_enabled !== false} onChange={(event) => setFeatures((current) => ({ ...current, [id]: { ...current[id], llm_tool_enabled: event.target.checked } }))} />LLM 工具</label>
-          <h3>{id} 服务商链</h3>
-          {chainFor(id).map((entry, index, chain) => <div className="canvas-edge-row" key={index}>
-            <span>{index === 0 ? "主" : "备"}</span>
-            <select value={entry.provider_id} onChange={(event) => setChain(id, chain.map((item, position) => position === index ? { ...item, provider_id: event.target.value } : item))}>{(config.providers || []).map((provider: ProviderConfig) => <option key={provider.id} value={provider.id}>{provider.label || provider.id}</option>)}</select>
-            <button type="button" className="icon-button" title="上移" disabled={index === 0} onClick={() => { const next = [...chain]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; setChain(id, next); }}><ArrowUp size={15} /><span className="sr-only">上移</span></button>
-            <button type="button" className="icon-button" title="下移" disabled={index === chain.length - 1} onClick={() => { const next = [...chain]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; setChain(id, next); }}><ArrowDown size={15} /><span className="sr-only">下移</span></button>
-            <button type="button" className="icon-button danger" title="移除服务商" onClick={() => setChain(id, chain.filter((_, position) => position !== index))}><X size={15} /><span className="sr-only">移除服务商</span></button>
-          </div>)}
-          <button type="button" className="secondary-action" disabled={chainFor(id).length >= (config.providers || []).length} onClick={() => { const next = (config.providers || []).find((provider: ProviderConfig) => !chainFor(id).some((entry) => entry.provider_id === provider.id)); if (next) setChain(id, [...chainFor(id), { provider_id: next.id }]); }}>添加服务商</button>
-        </div>)}
-        <label className="check-row"><input type="checkbox" checked={features.selfie?.use_edit_chain_when_empty !== false} onChange={(event) => setFeatures((current) => ({ ...current, selfie: { ...current.selfie, use_edit_chain_when_empty: event.target.checked } }))} />自拍链为空时使用改图链</label>
-        <label className="stack-field"><span>意图识别模型</span><select value={features.intent_classifier?.provider_id || ""} onChange={(event) => setFeatures((current) => ({ ...current, intent_classifier: { ...current.intent_classifier, provider_id: event.target.value } }))}><option value="">未设置</option>{(config.astrbot_providers || []).map((model: { id: string }) => <option key={model.id} value={model.id}>{model.id}</option>)}</select></label>
-      </div>
-      <div className="tool-panel"><h2>缓存与并发</h2>
-        {(["max_cached_images", "max_cached_videos"] as const).map((key) => <label className="stack-field" key={key}><span>{key === "max_cached_images" ? "最大缓存图片数" : "最大缓存视频数"}</span><input type="number" min={0} max={key === "max_cached_images" ? 100 : 500} value={storage[key] ?? (key === "max_cached_images" ? 100 : 20)} onChange={(event) => setStorage((current) => ({ ...current, [key]: Number(event.target.value) }))} /></label>)}
-        {(["debounce_interval", "max_user_concurrency", "max_user_video_concurrency"] as const).map((key) => <label className="stack-field" key={key}><span>{({ debounce_interval: "防抖秒数", max_user_concurrency: "用户图片并发", max_user_video_concurrency: "用户视频并发" })[key]}</span><input type="number" min={key === "debounce_interval" ? 0 : 1} max={120} value={limits[key]} onChange={(event) => setLimits((current) => ({ ...current, [key]: Number(event.target.value) }))} /></label>)}
-        <h2>网络</h2>
-        <label className="check-row"><input type="checkbox" checked={Boolean(network.media_allow_private)} onChange={(event) => setNetwork((current) => ({ ...current, media_allow_private: event.target.checked }))} />允许私网媒体地址</label>
-        {(["max_image_bytes", "max_video_bytes", "max_redirects", "dns_resolve_timeout_seconds"] as const).map((key) => <label className="stack-field" key={key}><span>{key}</span><input type="number" min={1} value={network[key] ?? ({ max_image_bytes: 52428800, max_video_bytes: 52428800, max_redirects: 5, dns_resolve_timeout_seconds: 2 })[key]} onChange={(event) => setNetwork((current) => ({ ...current, [key]: Number(event.target.value) }))} /></label>)}
-        <h2>回复</h2>
+  const featureLabels: Record<string, string> = { draw: "文生图", edit: "改图", selfie: "自拍", video: "视频" };
+  const providerOptions = config.providers || [];
+  const settingsDirty = JSON.stringify({ features, storage, network, reply, limits }) !== JSON.stringify({
+    features: config.features || {}, storage: config.storage || {}, network: config.network || {}, reply: config.reply_config || {},
+    limits: {
+      debounce_interval: Number(config.debounce_interval ?? 10),
+      max_user_concurrency: Number(config.max_user_concurrency ?? 2),
+      max_user_video_concurrency: Number(config.max_user_video_concurrency ?? 1),
+    },
+  });
+  return <section className="workspace settings-workspace">
+    <div className="workspace-heading"><div><span className="section-kicker">SETTINGS</span><h1>工作台设置</h1><p>配置功能开关、服务商优先级和运行限制。</p></div><a className="secondary-action" href="../LegacySettings/">更多插件选项<ChevronRight size={16} aria-hidden="true" /></a></div>
+    <section className="settings-section"><div className="settings-section-heading"><div><span className="section-kicker">ROUTING</span><h2>功能与服务商链</h2></div><small>从上到下依次尝试；第一项为主用服务商。</small></div>
+      <div className="feature-grid">{["draw", "edit", "selfie", "video"].map((id) => {
+        const chain = chainFor(id);
+        const selectedIds = new Set(chain.map((entry) => entry.provider_id));
+        return <article className="feature-route" key={id}><div className="feature-route-heading"><div><h3>{featureLabels[id]}</h3><small>{chain.length ? `${chain.length} 个服务商` : "未配置服务商"}</small></div><label className="switch-control"><input type="checkbox" checked={featureEnabled(id)} onChange={(event) => setFeature(id, event.target.checked)} /><span>启用</span></label></div>
+          <label className="tool-toggle"><input type="checkbox" checked={features[id]?.llm_tool_enabled !== false} onChange={(event) => setFeatures((current) => ({ ...current, [id]: { ...current[id], llm_tool_enabled: event.target.checked } }))} />允许 AI 工具调用</label>
+          <div className="route-list">{chain.map((entry, index) => <div className="route-row" key={`${id}-${index}`}><span className={index === 0 ? "route-priority primary" : "route-priority"}>{index === 0 ? "主用" : `备用 ${index}`}</span><select aria-label={`${featureLabels[id]} 服务商 ${index + 1}`} value={entry.provider_id} disabled={saving || !providerOptions.length} onChange={(event) => setChain(id, chain.map((item, position) => position === index ? { ...item, provider_id: event.target.value } : item))}><option value="">选择服务商</option>{providerOptions.filter((provider: ProviderConfig) => provider.id === entry.provider_id || !selectedIds.has(provider.id)).map((provider: ProviderConfig) => <option key={provider.id} value={provider.id}>{provider.label || provider.id}</option>)}</select><button type="button" className="icon-button" title="上移" aria-label="上移" disabled={saving || index === 0} onClick={() => { const next = [...chain]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; setChain(id, next); }}><ArrowUp size={16} /></button><button type="button" className="icon-button" title="下移" aria-label="下移" disabled={saving || index === chain.length - 1} onClick={() => { const next = [...chain]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; setChain(id, next); }}><ArrowDown size={16} /></button><button type="button" className="icon-button danger" title="移除" aria-label="移除" disabled={saving} onClick={() => setChain(id, chain.filter((_, position) => position !== index))}><X size={16} /></button></div>)}
+            {chain.length === 0 && <p className="route-empty">此功能没有服务商链，不会执行生成请求。</p>}
+          </div>
+          <button type="button" className="text-action" disabled={saving || chain.length >= providerOptions.length || !providerOptions.some((provider: ProviderConfig) => !selectedIds.has(provider.id))} onClick={() => { const next = providerOptions.find((provider: ProviderConfig) => !selectedIds.has(provider.id)); if (next) setChain(id, [...chain, { provider_id: next.id }]); }}>＋ 添加备用服务商</button>
+        </article>;
+      })}</div>
+      <div className="settings-inline-options"><label className="tool-toggle"><input type="checkbox" checked={features.selfie?.use_edit_chain_when_empty !== false} onChange={(event) => setFeatures((current) => ({ ...current, selfie: { ...current.selfie, use_edit_chain_when_empty: event.target.checked } }))} />自拍链为空时回退到改图链</label><label className="stack-field"><span>意图识别模型</span><select value={features.intent_classifier?.provider_id || ""} onChange={(event) => setFeatures((current) => ({ ...current, intent_classifier: { ...current.intent_classifier, provider_id: event.target.value } }))}><option value="">不使用</option>{(config.astrbot_providers || []).map((model: { id: string; model?: string }) => <option key={model.id} value={model.id}>{model.id}{model.model ? ` · ${model.model}` : ""}</option>)}</select></label></div>
+    </section>
+    <div className="settings-detail-grid">
+      <section className="settings-section"><div className="settings-section-heading"><div><span className="section-kicker">RUNTIME</span><h2>缓存与并发</h2></div></div><div className="settings-field-grid">
+        {(["max_cached_images", "max_cached_videos"] as const).map((key) => <label className="stack-field" key={key}><span>{key === "max_cached_images" ? "图片缓存上限" : "视频缓存上限"}<small>{key === "max_cached_images" ? "张" : "个，0 表示不清理"}</small></span><input type="number" min={0} max={500} value={storage[key] ?? (key === "max_cached_images" ? 100 : 20)} onChange={(event) => setStorage((current) => ({ ...current, [key]: Number(event.target.value) }))} /></label>)}
+        {(["debounce_interval", "max_user_concurrency", "max_user_video_concurrency"] as const).map((key) => <label className="stack-field" key={key}><span>{({ debounce_interval: "重复请求间隔", max_user_concurrency: "图片任务并发", max_user_video_concurrency: "视频任务并发" })[key]}<small>{key === "debounce_interval" ? "秒" : "每用户"}</small></span><input type="number" min={key === "debounce_interval" ? 0 : 1} max={key === "debounce_interval" ? 120 : 20} value={limits[key]} onChange={(event) => setLimits((current) => ({ ...current, [key]: Number(event.target.value) }))} /></label>)}
+      </div></section>
+      <section className="settings-section"><div className="settings-section-heading"><div><span className="section-kicker">NETWORK</span><h2>网络与下载安全</h2></div></div><label className="security-warning"><input type="checkbox" checked={Boolean(network.media_allow_private)} onChange={(event) => setNetwork((current) => ({ ...current, media_allow_private: event.target.checked }))} /><span><strong>允许访问私有网络地址</strong><small>可能暴露本机或内网服务，仅在可信服务商场景下开启。</small></span></label><div className="settings-field-grid">
+        {(["max_image_bytes", "max_video_bytes", "max_redirects", "dns_resolve_timeout_seconds"] as const).map((key) => <label className="stack-field" key={key}><span>{({ max_image_bytes: "图片下载上限", max_video_bytes: "视频下载上限", max_redirects: "最大重定向次数", dns_resolve_timeout_seconds: "DNS 超时" })[key]}<small>{key.endsWith("_bytes") ? "MB" : key.includes("timeout") ? "秒" : "次"}</small></span><input type="number" min={key.endsWith("_bytes") ? 1048576 : key === "max_redirects" ? 0 : 1} value={key.endsWith("_bytes") ? Math.round(Number(network[key] ?? 52428800) / 1048576) : network[key] ?? (key === "max_redirects" ? 5 : 2)} onChange={(event) => setNetwork((current) => ({ ...current, [key]: key.endsWith("_bytes") ? Number(event.target.value) * 1048576 : Number(event.target.value) }))} /></label>)}
+      </div></section>
+      <section className="settings-section"><div className="settings-section-heading"><div><span className="section-kicker">MESSAGES</span><h2>任务回复</h2></div></div><div className="settings-field-grid">
         {(["draw_pending_message", "selfie_pending_message"] as const).map((key) => <label className="stack-field" key={key}><span>{key === "draw_pending_message" ? "绘图等待提示" : "自拍等待提示"}</span><input value={reply[key] || ""} onChange={(event) => setReply((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
-        <label className="check-row"><input type="checkbox" checked={Boolean(reply.verbose_report)} onChange={(event) => setReply((current) => ({ ...current, verbose_report: event.target.checked }))} />详细任务报告</label>
-        <h2>Studio 入口</h2>
-        <label className="check-row"><input type="checkbox" checked={features.studio?.enabled !== false} onChange={(event) => setFeatures((current) => ({ ...current, studio: { ...current.studio, enabled: event.target.checked } }))} />启用 Studio</label>
-        <label className="stack-field"><span>默认页面</span><select value={features.studio?.default_entry || "create"} onChange={(event) => setFeatures((current) => ({ ...current, studio: { ...current.studio, default_entry: event.target.value } }))}><option value="create">创作</option><option value="settings">设置</option></select></label>
-        <button type="button" className="primary-action" disabled={saving} onClick={() => void save()}>{saving ? "保存中" : "保存工作台设置"}</button>
-      </div>
+      </div><label className="tool-toggle"><input type="checkbox" checked={Boolean(reply.verbose_report)} onChange={(event) => setReply((current) => ({ ...current, verbose_report: event.target.checked }))} />在等待消息中附加调试信息</label></section>
+      <section className="settings-section"><div className="settings-section-heading"><div><span className="section-kicker">STUDIO</span><h2>工作台入口</h2></div></div><label className="tool-toggle"><input type="checkbox" checked={features.studio?.enabled !== false} onChange={(event) => setFeatures((current) => ({ ...current, studio: { ...current.studio, enabled: event.target.checked } }))} />启用 AIIMG Studio</label><label className="stack-field"><span>打开时默认页面</span><select value={features.studio?.default_entry || "create"} onChange={(event) => setFeatures((current) => ({ ...current, studio: { ...current.studio, default_entry: event.target.value } }))}><option value="create">创作工作台</option><option value="settings">工作台设置</option></select></label></section>
     </div>
+    <div className="settings-savebar"><span className={saveMessage.includes("失败") || saveMessage.includes("变化") ? "form-error-text" : "save-state"}>{settingsDirty ? "有未保存的更改" : saveMessage || "配置已同步"}</span><button type="button" className="primary-action" disabled={saving || !settingsDirty} onClick={() => void save()}><Save size={16} />{saving ? "保存中" : "保存全部设置"}</button></div>
   </section>;
 }
 
@@ -3121,7 +3171,7 @@ export default function StudioApp() {
           <img src="./logo.png" alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.12.2</small>
+            <small>v4.12.3</small>
           </div>
         </div>
       </aside>

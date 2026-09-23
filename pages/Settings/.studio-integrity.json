@@ -1,8 +1,8 @@
 {
-  "source": "8b117a04df9f7482212b8fef1a3a0e3b6d557a85f6353e9d9df8c4e835bf5dc4",
+  "source": "9a24c4d07498e40a9a8375ed3772c2dcdccca5c31cdbd5c255d6762c6b892400",
   "files": {
-    "assets/studio.css": "87acf048b1b34de9b09069db3a8bfcead770bda0c3099d5a7ae5866a6efad07b",
-    "assets/studio.js": "cccff6d564da186fcc77c35887175de6ed7d231d669ac897ae21bfb7ad2c9377",
+    "assets/studio.css": "d27e35eb34af2bd2bb3e34ac926440feb40772543f07bc01451d48507e1e771b",
+    "assets/studio.js": "760608f628149ab098c63dd1283743e97f317fad8f5d436179f2ebcdaa30ec62",
     "index.html": "9f07e442c3ae660787a54af4a77ecd6b31f74175d7d6dc9a0d305d840b24c926",
     "logo.png": "29f087f43e51e3901ad284e7e15b3cd7266c0f36ad8f18ab66673c81181bd31a"
   }
