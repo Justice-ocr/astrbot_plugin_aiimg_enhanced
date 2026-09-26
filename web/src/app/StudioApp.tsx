@@ -3528,7 +3528,18 @@ export default function StudioApp() {
           <img className="brand-symbol" src={brandIcon} alt="" />
           <span>AI绘图站</span>
         </a>
-        <span className="topbar-route">{activeRoute.label}</span>
+        <span className="topbar-route" role="img" aria-label={activeRoute.label}>
+          <svg className="topbar-route-guides" viewBox="0 0 260 58" aria-hidden="true">
+            <path d="M8 12H240 M8 29H240 M8 47H240" />
+            <path className="route-guide-dashed" d="M27 6V52 M130 4V54 M226 6V52" />
+            <circle cx="76" cy="29" r="20" />
+            <circle cx="180" cy="29" r="20" />
+            <text x="244" y="14">cap</text>
+            <text x="244" y="31">x</text>
+            <text x="244" y="49">base</text>
+          </svg>
+          <span className="topbar-route-word" aria-hidden="true">{activeRoute.wordmark}</span>
+        </span>
         <div className="topbar-actions">
           {snapshot.sessions.length > 0 && (
             <select className="session-picker" aria-label="当前会话" value={activeScope} onChange={(event) => changeActiveScope(event.target.value)}>

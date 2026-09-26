@@ -13,18 +13,18 @@ import {
 } from "lucide-react";
 
 export const routes = [
-  { id: "create", label: "创作", icon: ImagePlus },
-  { id: "canvas", label: "画布", icon: Boxes },
-  { id: "assets", label: "素材", icon: FolderOpen },
-  { id: "tasks", label: "任务", icon: ListChecks },
-  { id: "history", label: "历史", icon: History },
-  { id: "personas", label: "人设", icon: Users },
-  { id: "prompts", label: "提示词", icon: Sparkles },
-  { id: "gif", label: "GIF", icon: GalleryHorizontalEnd },
-  { id: "design", label: "设计", icon: Brush },
-  { id: "agent", label: "Agent", icon: Bot },
-  { id: "providers", label: "服务商", icon: Settings2 },
-  { id: "settings", label: "设置", icon: Settings2 },
+  { id: "create", label: "创作", wordmark: "Create", icon: ImagePlus },
+  { id: "canvas", label: "画布", wordmark: "Canvas", icon: Boxes },
+  { id: "assets", label: "素材", wordmark: "Assets", icon: FolderOpen },
+  { id: "tasks", label: "任务", wordmark: "Tasks", icon: ListChecks },
+  { id: "history", label: "历史", wordmark: "History", icon: History },
+  { id: "personas", label: "人设", wordmark: "Personas", icon: Users },
+  { id: "prompts", label: "提示词", wordmark: "Prompts", icon: Sparkles },
+  { id: "gif", label: "GIF", wordmark: "GIF", icon: GalleryHorizontalEnd },
+  { id: "design", label: "设计", wordmark: "Design", icon: Brush },
+  { id: "agent", label: "Agent", wordmark: "Agent", icon: Bot },
+  { id: "providers", label: "服务商", wordmark: "Providers", icon: Settings2 },
+  { id: "settings", label: "设置", wordmark: "Settings", icon: Settings2 },
 ] as const;
 
 export type RouteId = (typeof routes)[number]["id"];
