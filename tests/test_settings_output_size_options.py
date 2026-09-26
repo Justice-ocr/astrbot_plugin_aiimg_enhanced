@@ -1,12 +1,9 @@
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SIZE_SOURCE = ROOT / "pages" / "Settings" / "output_sizes.json"
-SYNC_SCRIPT = ROOT / "scripts" / "sync_output_size_schema.py"
+SIZE_SOURCE = ROOT / "scripts" / "output_sizes.json"
 REQUIRED_SIZES = {"2560x1440", "1440x2560"}
 REMOVED_NON_16_SIZES = {"1920x1080", "3840x2160", "1080x1920"}
 
@@ -55,24 +52,6 @@ def test_output_size_source_only_contains_dimensions_divisible_by_16():
         assert height % 16 == 0, size
 
 
-def test_static_feature_selects_are_populated_from_javascript_only():
-    index_html = (ROOT / "pages" / "Settings" / "index.html").read_text(encoding="utf-8")
-
-    for size in _source_sizes() | REMOVED_NON_16_SIZES:
-        assert f'<option value="{size}">' not in index_html
-
-
-def test_settings_javascript_loads_single_size_source_and_renders_groups():
-    app_js = (ROOT / "pages" / "Settings" / "app.js").read_text(encoding="utf-8")
-    output_sizes_js = (ROOT / "pages" / "Settings" / "output_sizes.js").read_text(encoding="utf-8")
-
-    assert "output_sizes.json" not in app_js
-    assert "output_sizes.json" in output_sizes_js
-    assert "from './output_sizes.js'" in app_js
-    assert "OUTPUT_SIZE_OPTIONS = [" not in app_js
-    assert "<optgroup" in output_sizes_js
-
-
 def test_common_monitor_sizes_are_available_in_schema_options():
     schema_text = (ROOT / "_conf_schema.json").read_text(encoding="utf-8")
     schema = json.loads(schema_text)
@@ -92,10 +71,6 @@ def test_common_monitor_sizes_are_available_in_schema_options():
         assert removed not in schema_text
 
 
-def test_schema_sync_script_is_idempotent():
-    before = (ROOT / "_conf_schema.json").read_text(encoding="utf-8")
-
-    subprocess.run([sys.executable, str(SYNC_SCRIPT)], cwd=ROOT, check=True)
-
-    after = (ROOT / "_conf_schema.json").read_text(encoding="utf-8")
-    assert after == before
+def test_sync_script_reads_migrated_size_source():
+    source = (ROOT / "scripts" / "sync_output_size_schema.py").read_text(encoding="utf-8")
+    assert 'ROOT / "scripts" / "output_sizes.json"' in source

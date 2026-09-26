@@ -13,7 +13,7 @@ This is a release checklist, not a request for a large test suite. Reuse existin
 - Image history remains capped at 100 and displays newest-first with session and generation time.
 - Session persona selection remains isolated by AstrBot session.
 - Studio job, asset and project reads/writes require a known matching session scope; missing or invented scopes are rejected.
-- Legacy Settings remains available at `pages/LegacySettings` until Studio has completed one stable release cycle.
+- Studio remains the only Settings page; provider templates and output-size data no longer depend on the removed legacy page.
 
 ## Minimal automated checks
 
@@ -43,7 +43,7 @@ One successful workflow may satisfy multiple rows.
 | History | Newest is number 1; session and time are present; cap stays 100 | History screenshot |
 | Canvas/GIF | Drag or transform a canvas node, undo/redo, reorder GIF frames, save and reload the project | Project record and one UI pass |
 | Settings | Read and save one provider without losing fields | Before/after diff |
-| Fallback | Disable Studio and open legacy Settings | URL or screenshot |
+| Appearance | Upload a background, adjust the mask, reload, and remove the background | Settings screenshot |
 
 Current migration evidence (2026-09-22): Python compile, Astro check, static build/install, artifact scan and diff check pass. The xAI recovery path is implemented beside OpenAI Videos, Agnes and MiniMax H3; the first S08 canvas/GIF editing slice is installed. Live AstrBot route, real provider generation, project reload and restored runtime-data backup remain environment-dependent manual checks.
 
@@ -53,7 +53,7 @@ Real paid generation is performed only with user-approved credentials, model and
 
 - S00: baseline, source manifest and feature inventory exist; runtime backup is verified or explicitly pending.
 - S01: the five high-risk backend invariants above are fixed with focused evidence.
-- S02: authenticated Yukina-based shell opens without replacing legacy Settings.
+- S02: authenticated Yukina-based shell opens through the plugin Settings entry.
 - S03-S07: current generation, provider, persona and configuration functions are available in Studio.
 - S08-S11: Nova-derived workbench features share the same assets and jobs instead of separate services.
-- S12: build artifacts are reproducible, migration is additive, and fallback is exercised once.
+- S12: build artifacts are reproducible and Studio retains provider and configuration compatibility.

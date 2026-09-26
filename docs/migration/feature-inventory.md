@@ -53,8 +53,8 @@ Tool names and schemas are public compatibility surfaces and may not be changed 
 | W06 | Session persona selection | app.js and Pages API | migrate/implemented | Personas / Sessions |
 | W07 | Managed tasks and cancellation | operations.js and Pages API | migrate/implemented | Tasks |
 | W08 | Global image history, search, details and download | history.js and Pages API | migrate/implemented | Assets / History |
-| W09 | Output-size catalog | output_sizes.js and output_sizes.json | migrate/code complete, unverified | Create parameters; legacy catalog retained in Settings |
-| W10 | Legacy Settings | pages/LegacySettings | retain | Fallback route |
+| W09 | Output-size catalog | scripts/output_sizes.json | migrated | Create parameters and schema sync data |
+| W10 | Legacy Settings | pages/LegacySettings | removed | Studio is the only Settings page |
 
 Existing Pages APIs retained during migration:
 

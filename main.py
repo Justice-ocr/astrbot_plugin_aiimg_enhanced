@@ -80,6 +80,7 @@ from .core.video_errors import VideoNoFallbackError
 from .core.studio.job_store import StudioJobStore
 from .core.studio.generation_service import StudioGenerationService
 from .core.studio.asset_store import StudioAssetStore
+from .core.studio.appearance_store import StudioAppearanceStore
 from .core.studio.project_store import StudioProjectStore
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -162,6 +163,7 @@ class GiteeAIImagePlugin(
         self.tasks = TaskManager()
         self.studio_jobs = StudioJobStore(self.data_dir)
         self.studio_assets = StudioAssetStore(self.data_dir)
+        self.studio_appearance = StudioAppearanceStore(self.data_dir)
         self.studio_projects = StudioProjectStore(self.data_dir)
         self.studio_generation = StudioGenerationService(self)
         # 持久化：AstrBot原生config对象（可能有save_config方法）

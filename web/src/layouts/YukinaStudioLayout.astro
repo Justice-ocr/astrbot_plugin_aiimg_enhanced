@@ -30,7 +30,9 @@ const { title } = Astro.props;
         !window.AstrBotPluginPage
       ) {
         const now = Math.floor(Date.now() / 1000);
+        let previewAppearance = { image_data: "", mask_opacity: 0.82 };
         const responses = {
+          get_studio_appearance: { success: true, appearance: previewAppearance },
           get_config: {
             success: true,
             config: {
@@ -159,8 +161,19 @@ const { title } = Astro.props;
         };
         window.AstrBotPluginPage = {
           ready: async () => ({}),
-          apiGet: async (name) => responses[name] || { success: false, error: "Preview endpoint unavailable" },
-          apiPost: async () => ({ success: true }),
+          apiGet: async (name) => name === "get_studio_appearance"
+            ? { success: true, appearance: previewAppearance }
+            : responses[name] || { success: false, error: "Preview endpoint unavailable" },
+          apiPost: async (name, payload) => {
+            if (name === "save_studio_appearance") {
+              previewAppearance = {
+                mask_opacity: Number(payload.mask_opacity),
+                image_data: payload.remove_image ? "" : payload.image_data || previewAppearance.image_data,
+              };
+              return { success: true, appearance: previewAppearance };
+            }
+            return { success: true };
+          },
           download: async () => ({ success: true }),
         };
       }

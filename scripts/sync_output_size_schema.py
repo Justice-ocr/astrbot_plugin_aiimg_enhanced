@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SIZE_SOURCE = ROOT / "pages" / "Settings" / "output_sizes.json"
+SIZE_SOURCE = ROOT / "scripts" / "output_sizes.json"
 SCHEMA_PATH = ROOT / "_conf_schema.json"
 HINT_EXAMPLES = ["1024x1024", "2048x2048", "4096x4096", "2560x1440", "1440x2560"]
 

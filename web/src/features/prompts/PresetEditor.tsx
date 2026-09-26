@@ -45,7 +45,7 @@ export function PresetEditor({ feature, values, revision, onSaved }: {
     }
   }
   return <section aria-label="预设编辑">
-    {unsupported && <p role="alert">存在非标准预设格式，请在旧版设置中编辑；本页不会覆盖它们。</p>}
+    {unsupported && <p role="alert">存在非标准预设格式；本页暂不支持编辑，也不会覆盖这些数据。</p>}
     <fieldset disabled={busy || unsupported} style={{ border: 0, padding: 0, minWidth: 0 }}>
       {rows.map((row, index) => <div key={index} className="prompt-library-toolbar">
         <input aria-label={`预设 ${index + 1} 名称`} maxLength={80} value={row.name} onChange={(event) => update(index, { name: event.target.value })} />

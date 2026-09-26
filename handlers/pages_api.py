@@ -72,6 +72,8 @@ class PagesAPIMixin:
             ("get_history_image", self._pages_get_history_image, ["GET"], "获取历史图片预览或原图"),
             ("get_config", self._pages_get_config, ["GET"], "获取 AI绘图站 插件配置"),
             ("get_studio_config", self._pages_get_studio_config, ["GET"], "获取Studio脱敏配置"),
+            ("get_studio_appearance", self._pages_get_studio_appearance, ["GET"], "获取Studio外观"),
+            ("save_studio_appearance", self._pages_save_studio_appearance, ["POST"], "保存Studio外观"),
             ("save_studio_preferences", self._pages_save_studio_preferences, ["POST"], "保存Studio设置"),
             ("save_studio_presets", self._pages_save_studio_presets, ["POST"], "保存Studio预设"),
             ("save_studio_provider", self._pages_save_studio_provider, ["POST"], "保存Studio服务商"),
@@ -1496,6 +1498,32 @@ class PagesAPIMixin:
         if isinstance(value, list):
             return [PagesAPIMixin._studio_redact(item) for item in value]
         return value
+
+    async def _pages_get_studio_appearance(self):
+        try:
+            return jsonify({"success": True, "appearance": await self.studio_appearance.get()})
+        except OSError as exc:
+            logger.error("[Pages] 读取Studio外观失败: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "读取工作台背景失败"}), 500
+
+    async def _pages_save_studio_appearance(self):
+        try:
+            data = await request.get_json(force=True) or {}
+            if not isinstance(data, dict):
+                raise ValueError("外观设置必须是对象")
+            if type(data.get("remove_image", False)) is not bool:
+                raise ValueError("移除背景参数无效")
+            appearance = await self.studio_appearance.save(
+                mask_opacity=data.get("mask_opacity"),
+                image_data=data.get("image_data"),
+                remove_image=data.get("remove_image", False),
+            )
+            return jsonify({"success": True, "appearance": appearance})
+        except (ValueError, TypeError) as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        except OSError as exc:
+            logger.error("[Pages] 保存Studio外观失败: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "保存工作台背景失败"}), 500
 
     async def _pages_get_studio_config(self):
         try:

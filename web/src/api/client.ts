@@ -1,5 +1,10 @@
 import type { PersonaProfile, ProviderConfig, StudioAsset, StudioJob, StudioProject, StudioSnapshot } from "./contracts";
 
+export interface StudioAppearance {
+  image_data: string;
+  mask_opacity: number;
+}
+
 interface AstrBotPageBridge {
   ready(): Promise<unknown>;
   apiGet(name: string, params?: Record<string, string>): Promise<any>;
@@ -269,6 +274,22 @@ export async function loadProjectVersions(id: string, scope: string): Promise<St
 export async function saveStudioPreferences(payload: Record<string, unknown>): Promise<string> {
   const result = await requireSuccess<any>(getBridge().apiPost("save_studio_preferences", payload));
   return String(result.revision || "");
+}
+
+export async function loadStudioAppearance(): Promise<StudioAppearance> {
+  const bridge = getBridge();
+  await bridge.ready();
+  const result = await requireSuccess<{ appearance: StudioAppearance }>(bridge.apiGet("get_studio_appearance"));
+  return result.appearance;
+}
+
+export async function saveStudioAppearance(payload: {
+  mask_opacity: number;
+  image_data?: string;
+  remove_image?: boolean;
+}): Promise<StudioAppearance> {
+  const result = await requireSuccess<{ appearance: StudioAppearance }>(getBridge().apiPost("save_studio_appearance", payload));
+  return result.appearance;
 }
 
 export async function saveStudioPresets(feature: string, presets: string[], revision: string): Promise<string> {

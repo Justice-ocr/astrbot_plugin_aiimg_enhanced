@@ -13,6 +13,7 @@ import {
   Maximize,
   ImagePlus,
   Image as ImageIcon,
+  ImageDown,
   Upload,
   Moon,
   Pause,
@@ -35,7 +36,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
-import { PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "../../../pages/LegacySettings/provider_catalog.js";
+import { PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
 import {
   cancelTask,
   cancelStudioJob,
@@ -56,6 +57,7 @@ import {
   loadHistoryPreview,
   loadPersonaReferencePreview,
   loadStudioSnapshot,
+  loadStudioAppearance,
   deleteStudioPersona,
   deleteStudioProvider,
   pinStudioAsset,
@@ -68,12 +70,14 @@ import {
   exportMediaProject,
   loadProjectVersions,
   saveStudioPreferences,
+  saveStudioAppearance,
   setSessionPersona,
   switchStudioPersona,
   uploadStudioAsset,
   uploadStudioReference,
   uploadStudioPersonaReference,
 } from "../api/client";
+import type { StudioAppearance } from "../api/client";
 import type {
   StudioAsset,
   HistoryItem,
@@ -3239,8 +3243,65 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   </section>;
 }
 
-function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRefresh: () => void }) {
+function SettingsView({ snapshot, onRefresh, appearance, appearanceLoaded, appearanceError, onAppearanceChange }: {
+  snapshot: StudioSnapshot;
+  onRefresh: () => void;
+  appearance: StudioAppearance;
+  appearanceLoaded: boolean;
+  appearanceError: string;
+  onAppearanceChange: (value: StudioAppearance) => void;
+}) {
   const config = snapshot.config as Record<string, any>;
+  const [savedMask, setSavedMask] = useState(appearance.mask_opacity);
+  const [appearanceBusy, setAppearanceBusy] = useState(false);
+  const [appearanceMessage, setAppearanceMessage] = useState("");
+  useEffect(() => {
+    if (appearanceLoaded) setSavedMask(appearance.mask_opacity);
+  }, [appearanceLoaded]);
+
+  async function uploadBackground(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 8 * 1024 * 1024) {
+      setAppearanceMessage("仅支持不超过 8 MB 的 JPEG、PNG 或 WebP 图片");
+      return;
+    }
+    setAppearanceBusy(true);
+    setAppearanceMessage("");
+    try {
+      const imageData = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("背景图片读取失败"));
+        reader.readAsDataURL(file);
+      });
+      const next = await saveStudioAppearance({ mask_opacity: appearance.mask_opacity, image_data: imageData });
+      onAppearanceChange(next);
+      setSavedMask(next.mask_opacity);
+      setAppearanceMessage("背景已保存");
+    } catch (reason) {
+      setAppearanceMessage(reason instanceof Error ? reason.message : "背景上传失败");
+    } finally {
+      setAppearanceBusy(false);
+    }
+  }
+
+  async function saveAppearance(removeImage = false) {
+    setAppearanceBusy(true);
+    setAppearanceMessage("");
+    try {
+      const next = await saveStudioAppearance({ mask_opacity: appearance.mask_opacity, ...(removeImage ? { remove_image: true } : {}) });
+      onAppearanceChange(next);
+      setSavedMask(next.mask_opacity);
+      setAppearanceMessage(removeImage ? "已恢复默认背景" : "遮罩已保存");
+    } catch (reason) {
+      setAppearanceMessage(reason instanceof Error ? reason.message : "外观保存失败");
+    } finally {
+      setAppearanceBusy(false);
+    }
+  }
+
   const [features, setFeatures] = useState<Record<string, any>>(() => config.features || {});
   const [storage, setStorage] = useState<Record<string, any>>(() => config.storage || {});
   const [network, setNetwork] = useState<Record<string, any>>(() => config.network || {});
@@ -3314,6 +3375,35 @@ function SettingsView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
   });
   return <section className="workspace settings-workspace">
     <div className="workspace-heading"><div><span className="section-kicker">SETTINGS</span><h1>工作台设置</h1><p>配置功能开关、服务商优先级和运行限制。</p></div></div>
+    <section className="settings-section appearance-section">
+      <div className="settings-section-heading"><div><span className="section-kicker">APPEARANCE</span><h2>页面背景</h2></div></div>
+      <div className="appearance-controls">
+        <div className="appearance-preview" aria-label={appearance.image_data ? "当前背景预览" : "默认背景预览"}
+          style={appearance.image_data ? { backgroundImage: `url("${appearance.image_data}")` } : undefined}>
+          <div className="appearance-preview-mask" style={{ opacity: appearance.image_data ? appearance.mask_opacity : 1 }} />
+        </div>
+        <div className="appearance-fields">
+          <div className="appearance-actions">
+            <label className="secondary-action"><ImageDown size={16} aria-hidden="true" />{appearanceBusy ? "保存中" : "上传背景"}
+              <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" disabled={appearanceBusy || !appearanceLoaded} onChange={(event) => void uploadBackground(event)} />
+            </label>
+            {appearance.image_data && <button type="button" className="secondary-action" disabled={appearanceBusy} onClick={() => void saveAppearance(true)}><Trash2 size={16} />移除背景</button>}
+          </div>
+          <label className="appearance-slider"><span>遮罩不透明度</span><output>{Math.round(appearance.mask_opacity * 100)}%</output>
+            <input type="range" min="0" max="100" step="1" disabled={appearanceBusy || !appearanceLoaded || !appearance.image_data}
+              value={Math.round(appearance.mask_opacity * 100)}
+              onChange={(event) => onAppearanceChange({ ...appearance, mask_opacity: Number(event.target.value) / 100 })} />
+          </label>
+          <div className="appearance-footer">
+            <small>JPEG、PNG 或 WebP，最多 8 MB</small>
+            <button type="button" className="primary-action" disabled={appearanceBusy || !appearanceLoaded || !appearance.image_data || appearance.mask_opacity === savedMask} onClick={() => void saveAppearance()}>
+              <Save size={16} />保存遮罩
+            </button>
+          </div>
+          {(appearanceMessage || appearanceError) && <p className="appearance-message" role="status">{appearanceMessage || appearanceError}</p>}
+        </div>
+      </div>
+    </section>
     <section className="settings-section"><div className="settings-section-heading"><div><span className="section-kicker">ROUTING</span><h2>功能与服务商链</h2></div><small>从上到下依次尝试；第一项为主用服务商。</small></div>
       <div className="feature-grid">{["draw", "edit", "selfie", "video"].map((id) => {
         const chain = chainFor(id);
@@ -3352,6 +3442,9 @@ export default function StudioApp() {
   const [error, setError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [dark, setDark] = useState(false);
+  const [appearance, setAppearance] = useState<StudioAppearance>({ image_data: "", mask_opacity: 0.82 });
+  const [appearanceLoaded, setAppearanceLoaded] = useState(false);
+  const [appearanceError, setAppearanceError] = useState("");
   const [activeScope, setActiveScope] = useState("");
   const activeScopeRef = useRef("");
   const refreshSequence = useRef(0);
@@ -3391,6 +3484,10 @@ export default function StudioApp() {
     window.addEventListener("hashchange", onHashChange);
     setDark(document.documentElement.dataset.theme === "dark");
     void refresh();
+    void loadStudioAppearance()
+      .then(setAppearance)
+      .catch((reason) => setAppearanceError(reason instanceof Error ? reason.message : "背景加载失败"))
+      .finally(() => setAppearanceLoaded(true));
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [refresh]);
 
@@ -3414,6 +3511,10 @@ export default function StudioApp() {
 
   return (
     <div className="studio-shell">
+      {appearance.image_data && <div className="studio-background" aria-hidden="true">
+        <div className="studio-background-image" style={{ backgroundImage: `url("${appearance.image_data}")` }} />
+        <div className="studio-background-mask" style={{ opacity: appearance.mask_opacity }} />
+      </div>}
       <header className="studio-topbar">
         <button
           type="button"
@@ -3516,7 +3617,7 @@ export default function StudioApp() {
             {route === "design" && <DesignView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}
             {route === "agent" && <AgentView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}
             {route === "providers" && <ProvidersView snapshot={snapshot} onRefresh={() => void refresh()} />}
-            {route === "settings" && <SettingsView snapshot={snapshot} onRefresh={refresh} />}
+            {route === "settings" && <SettingsView snapshot={snapshot} onRefresh={refresh} appearance={appearance} appearanceLoaded={appearanceLoaded} appearanceError={appearanceError} onAppearanceChange={(value) => { setAppearance(value); setAppearanceError(""); }} />}
           </>
         )}
       </main>

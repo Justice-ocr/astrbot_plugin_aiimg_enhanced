@@ -71,7 +71,36 @@
 .studio-brand:hover { background: var(--primary-color-hover); }
 .studio-brand:active { transform: scale(0.97); }
 .studio-brand .brand-symbol { border: 0; background: transparent; padding: 5px; }
-.topbar-route { justify-self: center; font-size: 17px; font-weight: 600; }
+.topbar-route {
+  position: relative;
+  justify-self: center;
+  padding: 0 20px;
+  color: var(--text-color);
+  font-family: "STKaiti", "KaiTi", "Noto Serif CJK SC", "Songti SC", serif;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.5;
+  text-shadow: 1px 2px 0 var(--primary-color-transparent);
+}
+.topbar-route::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: 3px;
+  background: var(--accent-coral);
+  content: "";
+  transform: skewY(-18deg);
+}
+.topbar-route::after {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  width: 22px;
+  height: 2px;
+  background: var(--primary-color);
+  content: "";
+}
 .topbar-actions { justify-self: end; }
 
 .studio-sidebar {

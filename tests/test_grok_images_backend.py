@@ -285,7 +285,7 @@ class GrokProviderConfigTests(unittest.TestCase):
         self.assertEqual(edit_items["default_size"]["default"], "2048x2048")
 
     def test_settings_catalog_uses_current_xai_defaults(self):
-        source = (ROOT / "pages" / "Settings" / "provider_catalog.js").read_text(
+        source = (ROOT / "web" / "src" / "app" / "provider_catalog.js").read_text(
             encoding="utf-8"
         )
 

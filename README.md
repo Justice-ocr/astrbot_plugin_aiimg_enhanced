@@ -148,11 +148,10 @@ flowchart LR
 
 | 文件 | 责任 |
 | --- | --- |
-| `pages/LegacySettings/app.js` | 兼容设置页状态、表单读写、保存和渲染编排 |
-| `pages/LegacySettings/output_sizes.js` | 分辨率选项加载、归一化和下拉框渲染 |
-| `pages/LegacySettings/persona_refs.js` | 人设参考图上传、预览、并发加载和清空操作 |
-| `pages/LegacySettings/provider_catalog.js` | 服务商类型推断、模板默认值、展示名称和视频服务商分类 |
-| `pages/LegacySettings/provider_form.js` | 服务商弹窗表单生成、字段读取和尺寸字段归一化 |
+| `web/src/app/StudioApp.tsx` | 工作台页面、服务商及外观设置交互 |
+| `web/src/app/provider_catalog.js` | 服务商模板默认值及分类 |
+| `core/studio/appearance_store.py` | 工作台背景图片与遮罩设置的插件级持久化 |
+| `scripts/output_sizes.json` | 输出尺寸选项的维护数据源 |
 | `core/pages_config_service.py` | 配置页 payload 合并、provider 清洗和变更标记 |
 | `core/persona_ref_service.py` | 参考图格式检测、保存、base64 转存和安全预览 |
 
@@ -228,7 +227,7 @@ Web **任务管理** 展示图片、批量与后台视频任务的会话、用�
 
 - 确认插件已更新到包含上传桥接回退的版本，并在更新后重载插件。
 - 使用 JPG、JPEG、PNG、WebP 或 GIF，单张不超过 20 MB。
-- 从 AstrBot 插件详情页进入 `Settings` Studio；旧版兼容页位于 `LegacySettings`。
+- 从 AstrBot 插件详情页进入 `Settings` 工作台。
 - 检查反向代理是否允许 POST 请求体，并适当提高请求体大小限制。
 - 如果 multipart 上传被 Pages Bridge 或代理拦截，页面会自动回退到 base64 上传接口，仍然只在配置中保留服务端图片路径。
 
