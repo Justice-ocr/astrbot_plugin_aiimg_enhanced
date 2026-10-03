@@ -55,6 +55,7 @@ class ImageDrawService:
         resolution: str | None = None,
         provider_id: str | None = None,
         session_id: str | None = None,
+        negative_prompt: str | None = None,
     ) -> tuple[Path, list[dict]]:
         """Generate an image.
 
@@ -112,6 +113,8 @@ class ImageDrawService:
                         raise RuntimeError("Provider does not support generate()")
                     effective_prompt = prompt
                     provider_conf = self.registry.get(pid) or {}
+                    if negative_prompt is not None and provider_conf.get("__template_key") not in {"nai_gateway", "nai_native", "openai_images"}:
+                        raise ValueError("本次负面提示词仅支持 NAI 和 OpenAI Images 模板，请使用 @服务商ID 指定服务商")
                     if (
                         provider_conf.get("__template_key") in {"nai_gateway", "nai_native", "openai_chat", "openai_images"}
                         and provider_conf.get("nai_translate_prompt", False)
@@ -121,10 +124,14 @@ class ImageDrawService:
                         effective_prompt = await translate_nai_prompt(
                             self.context, prompt, provider_conf, session_id
                         )
+                    request_options = {}
+                    if negative_prompt is not None:
+                        request_options["negative_prompt"] = negative_prompt
                     result = await gen(
                         effective_prompt,
                         size=final_size,
                         resolution=final_res,
+                        **request_options,
                     )
                 if not result:
                     raise RuntimeError("Provider returned empty generate result")

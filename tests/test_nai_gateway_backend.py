@@ -63,6 +63,29 @@ class NaiGatewayTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await backend.close()
 
+    async def test_negative_override_wins_without_changing_configuration(self):
+        backend = self.cls(imgr=self.imgr, settings={
+            "base_url": "https://gateway.test", "api_keys": ["secret"],
+            "nai_artist": "artist:test", "negative_prompt": "default negative",
+            "extra_body": {"negative": "extra negative"},
+        })
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, content=b"png", headers={"content-type": "image/png"})
+
+        backend._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            for negative, expected in (("blurry", "blurry"), ("", ""), (None, "extra negative")):
+                await backend.generate("{artist:other}, 1girl", negative_prompt=negative)
+                self.assertEqual(requests[-1].url.params["negative"], expected)
+                self.assertEqual(requests[-1].url.params["tag"], "{artist:other}, 1girl")
+                self.assertEqual(requests[-1].url.params["artist"], "artist:test")
+            self.assertEqual(backend.settings["negative_prompt"], "default negative")
+        finally:
+            await backend.close()
+
     async def test_error_does_not_echo_token(self):
         backend = self.cls(imgr=self.imgr, settings={
             "base_url": "https://gateway.test", "api_keys": ["secret"],

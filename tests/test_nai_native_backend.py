@@ -82,6 +82,22 @@ class NaiNativeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await backend.close()
 
+    async def test_negative_override_preserves_artist_and_defaults(self):
+        backend, requests = self.backend("img2img")
+        backend.settings.update(nai_artist="artist:test", negative_prompt="default negative")
+        try:
+            for negative in ("lowres, bad hands", "", None):
+                await backend.generate("{artist:other}, 1girl", negative_prompt=negative)
+                payload = requests[-1][1]
+                expected = "default negative" if negative is None else negative
+                self.assertEqual(payload["parameters"]["negative_prompt"], expected)
+                self.assertEqual(payload["parameters"]["v4_negative_prompt"]["caption"]["base_caption"], expected)
+                self.assertEqual(payload["input"], "artist:test, {artist:other}, 1girl")
+                self.assertEqual(payload["parameters"]["v4_prompt"]["caption"]["base_caption"], payload["input"])
+            self.assertEqual(backend.settings["negative_prompt"], "default negative")
+        finally:
+            await backend.close()
+
     async def test_bad_size_fails_before_network(self):
         backend, requests = self.backend("img2img")
         try:

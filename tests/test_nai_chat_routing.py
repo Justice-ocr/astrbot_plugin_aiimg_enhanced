@@ -59,6 +59,25 @@ class NaiChatRoutingTests(unittest.IsolatedAsyncioTestCase):
                 int(enabled and template in {"openai_chat", "openai_images"}),
             )
 
+    async def test_draw_passes_negative_only_to_nai_and_translates_only_positive(self):
+        for template in ("nai_native", "nai_gateway", "openai_images"):
+            router, backend = self.router(template=template)
+            self.translator.translate_nai_prompt.reset_mock()
+            await router.generate("artist:test, sunset", provider_id="nai", session_id="session", negative_prompt="lowres, blurry")
+            self.assertEqual(backend.generate.call_args.kwargs["negative_prompt"], "lowres, blurry")
+            self.assertEqual(self.translator.translate_nai_prompt.call_args.args[1], "artist:test, sunset")
+            await router.generate("sunset", provider_id="nai", session_id="session", negative_prompt="")
+            self.assertEqual(backend.generate.call_args.kwargs["negative_prompt"], "")
+            await router.generate("sunset", provider_id="nai", session_id="session")
+            self.assertNotIn("negative_prompt", backend.generate.call_args.kwargs)
+
+    async def test_draw_rejects_negative_for_other_templates_before_submission(self):
+        router, backend = self.router(template="openai_chat")
+        with self.assertRaisesRegex(RuntimeError, "OpenAI Images"):
+            await router.generate("sunset", provider_id="nai", negative_prompt="blurry")
+        backend.generate.assert_not_awaited()
+        self.translator.translate_nai_prompt.assert_not_awaited()
+
     async def test_edit_preserves_images_and_session(self):
         router, backend = self.router(edit=True)
         images = [b"reference"]

@@ -42,6 +42,7 @@ class NaiGatewayBackend(OpenAIFullURLBackend):
         self, prompt: str, *, model: str | None = None,
         size: str | None = None, resolution: str | None = None,
         extra_body: dict | None = None,
+        negative_prompt: str | None = None,
     ) -> Path:
         if not str(prompt or "").strip():
             raise ValueError("NAI 提示词不能为空")
@@ -67,6 +68,8 @@ class NaiGatewayBackend(OpenAIFullURLBackend):
             raise ValueError("NAI 额外参数必须为 JSON 对象")
         params.update(extra)
         params.update(extra_body or {})
+        if negative_prompt is not None:
+            params["negative"] = negative_prompt
         params.pop("token", None)
         key = self._next_key()
         if key.lower().startswith("bearer "):

@@ -1,5 +1,33 @@
 # NovelAI 第三方 GET 网关
 
+## 指令级负面提示词
+
+原生 NAI、NAI GET 网关和 OpenAI Images 模板支持在 `/aiimg` 指令末尾填写负面词。
+推荐使用中文标签，支持半角或全角冒号，也可分行填写。
+`/画图`、`/生图`、`/绘图`、`/出图` 别名同样支持。示例：
+
+```text
+/画图 @nai artist:ciloranko, 1girl 负面：lowres, blurry
+/画图 @nai 画师：artist:ciloranko 正面：1girl, solo 负面：lowres, bad hands
+/aiimg @nai 1girl, solo --negative lowres, blurry
+/aiimg @nai 1girl, solo --negative ""
+```
+
+`@nai` 替换为配置中的服务商 ID。画师串也可固定在 NAI 服务商的画师配置中，
+无需在指令中重复填写。`负面：` 或 `--negative` 后的全部内容是本次负面词，
+不经过 LLM 标签转换。省略时保持默认行为；`负面：` 留空或 `--negative ""`
+表示本次清空。负面部分必须放在最后，比例如需填写，放在正面词末尾、
+负面部分之前，并确认尺寸符合服务商限制。要原样保留标签和权重，请关闭自然语言转标签。
+
+原生 NAI 覆盖 `negative_prompt` 及 V4 负面 caption；GET 网关覆盖 `negative`；
+OpenAI Images 中转通过 `extra_body` 发送顶层 `negative_prompt`，需要中转支持该扩展字段。
+直连 `api.openai.com` 时，官方 Images 不支持独立负面字段，因此将本次负面词作为
+“Avoid these elements” 附加到正面 prompt，不发送未知字段；此方式不等同于 NAI 负面引导。
+显式传入的本次负面词优先于配置及额外参数，不修改默认配置。
+
+该语法仅用于上述文生图指令；批量、预设、改图和 LLM 工具入口暂不解析。
+其他协议模板不支持本次负面词，会明确报错；建议用 `@服务商ID` 指定后端。
+
 ## OpenAI Images 协议中转
 
 商家提供 `/v1/images/generations` 时，使用「OpenAI Images」模板。

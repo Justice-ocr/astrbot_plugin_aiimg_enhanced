@@ -451,6 +451,7 @@ class OpenAICompatBackend:
         size: str | None = None,
         resolution: str | None = None,
         extra_body: dict | None = None,
+        negative_prompt: str | None = None,
     ) -> Path:
         key = self._next_key()
         client = self._get_client(key)
@@ -475,6 +476,14 @@ class OpenAICompatBackend:
         eb = {}
         eb.update(self.extra_body)
         eb.update(extra_body or {})
+        if negative_prompt is not None:
+            if urlsplit(self.base_url).hostname == "api.openai.com":
+                # Official Images has no negative_prompt field.
+                eb.pop("negative_prompt", None)
+                if negative_prompt:
+                    kwargs["prompt"] = f"{prompt}\n\nAvoid these elements: {negative_prompt}"
+            else:
+                eb["negative_prompt"] = negative_prompt
         if eb:
             kwargs["extra_body"] = eb
 

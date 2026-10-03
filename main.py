@@ -2068,8 +2068,9 @@ class GiteeAIImagePlugin(
     async def generate_image_command(self, event: AstrMessageEvent, prompt: str):
         """生成图片指令
 
-        用法: /aiimg [@provider_id] <提示词> [比例]
-        示例: /aiimg 一个女孩 9:16
+        用法: /aiimg [@provider_id] <提示词> [比例] [负面：<负面提示词>]
+        示例: /aiimg @nai 画师：artist:ciloranko 正面：1girl 负面：lowres, blurry
+        也支持 --negative <负面提示词>；NAI 与 OpenAI Images 模板可用。
         支持比例: 1:1, 4:3, 3:4, 3:2, 2:3, 16:9, 9:16
         """
         # 解析参数
@@ -2083,6 +2084,14 @@ class GiteeAIImagePlugin(
             await self._fail_cmd(event)
             return
 
+        from .core.image_command_prompt import split_negative_prompt
+
+        try:
+            arg, negative_prompt = split_negative_prompt(arg)
+        except ValueError as exc:
+            await event.send(event.plain_result(f"负面提示词参数错误：{exc}"))
+            event.stop_event()
+            return
         prompt = arg.strip()
         size: str | None = None
         parts = arg.split()
@@ -2122,12 +2131,14 @@ class GiteeAIImagePlugin(
             image_path, _prov_tries = await self.draw.generate(
                 prompt, size=size, provider_id=provider_override,
                 session_id=event.unified_msg_origin,
+                negative_prompt=negative_prompt,
             )
             t_end = time.perf_counter()
 
             self._remember_last_image(event, image_path)
             await self._record_image_history(event, image_path, {
                 "mode": "text", "user_prompt": prompt, "size": size,
+                "negative_prompt": negative_prompt,
                 "provider_tries": _prov_tries,
             })
             sent = await self._send_image_with_fallback(event, image_path, elapsed=t_end - t_start, provider_tries=_prov_tries)
