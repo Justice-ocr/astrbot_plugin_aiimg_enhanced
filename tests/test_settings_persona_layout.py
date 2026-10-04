@@ -1,26 +1,21 @@
+"""Persona layout assertions for the current React Studio, not the removed legacy UI."""
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-INDEX_HTML = ROOT / "pages" / "Settings" / "index.html"
-STYLE_CSS = ROOT / "pages" / "Settings" / "style.css"
+APP = ROOT / "web" / "src" / "app" / "StudioApp.tsx"
+STYLE = ROOT / "web" / "src" / "styles" / "yukina-shell.css"
 
 
 def test_persona_upload_toolbar_lives_in_reference_panel():
-    html = INDEX_HTML.read_text(encoding="utf-8")
-
-    ref_panel_start = html.index('<div class="persona-ref-panel">')
-    upload_button = html.index('id="modal-upload-btn"')
-    left_form_end = html.index('</div>', html.index('<div class="persona-edit-fields">'))
-
-    assert ref_panel_start < upload_button
-    assert upload_button > left_form_end
-    assert 'id="modal-clear-refs-btn"' in html
+    source = APP.read_text(encoding="utf-8").split("function PersonasView", 1)[1].split("const providerSecretFields", 1)[0]
+    assert source.index("基础提示词") < source.index("参考图与职责") < source.index("添加参考图") < source.index('className="persona-ref-grid"')
+    assert 'accept="image/jpeg,image/png,image/webp,image/gif"' in source
+    assert "removeRef(path)" in source
 
 
-def test_persona_reference_panel_has_sticky_toolbar():
-    css = STYLE_CSS.read_text(encoding="utf-8")
-
-    assert ".persona-ref-toolbar" in css
-    assert "position:sticky" in css
-    assert "justify-content:space-between" in css
+def test_persona_reference_panel_preserves_image_aspect_ratio():
+    css = STYLE.read_text(encoding="utf-8")
+    media = css.split(".persona-ref-media img {", 1)[1].split("}", 1)[0]
+    assert "object-fit: contain" in media
+    assert ".persona-editor-layout" in css
+    assert ".persona-ref-grid" in css

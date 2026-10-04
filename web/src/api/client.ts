@@ -1,4 +1,4 @@
-import type { PersonaProfile, ProviderConfig, StudioAsset, StudioJob, StudioProject, StudioSnapshot } from "./contracts";
+import type { HistoryPage, PersonaProfile, ProviderConfig, StudioAsset, StudioJob, StudioProject, StudioSnapshot } from "./contracts";
 
 export interface StudioAppearance {
   image_data: string;
@@ -344,6 +344,33 @@ export async function downloadStudioJobMedia(id: string, scope?: string): Promis
     throw new Error("当前 AstrBot 页面桥接不支持下载");
   }
   await bridge.download("download_job_media", { id, ...(scope ? { scope } : {}) }, `aiimg-studio-${id}.mp4`);
+}
+
+export async function loadHistoryPage(page = 1, query = ""): Promise<HistoryPage> {
+  return requireSuccess<HistoryPage>(getBridge().apiGet("get_history", {
+    page: String(page), query,
+  }));
+}
+
+export async function downloadHistoryImage(id: number): Promise<void> {
+  const result = await requireSuccess<{ image_data: string; filename: string }>(
+    getBridge().apiGet("get_history_image", { id: String(id), original: "1" }),
+  );
+  if (!/^data:image\/[\w.+-]+;base64,/.test(result.image_data)) {
+    throw new Error("原图数据无效");
+  }
+  const response = await fetch(result.image_data);
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = result.filename || `aiimg-${id}`;
+  document.body.appendChild(link);
+  try {
+    link.click();
+  } finally {
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 
 export async function loadHistoryPreview(id: number, scope?: string): Promise<string> {

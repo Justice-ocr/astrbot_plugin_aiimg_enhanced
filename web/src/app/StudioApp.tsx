@@ -55,6 +55,8 @@ import {
   deleteStudioAsset,
   loadAssetPreview,
   loadHistoryPreview,
+  loadHistoryPage,
+  downloadHistoryImage,
   loadPersonaReferencePreview,
   loadStudioSnapshot,
   loadStudioAppearance,
@@ -680,7 +682,7 @@ function TasksView({
                 </button>
               )}
               {job.state === "completed" && Boolean(job.result?.video_path) && (
-                <button type="button" className="icon-button" onClick={() => void downloadStudioJobMedia(job.id, job.scope)}>
+                <button type="button" className="icon-button" onClick={() => void downloadStudioJobMedia(job.id, job.scope).catch((reason) => window.alert(reason instanceof Error ? reason.message : "视频下载失败"))}>
                   <Download size={18} />
                   <span className="sr-only">下载视频</span>
                 </button>
@@ -740,40 +742,145 @@ function TasksView({
 }
 
 function HistoryView({ snapshot }: { snapshot: StudioSnapshot }) {
+  const [page, setPage] = useState(1);
+  const [queryDraft, setQueryDraft] = useState("");
+  const [query, setQuery] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [result, setResult] = useState({ items: snapshot.history, total: snapshot.historyTotal, page: 1, pages: 1 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [selected, setSelected] = useState<HistoryItem | null>(null);
+  const [downloading, setDownloading] = useState<number | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    setSelected(null);
+    loadHistoryPage(page, query).then((next) => {
+      if (!active) return;
+      setResult(next);
+      setPage(next.page);
+    }).catch((reason) => {
+      if (active) setError(reason instanceof Error ? reason.message : "历史加载失败");
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [page, query, refreshKey, snapshot.history]);
+
+  useEffect(() => {
+    if (selected && dialog.current && !dialog.current.open) dialog.current.showModal();
+  }, [selected]);
+
+  async function copyPrompt(item: HistoryItem) {
+    setError("");
+    setMessage("");
+    try {
+      if (!item.prompt) throw new Error("此记录没有提示词");
+      try {
+        if (!navigator.clipboard) throw new Error("剪贴板不可用");
+        await navigator.clipboard.writeText(item.prompt);
+      } catch {
+        // Clipboard permissions may be unavailable in an AstrBot iframe.
+        const input = document.createElement("textarea");
+        input.value = item.prompt;
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        const focused = document.activeElement as HTMLElement | null;
+        (dialog.current?.open ? dialog.current : document.body).appendChild(input);
+        try {
+          input.select();
+          if (!document.execCommand("copy")) throw new Error("浏览器不允许复制，请在详情中手动选择提示词");
+        } finally {
+          input.remove();
+          focused?.focus();
+        }
+      }
+      setMessage("提示词已复制");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "复制失败");
+    }
+  }
+
+  async function download(item: HistoryItem) {
+    setDownloading(item.id);
+    setError("");
+    try {
+      await downloadHistoryImage(item.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "原图下载失败");
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  function controls(item: HistoryItem) {
+    return <div className="composer-actions">
+      <button type="button" className="secondary-action" disabled={!item.prompt} onClick={() => void copyPrompt(item)}><Copy size={16} />复制提示词</button>
+      <button type="button" className="secondary-action" disabled={!item.available || downloading !== null} onClick={() => void download(item)}><Download size={16} />{downloading === item.id ? "下载中" : "下载原图"}</button>
+    </div>;
+  }
+
   return (
-    <section className="workspace">
+    <section className="workspace" aria-busy={loading}>
       <div className="workspace-heading">
-        <div>
-          <span className="section-kicker">ASSETS</span>
-          <h1>生成历史</h1>
-        </div>
-        <span className="connection-chip">{snapshot.historyTotal} 张</span>
+        <div><span className="section-kicker">HISTORY</span><h1>生成历史</h1></div>
+        <span className="connection-chip">{result.total} 张</span>
       </div>
+      <form className="history-toolbar" onSubmit={(event) => {
+        event.preventDefault();
+        setPage(1);
+        setQuery(queryDraft.trim());
+        setRefreshKey((value) => value + 1);
+      }}>
+        <input aria-label="搜索历史提示词" placeholder="搜索提示词" maxLength={200} value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} />
+        <button type="submit" className="secondary-action">搜索</button>
+        <button type="button" className="secondary-action" onClick={() => { setQueryDraft(""); setQuery(""); setPage(1); setRefreshKey((value) => value + 1); }}>清除搜索</button>
+        <button type="button" className="secondary-action" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={16} />刷新历史</button>
+      </form>
+      {loading && <p role="status">正在加载历史</p>}
+      {error && <p className="task-error" role="alert">{error}</p>}
+      {message && <p role="status">{message}</p>}
       <div className="history-grid">
-        {snapshot.history.map((item) => (
+        {!loading && result.items.map((item) => (
           <article className="history-card" key={item.id}>
-            <div className="history-media">
-              <HistoryPreview item={item} />
-              <span className="history-sequence">{item.sequence}</span>
-            </div>
+            <div className="history-media"><HistoryPreview item={item} /><span className="history-sequence">{item.sequence}</span></div>
             <div className="history-copy">
               <strong>{item.prompt || "未记录提示词"}</strong>
-              <small>
-                {item.conversation_title ||
-                  item.conversation ||
-                  "默认会话"}
-              </small>
-              <small>
-                {formatTime(item.created_at)}
-                {item.provider ? " · " + item.provider : ""}
-              </small>
+              <small>{item.conversation_title || item.conversation || "默认会话"}</small>
+              <small>{formatTime(item.created_at)}{item.provider ? " · " + item.provider : ""}{!item.available ? " · 已过期" : ""}</small>
+              <button type="button" className="secondary-action" onClick={() => { setError(""); setMessage(""); setSelected(item); }}>查看详情</button>
+              {controls(item)}
             </div>
           </article>
         ))}
-        {snapshot.history.length === 0 && (
-          <div className="empty-state">暂无生成历史</div>
-        )}
+        {!loading && !error && result.items.length === 0 && <div className="empty-state">{query ? "没有匹配的历史" : "暂无生成历史"}</div>}
       </div>
+      <nav className="history-pagination" aria-label="历史分页">
+        <button type="button" className="secondary-action" disabled={loading || page <= 1} onClick={() => setPage((value) => value - 1)}>上一页</button>
+        <span aria-live="polite">第 {result.page} / {result.pages} 页 · {result.total} 张</span>
+        <button type="button" className="secondary-action" disabled={loading || page >= result.pages} onClick={() => setPage((value) => value + 1)}>下一页</button>
+      </nav>
+      {selected && <dialog ref={dialog} className="history-dialog" aria-labelledby="history-detail-title" onCancel={() => setSelected(null)} onClose={() => setSelected(null)}>
+        <div className="panel-heading"><h2 id="history-detail-title">历史详情 · 记录 ID #{selected.id}</h2><button type="button" className="icon-button" aria-label="关闭历史详情" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
+        <div className="history-detail-media"><HistoryPreview item={selected} /></div>
+        <dl className="history-details">
+          <dt>提示词</dt><dd>{selected.prompt || "未记录"}</dd>
+          <dt>实际提示词</dt><dd>{selected.effective_prompt || "未记录"}</dd>
+          <dt>生成时间</dt><dd>{formatTime(selected.created_at)}</dd>
+          <dt>服务商 / 模式 / 尺寸</dt><dd>{[selected.provider, selected.mode, selected.output].filter(Boolean).join(" / ") || "未记录"}</dd>
+          <dt>会话</dt><dd>{selected.conversation_title || "未记录"}</dd>
+          <dt>会话 ID</dt><dd>{selected.conversation || "未记录"}</dd>
+          <dt>用户</dt><dd>{selected.sender || "未记录"}</dd>
+          <dt>消息来源 / 机器人</dt><dd>{[selected.origin, selected.bot].filter(Boolean).join(" / ") || "未记录"}</dd>
+          <dt>原图状态</dt><dd>{selected.available ? "可下载" : "已过期"}</dd>
+          {selected.parent_image_id && <><dt>父记录 ID</dt><dd>#{selected.parent_image_id}</dd></>}
+        </dl>
+        {controls(selected)}
+        {error && <p className="task-error" role="alert">{error}</p>}
+        {message && <p role="status">{message}</p>}
+      </dialog>}
     </section>
   );
 }
@@ -880,7 +987,7 @@ function AssetsView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
                   <button type="button" className="icon-button" title="继续改图" onClick={() => openAssetInCreate(item.asset_id, "edit")}><Pencil size={17} /><span className="sr-only">继续改图</span></button>
                   <button type="button" className="icon-button" title="生成视频" onClick={() => openAssetInCreate(item.asset_id, "video")}><Video size={17} /><span className="sr-only">生成视频</span></button>
                 </>}
-                {item.source !== "history" && <button type="button" className="icon-button" onClick={() => void downloadStudioAsset(item.asset_id, item.filename, item.scope)} title="下载素材"><Download size={17} /><span className="sr-only">下载素材</span></button>}
+                {item.source !== "history" && <button type="button" className="icon-button" onClick={() => void downloadStudioAsset(item.asset_id, item.filename, item.scope).catch((reason) => window.alert(reason instanceof Error ? reason.message : "素材下载失败"))} title="下载素材"><Download size={17} /><span className="sr-only">下载素材</span></button>}
                 <button type="button" className="icon-button" onClick={() => void togglePin(item)} disabled={busy === item.asset_id} title={item.source === "history" ? "存入素材库" : item.pinned ? "取消收藏" : "收藏素材"}>
                   {item.pinned ? <CheckCircle2 size={17} /> : <FolderOpen size={17} />}
                   <span className="sr-only">{item.source === "history" ? "存入素材库" : item.pinned ? "取消收藏" : "收藏素材"}</span>
@@ -2858,17 +2965,23 @@ function PersonaReferencePreview({ path }: { path: string }) {
 
 function PersonasView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRefresh: () => void }) {
   const [pending, setPending] = useState("");
+  const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState(snapshot.personaProfiles[0]?.id || "");
   const [draft, setDraft] = useState<PersonaProfile | null>(null);
   const selected = snapshot.personaProfiles.find((item) => item.id === selectedId);
 
   useEffect(() => {
+    if (creating) {
+      // Keep a just-saved profile selected until the refreshed snapshot contains it.
+      if (selectedId && snapshot.personaProfiles.some((item) => item.id === selectedId)) setCreating(false);
+      return;
+    }
     if (!selectedId || !snapshot.personaProfiles.some((item) => item.id === selectedId)) {
       const next = snapshot.personaProfiles[0];
       setSelectedId(next?.id || "");
       setDraft(next ? { ...next, ref_images: [...next.ref_images], ref_roles: { ...next.ref_roles } } : null);
     }
-  }, [selectedId, snapshot.personaProfiles]);
+  }, [creating, selectedId, snapshot.personaProfiles]);
 
   useEffect(() => {
     if (selected) {
@@ -2877,12 +2990,14 @@ function PersonasView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
   }, [selectedId]);
 
   function choose(id: string) {
+    setCreating(false);
     setSelectedId(id);
     const next = snapshot.personaProfiles.find((item) => item.id === id);
     setDraft(next ? { ...next, ref_images: [...next.ref_images], ref_roles: { ...next.ref_roles } } : null);
   }
 
   function createNew() {
+    setCreating(true);
     setSelectedId("");
     setDraft({ id: "", name: "", base_prompt: "", ref_images: [], ref_roles: {} });
   }

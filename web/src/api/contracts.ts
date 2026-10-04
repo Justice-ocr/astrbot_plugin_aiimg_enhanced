@@ -156,8 +156,21 @@ export interface HistoryItem {
   provider?: string;
   prompt?: string;
   conversation?: string;
+  effective_prompt?: string;
+  output?: string;
+  parent_image_id?: number | null;
+  origin?: string;
+  bot?: string;
+  sender?: string;
   conversation_title?: string;
   available?: boolean;
+}
+
+export interface HistoryPage {
+  items: HistoryItem[];
+  total: number;
+  page: number;
+  pages: number;
 }
 
 export interface SessionPersona {

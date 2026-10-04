@@ -12,8 +12,17 @@ async function filesUnder(root, base = root) {
   return result.sort();
 }
 
+async function bytesForHash(filename) {
+  const data = await readFile(filename);
+  // Git's Windows autocrlf setting must not invalidate a Linux-built manifest.
+  const textExtensions = new Set([".astro", ".css", ".html", ".js", ".json", ".mjs", ".svg", ".ts", ".tsx", ".txt", ".yaml"]);
+  return textExtensions.has(path.extname(filename))
+    ? Buffer.from(data.toString("utf8").replaceAll("\r\n", "\n"), "utf8")
+    : data;
+}
+
 async function hashFile(filename) {
-  return createHash("sha256").update(await readFile(filename)).digest("hex");
+  return createHash("sha256").update(await bytesForHash(filename)).digest("hex");
 }
 
 export async function sourceDigest(root) {
@@ -28,7 +37,7 @@ export async function sourceDigest(root) {
     "scripts/build_studio.mjs",
   ];
   for (const name of files.sort()) {
-    hash.update(name).update("\0").update(await readFile(path.join(root, name))).update("\0");
+    hash.update(name).update("\0").update(await bytesForHash(path.join(root, name))).update("\0");
   }
   return hash.digest("hex");
 }

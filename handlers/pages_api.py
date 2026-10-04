@@ -487,7 +487,7 @@ class PagesAPIMixin:
             path,
             mimetype="video/mp4",
             as_attachment=True,
-            download_name=f"aiimg-studio-{job_id}.mp4",
+            attachment_filename=f"aiimg-studio-{job_id}.mp4",
         )
 
     async def _pages_get_assets(self):
@@ -588,7 +588,7 @@ class PagesAPIMixin:
             path,
             mimetype=str((item.get("metadata") or {}).get("mime_type") or "application/octet-stream"),
             as_attachment=request.args.get("download") == "1",
-            download_name=str(item.get("filename") or f"asset-{asset_id}"),
+            attachment_filename=str(item.get("filename") or f"asset-{asset_id}"),
         )
 
     async def _pages_get_asset_b64(self):
@@ -881,7 +881,7 @@ class PagesAPIMixin:
                 return output
             output = await asyncio.to_thread(encode)
             return await send_file(output, mimetype="application/zip", as_attachment=True,
-                                   download_name=f"studio-{project['kind']}-{project['id']}.zip")
+                                   attachment_filename=f"studio-{project['kind']}-{project['id']}.zip")
         except PermissionError as exc:
             return jsonify({"success": False, "error": str(exc)}), 403
         except (ValueError, TypeError, OSError) as exc:
@@ -936,7 +936,7 @@ class PagesAPIMixin:
 
             output = await asyncio.to_thread(encode)
             return await send_file(output, mimetype="application/zip", as_attachment=True,
-                                   download_name=f"studio-web-{item['id']}.zip")
+                                   attachment_filename=f"studio-web-{item['id']}.zip")
         except PermissionError as exc:
             return jsonify({"success": False, "error": str(exc)}), 403
         except (ValueError, TypeError) as exc:

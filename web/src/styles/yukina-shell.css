@@ -1037,6 +1037,41 @@
   gap: 4px;
 }
 
+.history-toolbar,
+.history-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.history-toolbar input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.history-pagination { justify-content: center; }
+
+.history-dialog {
+  box-sizing: border-box;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--card-color);
+  color: var(--text-color);
+}
+
+.history-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.history-dialog .panel-heading { flex-wrap: wrap; }
+.history-detail-media img { display: block; max-width: 100%; max-height: 45dvh; margin: auto; object-fit: contain; }
+.history-details { display: grid; gap: 6px; }
+.history-details dt { font-weight: 650; }
+.history-details dd { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .history-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -1746,7 +1781,7 @@
 
 .persona-ref-media img {
   display: block;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .danger-action {
