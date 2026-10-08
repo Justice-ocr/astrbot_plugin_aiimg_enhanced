@@ -3182,6 +3182,8 @@ const providerSelectOptions: Record<string, Array<[string, string]>> = {
   image_handling_method: [["auto", "自动"], ["data_uri", "Data URI"], ["astrbot", "AstrBot 文件服务"], ["third_party", "第三方文件服务"], ["free_public", "公共文件服务"]],
   nai_reference_mode: [["img2img", "图生图"], ["character", "角色参考"], ["vibe", "Vibe"], ["text", "纯文生"]],
   nai_auth_mode: [["token", "Token"], ["bearer", "Bearer"]],
+  default_size: [["1024x1024", "1024×1024"], ["832x1216", "832×1216"], ["1216x832", "1216×832"], ["1152x896", "1152×896"], ["896x1152", "896×1152"], ["1536x1024", "1536×1024"], ["1024x1536", "1024×1536"], ["2048x2048", "2048×2048"], ["4096x4096", "4096×4096"]],
+  default_resolution: [["1K", "1K"], ["2K", "2K"], ["4K", "4K"], ["1024x1024", "1024×1024"], ["2048x2048", "2048×2048"], ["4096x4096", "4096×4096"]],
   default_ratio: [["1:1", "1:1"], ["2:3", "2:3"], ["3:2", "3:2"], ["4:3", "4:3"], ["3:4", "3:4"], ["16:9", "16:9"], ["9:16", "9:16"]],
   default_style: [["写实", "写实"], ["动漫", "动漫"], ["插画", "插画"], ["水彩", "水彩"]],
   nai_sampler: [["", "默认"], ["k_euler_ancestral", "Euler Ancestral"], ["k_euler", "Euler"], ["k_dpmpp_2m", "DPM++ 2M"]],
