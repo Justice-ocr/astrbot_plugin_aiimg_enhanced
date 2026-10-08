@@ -3157,6 +3157,11 @@ const providerFieldLabels: Record<string, string> = {
   timeout: "请求超时（秒）", max_retries: "最大重试次数", use_proxy: "启用代理", proxy_url: "代理地址",
   default_size: "默认图片尺寸", default_resolution: "默认分辨率", size: "默认尺寸", resolution: "默认分辨率",
   generate_request_mode: "文生图请求模式", edit_request_mode: "改图请求模式", video_request_mode: "视频请求模式",
+  request_mode: "视频请求模式", image_input_mode: "参考图输入模式", input_reference_field: "文件参考图字段名",
+  video_resolution: "视频分辨率", seconds: "视频时长（秒）", seed: "随机种子", duration: "视频时长（秒）",
+  ratio: "默认画幅", xai_resolution: "视频分辨率", xai_reference_mode: "参考图模式",
+  image_handling_method: "图片处理方式", nai_reference_mode: "参考图模式", nai_auth_mode: "鉴权模式",
+  nai_sampler: "采样器", nai_noise_schedule: "噪声调度",
   supports_edit: "支持改图", supports_video: "支持视频", extra_body: "额外请求参数",
   endpoint: "接口路径", submit_path: "提交路径", query_path: "查询路径", download_path: "下载路径",
   image_field: "参考图字段名", reference_field: "参考图字段名", aspect_ratio: "默认画幅", default_duration: "默认时长（秒）",
@@ -3165,6 +3170,22 @@ const providerSelectOptions: Record<string, Array<[string, string]>> = {
   generate_request_mode: [["auto", "自动"], ["stream", "流式"], ["non_stream", "非流式"]],
   edit_request_mode: [["auto", "自动"], ["stream", "流式"], ["non_stream", "非流式"]],
   video_request_mode: [["auto", "自动"], ["multipart", "Multipart"], ["json", "JSON"]],
+  request_mode: [["auto", "自动"], ["multipart", "Multipart"], ["json", "JSON"]],
+  image_input_mode: [["auto", "自动"], ["image_urls", "image_urls（参考图数组）"], ["input_reference", "input_reference（文件上传）"], ["first_last_frame", "首尾帧"], ["roles_reference", "角色参考图"], ["roles_frames", "角色首尾帧"]],
+  video_resolution: [["", "自动/不发送"], ["480p", "480p"], ["768p", "768p"], ["1080p", "1080p"]],
+  resolution: [["", "默认"], ["480p", "480p"], ["768p", "768p"], ["1080p", "1080p"], ["1K", "1K"], ["2K", "2K"], ["4K", "4K"], ["480P", "480P"], ["768P", "768P"], ["1080P", "1080P"]],
+  size: [["", "自动/不发送"], ["16:9", "16:9"], ["9:16", "9:16"], ["1:1", "1:1"], ["4:3", "4:3"], ["3:4", "3:4"], ["1024x1024", "1024×1024"], ["2048x2048", "2048×2048"], ["4096x4096", "4096×4096"]],
+  ratio: [["16:9", "16:9"], ["9:16", "9:16"], ["1:1", "1:1"], ["4:3", "4:3"], ["3:4", "3:4"], ["adaptive", "自适应"]],
+  aspect_ratio: [["auto", "自动"], ["16:9", "16:9"], ["9:16", "9:16"], ["1:1", "1:1"], ["4:3", "4:3"], ["3:4", "3:4"], ["3:2", "3:2"], ["2:3", "2:3"]],
+  xai_resolution: [["480p", "480p"], ["720p", "720p"], ["1080p", "1080p"]],
+  xai_reference_mode: [["reference", "参考图"], ["image", "图片"], ["text", "纯文生"]],
+  image_handling_method: [["auto", "自动"], ["data_uri", "Data URI"], ["astrbot", "AstrBot 文件服务"], ["third_party", "第三方文件服务"], ["free_public", "公共文件服务"]],
+  nai_reference_mode: [["img2img", "图生图"], ["character", "角色参考"], ["vibe", "Vibe"], ["text", "纯文生"]],
+  nai_auth_mode: [["token", "Token"], ["bearer", "Bearer"]],
+  default_ratio: [["1:1", "1:1"], ["2:3", "2:3"], ["3:2", "3:2"], ["4:3", "4:3"], ["3:4", "3:4"], ["16:9", "16:9"], ["9:16", "9:16"]],
+  default_style: [["写实", "写实"], ["动漫", "动漫"], ["插画", "插画"], ["水彩", "水彩"]],
+  nai_sampler: [["", "默认"], ["k_euler_ancestral", "Euler Ancestral"], ["k_euler", "Euler"], ["k_dpmpp_2m", "DPM++ 2M"]],
+  nai_noise_schedule: [["", "默认"], ["karras", "Karras"], ["native", "Native"]],
 };
 
 function providerFieldLabel(key: string): string {
@@ -3239,8 +3260,11 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   function renderField(key: string, value: unknown) {
     if (key === "label" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
     const options = providerSelectOptions[key];
+    const selectOptions = options && !options.some(([option]) => option === String(value ?? ""))
+      ? [[String(value ?? ""), `${String(value ?? "")}（当前值）`], ...options] as Array<[string, string]>
+      : options;
     if (typeof value === "boolean") return <label className="provider-toggle" key={key}><input type="checkbox" checked={value} disabled={busy} onChange={(event) => updateField(key, event.target.checked)} /><span><strong>{providerFieldLabel(key)}</strong><small>{value ? "已启用" : "已关闭"}</small></span></label>;
-    if (options) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><select value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}>{options.map(([option, label]) => <option key={option} value={option}>{label}</option>)}</select></label>;
+    if (selectOptions) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><select value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}>{selectOptions.map(([option, label]) => <option key={option} value={option}>{label}</option>)}</select></label>;
     if (typeof value === "number") return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><input type="number" value={value} disabled={busy} onChange={(event) => updateField(key, event.target.value === "" ? "" : Number(event.target.value))} /></label>;
     if (Array.isArray(value)) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)} <small>每行一项</small></span><textarea rows={Math.min(5, Math.max(2, value.length))} value={value.map(String).join("\n")} disabled={busy} onChange={(event) => updateField(key, event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>;
     if (value && typeof value === "object") return null;
