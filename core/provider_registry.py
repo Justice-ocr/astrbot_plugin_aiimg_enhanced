@@ -423,6 +423,7 @@ class ProviderRegistry:
             # Minimal required fields per provider type.
             if template_key in {
                 "openai_images",
+                "nai_openai_images",
                 "grok_images",
                 "grok_images_edit",
                 "gitee_images",
@@ -622,7 +623,7 @@ class ProviderRegistry:
                 proxy_url=str(conf.get("proxy_url") or "").strip() or None,
             )
 
-        if template_key in {"openai_images", "gemini_openai_images"}:
+        if template_key in {"openai_images", "gemini_openai_images", "nai_openai_images"}:
             return OpenAICompatBackend(
                 imgr=self._imgr,
                 base_url=str(conf.get("base_url") or "").strip(),

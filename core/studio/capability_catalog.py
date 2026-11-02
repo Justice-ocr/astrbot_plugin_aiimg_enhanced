@@ -29,6 +29,7 @@ _PROTOCOLS: dict[str, tuple[str, str]] = {
     "gitee_images": ("gitee-images", VERIFIED_DATE),
     "gitee_async": ("gitee-async-images", VERIFIED_DATE),
     "jimeng": ("jimeng-images", VERIFIED_DATE),
+    "nai_openai_images": ("openai-compatible-images", VERIFIED_DATE),
     "nai_native": ("novelai-native-compatible", VERIFIED_DATE),
     "nai_gateway": ("novelai-get-gateway", VERIFIED_DATE),
     "modelscope_openai_images": ("openai-compatible-images", VERIFIED_DATE),
@@ -39,6 +40,7 @@ _PROTOCOLS: dict[str, tuple[str, str]] = {
 }
 
 _IMAGE_TEMPLATES = {
+    "nai_openai_images",
     "nai_native",
     "nai_gateway",
     "openai_images",
@@ -71,6 +73,7 @@ _VIDEO_TEMPLATES = {
 }
 
 _IMAGE_EDIT_DEFAULTS = {
+    "nai_openai_images": False,
     "nai_native": True,
     "nai_gateway": False,
     "openai_images": True,

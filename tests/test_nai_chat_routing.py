@@ -42,6 +42,18 @@ class NaiChatRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         return cls({}, None, Path("."), registry=registry, context=object()), backend
 
+    async def test_reviewed_nai_tags_skip_translation(self):
+        for template in ("nai_native", "nai_gateway", "nai_openai_images", "openai_images"):
+            router, backend = self.router(template=template)
+            self.translator.translate_nai_prompt.reset_mock()
+            prompt = "masterpiece, {{artist:chosen}}, 1girl, {blue_eyes}"
+            await router.generate(prompt, provider_id="nai", session_id="umo",
+                                  negative_prompt="lowres", nai_prepared=True)
+            self.assertEqual(backend.generate.call_args.args[0], prompt)
+            self.translator.translate_nai_prompt.assert_not_awaited()
+            self.assertEqual(backend.generate.call_args.kwargs.get("nai_prepared", False),
+                             template in {"nai_native", "nai_gateway"})
+
     async def test_draw_translates_only_when_enabled_for_supported_template(self):
         for enabled, template, expected in [
             (True, "openai_chat", "landscape, sunset"),

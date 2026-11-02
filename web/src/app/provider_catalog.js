@@ -1,5 +1,6 @@
 function inferProviderType(p) {
   if (!p || typeof p !== 'object') return 'openai_images';
+  if (p.__template_key) return p.__template_key;
   if ('nai_reference_mode' in p) return 'nai_native';
   if ('nai_auth_mode' in p) return 'nai_gateway';
   if (String(p.model || '').toLowerCase() === 'grok-imagine-image-edit') return 'grok_images_edit';
@@ -29,6 +30,7 @@ function inferProviderType(p) {
 
 const PROVIDER_TEMPLATES = {
   xai_video: { label:'xAI 原生视频', base_url:'https://api.x.ai', api_keys:[], model:'grok-imagine-video-1.5', timeout:300, poll_interval:5, poll_timeout:1200, duration:'8', aspect_ratio:'16:9', xai_resolution:'720p', xai_reference_mode:'reference', proxy_url:'' },
+  nai_openai_images: { label:'NAI OpenAI 兼容', base_url:'', api_keys:[], model:'nai-diffusion-4-5-full', timeout:120, max_retries:0, default_size:'832x1216', supports_edit:false, nai_artist:'', nai_prompt_prefix:'', negative_prompt:'', nai_llm_provider_id:'', proxy_url:'' },
   nai_native: { label:'NovelAI 原生协议中转', base_url:'', api_keys:[], model:'nai-diffusion-4-5-full', timeout:120, default_size:'832x1216', nai_reference_mode:'img2img', nai_strength:0.6, nai_vibe_information:1, nai_translate_prompt:false, nai_llm_provider_id:'', nai_prompt_prefix:'', nai_artist:'', negative_prompt:'', nai_sampler:'k_euler_ancestral', num_inference_steps:28, guidance_scale:5, nai_cfg:0, nai_noise_schedule:'karras', seed:'', proxy_url:'' },
   nai_gateway: { label:'NovelAI 第三方 GET 网关', base_url:'', generate_path:'/generate', api_keys:[], model:'nai-diffusion-4-5-full', timeout:120, default_size:'832x1216', nai_auth_mode:'token', nai_translate_prompt:false, nai_llm_provider_id:'', nai_prompt_prefix:'', nai_artist:'', negative_prompt:'', nai_sampler:'', num_inference_steps:28, guidance_scale:5, nai_cfg:'', nai_noise_schedule:'', seed:'', proxy_url:'', extra_body:'' },
   openai_images:          { label:'OpenAI Images', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto', nai_translate_prompt:false, nai_llm_provider_id:'' },
@@ -58,6 +60,7 @@ const PROVIDER_TEMPLATES = {
 
 const PROVIDER_NAMES = {
   xai_video:'xAI 原生视频',
+  nai_openai_images:'NAI OpenAI 兼容',
   nai_native:'NovelAI 原生协议中转',
   nai_gateway:'NovelAI 第三方 GET 网关',
   openai_images:'OpenAI Images',

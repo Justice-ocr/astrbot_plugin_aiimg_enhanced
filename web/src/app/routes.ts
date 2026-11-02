@@ -14,6 +14,7 @@ import {
 
 export const routes = [
   { id: "create", label: "创作", wordmark: "Create", icon: ImagePlus },
+  { id: "nai", label: "NAI", wordmark: "NovelAI", icon: Sparkles },
   { id: "canvas", label: "画布", wordmark: "Canvas", icon: Boxes },
   { id: "assets", label: "素材", wordmark: "Assets", icon: FolderOpen },
   { id: "tasks", label: "任务", wordmark: "Tasks", icon: ListChecks },

@@ -394,3 +394,8 @@ export async function setSessionPersona(scope: string, personaId: string): Promi
     persona_id: personaId,
   }));
 }
+
+export async function prepareNaiPrompt(payload: Record<string, unknown>): Promise<{ artist: string; tags: string; prefix: string; negative: string; prompt: string }> {
+  const result = await requireSuccess<any>(getBridge().apiPost("prepare_nai_prompt", payload));
+  return result.draft;
+}

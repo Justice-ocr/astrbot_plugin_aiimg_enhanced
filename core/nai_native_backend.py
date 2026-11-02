@@ -87,7 +87,7 @@ class NaiNativeBackend(NaiGatewayBackend):
                     return archive.read(entry)
         raise RuntimeError("NAI ZIP 中没有图片")
 
-    async def _run(self, prompt, images, *, model=None, size=None, resolution=None, extra_body=None, negative_prompt=None):
+    async def _run(self, prompt, images, *, model=None, size=None, resolution=None, extra_body=None, negative_prompt=None, nai_prepared=False):
         if extra_body:
             raise ValueError("NAI 原生模板暂不支持任务级额外参数")
         if not str(prompt or "").strip():
@@ -104,7 +104,7 @@ class NaiNativeBackend(NaiGatewayBackend):
         seed = secrets.randbelow(2**32) if seed in (None, "") else int(seed)
         if not 0 <= seed < 2**32:
             raise ValueError("NAI seed 必须为 0 到 4294967295")
-        prompt = ", ".join(str(v).strip() for v in [
+        prompt = prompt if nai_prepared else ", ".join(str(v).strip() for v in [
             self.settings.get("nai_prompt_prefix"), self.settings.get("nai_artist"), prompt
         ] if v and str(v).strip())
         negative = (self.settings.get("negative_prompt") or "") if negative_prompt is None else negative_prompt

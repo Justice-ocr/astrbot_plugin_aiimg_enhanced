@@ -42,6 +42,7 @@ class PagesAPIMixin:
             ("draft_agent", self._pages_draft_agent, ["POST"], "创建Agent规划草稿"),
             ("submit_agent", self._pages_submit_agent, ["POST"], "确认Agent计划"),
             ("transform_prompt", self._pages_transform_prompt, ["POST"], "Studio提示词处理"),
+            ("prepare_nai_prompt", self._pages_prepare_nai_prompt, ["POST"], "NAI自然语言转Tag草稿"),
             ("generate_web_replica", self._pages_generate_web_replica, ["POST"], "生成网页文件草稿"),
             ("cancel_job", self._pages_cancel_job, ["POST"], "取消Studio任务"),
             ("resume_job", self._pages_resume_job, ["POST"], "恢复Studio任务"),
@@ -320,6 +321,29 @@ class PagesAPIMixin:
             logger.warning("[Studio] 网页草稿生成失败", exc_info=True)
             return jsonify({"success": False, "error": "网页生成失败，未自动重试"}), 500
 
+    async def _pages_prepare_nai_prompt(self):
+        try:
+            data = await request.get_json(force=True) or {}
+            if not isinstance(data, dict):
+                raise ValueError("参数必须是对象")
+            scope = await self._require_studio_scope(data.get("scope"))
+            provider = self.registry.get(str(data.get("provider_id") or ""))
+            if not provider:
+                raise ValueError("请选择 NAI 服务商")
+            from ..core.nai_workflow import NaiWorkflow
+            draft = await NaiWorkflow().prepare(
+                self.context, str(data.get("prompt") or ""), provider, json.loads(scope)[0],
+                force=True, llm_id=str(data.get("llm_provider_id") or ""),
+            )
+            return jsonify({"success": True, "draft": draft})
+        except PermissionError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 403
+        except (ValueError, TypeError, RuntimeError) as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        except Exception:
+            logger.warning("[NAI] Tag 草稿转换失败", exc_info=True)
+            return jsonify({"success": False, "error": "NAI 转换失败，未提交生图；请检查转换 LLM"}), 500
+
     async def _pages_transform_prompt(self):
         try:
             data = await request.get_json(force=True) or {}
@@ -520,6 +544,7 @@ class PagesAPIMixin:
                     "history_id": item["id"],
                     "prompt": item.get("prompt", ""),
                     "conversation": item.get("conversation", ""),
+                    "umo": item.get("umo") or item.get("origin", ""),
                     "conversation_title": item.get("conversation_title", ""),
                     "available": item.get("available", False),
                 })

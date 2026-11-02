@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>AstrBot &gt;= 4.16.0, &lt; 5</strong>
-  · v4.12.3
+  · v4.13.0
   · MIT
   · <a href="https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced">GitHub 仓库</a>
 </p>
@@ -258,3 +258,26 @@ Web **任务管理** 展示图片、批量与后台视频任务的会话、用�
 - 配置页面参考：[astrbot_plugin_omnidraw](https://github.com/diaomin66/astrbot_plugin_omnidraw)，作者雪碧bir
 
 本项目是在原有工作基础上的持续增强与维护，感谢相关作者和社区贡献者。
+
+## NAI 独立工作流
+
+Studio 左侧新增 **NAI** 工作台；服务商模板面板中新增 **NAI** 分类，包含原生 JSON/ZIP、OpenAI Images 兼容和既有 GET 网关模板。OpenAI 兼容模板不是 GET 网关，请按供应商协议选择。
+
+- 分别填写前缀 Tag、完整画师串、正面 Tag、负面 Tag，保留逗号及权重语法。
+- 点击“预填充服务商默认值”加载该服务商的画师串、前缀、负面 Tag、尺寸和转换模型。该操作会覆盖编辑区，请先保存需要保留的内容。
+- 自然语言转换只调用转换 LLM，返回草稿，不会提交生图；检查后点击“预填充到编辑区”，可继续修改。
+- 勾选审阅确认后再生图；修改 Tag、画师串或尺寸会取消确认。确认后的提示词原样传递，不会二次转 Tag 或重复添加默认画师串。
+- 画师由用户填写或从服务商配置预填充，LLM 不猜测画师。如果尚未配置画师，草稿会明确提示，可以补充后重发或确认不指定画师。
+
+专用指令：
+
+```text
+/nai @nai_native 画师串：{{artist:your_artist}} 正面：1girl, blue_eyes, outdoors 负面：lowres, bad_hands
+/nai @nai_openai 一个蓝眼睛女孩站在夕阳下
+/nai确认 草稿编号
+/nai 取消
+```
+
+已包含画师串和 Tag 的请求直接按用户内容生图；自然语言或不完整的 Tag 输入先返回草稿。草稿 15 分钟有效，按 UMO 和发送者隔离，确认编号一次有效；服务商配置变化后必须重新准备。通过 `/aiimg @NAI服务商ID ...` 显式指定 NAI 时，也会进入这套流程。不要依赖普通生图链自动识别 NAI 工作流，使用 `/nai` 或独立工作台。
+
+素材和历史卡片改为完整显示 UMO（例如 `aiocqhttp:GroupMessage:123456`），不再用 AstrBot 内部会话 UUID 代替，长 UMO 支持换行和选择复制。

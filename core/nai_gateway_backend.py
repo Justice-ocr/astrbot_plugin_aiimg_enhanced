@@ -43,10 +43,11 @@ class NaiGatewayBackend(OpenAIFullURLBackend):
         size: str | None = None, resolution: str | None = None,
         extra_body: dict | None = None,
         negative_prompt: str | None = None,
+        nai_prepared: bool = False,
     ) -> Path:
         if not str(prompt or "").strip():
             raise ValueError("NAI 提示词不能为空")
-        prefix = str(self.settings.get("nai_prompt_prefix") or "").strip()
+        prefix = "" if nai_prepared else str(self.settings.get("nai_prompt_prefix") or "").strip()
         params = {
             "tag": f"{prefix}, {prompt}" if prefix else prompt,
             "model": model or self.default_model,
@@ -58,6 +59,8 @@ class NaiGatewayBackend(OpenAIFullURLBackend):
             "guidance_scale": "scale", "nai_cfg": "cfg",
             "nai_noise_schedule": "noise_schedule", "seed": "seed",
         }.items():
+            if nai_prepared and source == "nai_artist":
+                continue
             value = self.settings.get(source)
             if value is not None and value != "":
                 params[target] = value
@@ -68,6 +71,9 @@ class NaiGatewayBackend(OpenAIFullURLBackend):
             raise ValueError("NAI 额外参数必须为 JSON 对象")
         params.update(extra)
         params.update(extra_body or {})
+        if nai_prepared:
+            params["tag"] = prompt
+            params.pop("artist", None)
         if negative_prompt is not None:
             params["negative"] = negative_prompt
         params.pop("token", None)

@@ -56,6 +56,7 @@ class ImageDrawService:
         provider_id: str | None = None,
         session_id: str | None = None,
         negative_prompt: str | None = None,
+        nai_prepared: bool = False,
     ) -> tuple[Path, list[dict]]:
         """Generate an image.
 
@@ -113,18 +114,28 @@ class ImageDrawService:
                         raise RuntimeError("Provider does not support generate()")
                     effective_prompt = prompt
                     provider_conf = self.registry.get(pid) or {}
-                    if negative_prompt is not None and provider_conf.get("__template_key") not in {"nai_gateway", "nai_native", "openai_images"}:
+                    if negative_prompt is not None and provider_conf.get("__template_key") not in {"nai_gateway", "nai_native", "nai_openai_images", "openai_images"}:
                         raise ValueError("本次负面提示词仅支持 NAI 和 OpenAI Images 模板，请使用 @服务商ID 指定服务商")
                     if (
                         provider_conf.get("__template_key") in {"nai_gateway", "nai_native", "openai_chat", "openai_images"}
                         and provider_conf.get("nai_translate_prompt", False)
+                        and not nai_prepared
                     ):
                         from .nai_prompt import translate_nai_prompt
 
                         effective_prompt = await translate_nai_prompt(
                             self.context, prompt, provider_conf, session_id
                         )
+                    if nai_prepared:
+                        import json
+                        extra = provider_conf.get("extra_body") or {}
+                        if isinstance(extra, str):
+                            extra = json.loads(extra)
+                        if isinstance(extra, dict) and {"prompt", "input", "tag", "artist"}.intersection(extra):
+                            raise ValueError("额外参数不能覆盖已确认的 NAI 提示词或画师串")
                     request_options = {}
+                    if nai_prepared and provider_conf.get("__template_key") in {"nai_native", "nai_gateway"}:
+                        request_options["nai_prepared"] = True
                     if negative_prompt is not None:
                         request_options["negative_prompt"] = negative_prompt
                     result = await gen(

@@ -2088,3 +2088,12 @@
     transition-duration: 1ms !important;
   }
 }
+
+.history-copy .full-umo, .history-details .full-umo { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; user-select: text; }
+
+.nai-workbench { display: grid; gap: 1.25rem; }
+.nai-tag-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.nai-workbench textarea, .nai-workbench pre { font-family: ui-monospace, monospace; }
+.nai-workbench pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; border: 1px solid var(--line, #d8d8e3); border-radius: 12px; user-select: text; }
+.nai-conversion-draft { margin-top: 1rem; }
+@media (max-width: 720px) { .nai-tag-grid { grid-template-columns: minmax(0, 1fr); } }

@@ -72,6 +72,21 @@ class StudioGenerationService:
             "reference_paths": [str(item).strip() for item in (payload.get("reference_paths") or []) if str(item).strip()][:9],
             "reference_asset_ids": [str(item).strip() for item in (payload.get("reference_asset_ids") or []) if str(item).strip()][:9],
         }
+        if payload.get("nai_workbench") is True:
+            from ..nai_workflow import is_nai_provider, compose_nai_prompt
+            nai_provider = self.plugin.registry.get(request["provider_id"])
+            if not nai_provider or not is_nai_provider(nai_provider):
+                raise ValueError("NAI 工作台必须选择 NAI 服务商")
+            if kind != "image" or mode != "draw" or payload.get("nai_reviewed") is not True:
+                raise ValueError("请先审阅 NAI 画师串和 Tag 后确认生图")
+            fields = {key: str(payload.get(key) or "").strip() for key in ("nai_artist", "nai_tags", "nai_prefix", "negative_prompt")}
+            if not fields["nai_tags"] or any(len(value) > 8000 for value in fields.values()):
+                raise ValueError("NAI Tag 为空或字段过长")
+            request.update(fields)
+            request["prompt"] = compose_nai_prompt(fields["nai_artist"], fields["nai_tags"], fields["nai_prefix"])
+            if request["prompt"] != prompt:
+                raise ValueError("NAI 提示词与审阅字段不一致，请重新确认")
+            request["nai_prepared"] = True
         provider_id = request["provider_id"]
         if provider_id:
             provider = self.plugin.registry.get(provider_id)
@@ -554,7 +569,8 @@ class StudioGenerationService:
                         provider_id=request.get("provider_id") or None,
                         size=request.get("size") or None,
                         resolution=request.get("resolution") or None,
-                        session_id=scope,
+                        session_id=json.loads(scope)[0],
+                        **({"negative_prompt": request.get("negative_prompt", ""), "nai_prepared": True} if request.get("nai_prepared") else {}),
                     )
                 else:
                     references = await self._references_for_request(scope, mode, request)
@@ -600,6 +616,7 @@ class StudioGenerationService:
                 "backend": request.get("provider_id") or "",
                 "provider_tries": provider_tries,
                 "conversation_title": "Web Studio",
+                **({key: request.get(key, "") for key in ("nai_artist", "nai_tags", "nai_prefix", "negative_prompt")} if request.get("nai_prepared") else {}),
             }
             asset = await self.plugin.studio_assets.create_from_path(
                 scope, image_path, source_job_id=job_id,

@@ -95,6 +95,7 @@ export interface ManagedTask {
   sent?: number;
   persona?: string;
   conversation?: string;
+  umo?: string;
   sender?: string;
   error?: string;
 }
@@ -133,6 +134,7 @@ export interface StudioAsset {
   available?: boolean;
   prompt?: string;
   conversation?: string;
+  umo?: string;
   conversation_title?: string;
   metadata?: Record<string, unknown>;
 }
@@ -156,6 +158,7 @@ export interface HistoryItem {
   provider?: string;
   prompt?: string;
   conversation?: string;
+  umo?: string;
   effective_prompt?: string;
   output?: string;
   parent_image_id?: number | null;

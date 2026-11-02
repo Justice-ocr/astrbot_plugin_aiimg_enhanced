@@ -93,6 +93,7 @@ import type {
   ProviderConfig,
 } from "../api/contracts";
 import { readRoute, routeHref, routes, type RouteId } from "./routes";
+import { NaiWorkbench } from "../features/nai/NaiWorkbench";
 import { PresetEditor } from "../features/prompts/PresetEditor";
 import { buildStaticPreview } from "../features/design/static-preview";
 import brandIcon from "../assets/yukina-favicon.svg?inline";
@@ -741,6 +742,14 @@ function TasksView({
   );
 }
 
+function fullUmo(item: { umo?: string; origin?: string; scope?: string }): string {
+  if (item.umo || item.origin) return item.umo || item.origin || "";
+  try {
+    const parts = JSON.parse(item.scope || "[]");
+    return Array.isArray(parts) && typeof parts[0] === "string" ? parts[0] : "";
+  } catch { return ""; }
+}
+
 function HistoryView({ snapshot }: { snapshot: StudioSnapshot }) {
   const [page, setPage] = useState(1);
   const [queryDraft, setQueryDraft] = useState("");
@@ -848,7 +857,7 @@ function HistoryView({ snapshot }: { snapshot: StudioSnapshot }) {
             <div className="history-media"><HistoryPreview item={item} /><span className="history-sequence">{item.sequence}</span></div>
             <div className="history-copy">
               <strong>{item.prompt || "未记录提示词"}</strong>
-              <small>{item.conversation_title || item.conversation || "默认会话"}</small>
+              <small className="full-umo" title={fullUmo(item)}>{fullUmo(item) || "未记录 UMO"}</small>
               <small>{formatTime(item.created_at)}{item.provider ? " · " + item.provider : ""}{!item.available ? " · 已过期" : ""}</small>
               <button type="button" className="secondary-action" onClick={() => { setError(""); setMessage(""); setSelected(item); }}>查看详情</button>
               {controls(item)}
@@ -871,7 +880,7 @@ function HistoryView({ snapshot }: { snapshot: StudioSnapshot }) {
           <dt>生成时间</dt><dd>{formatTime(selected.created_at)}</dd>
           <dt>服务商 / 模式 / 尺寸</dt><dd>{[selected.provider, selected.mode, selected.output].filter(Boolean).join(" / ") || "未记录"}</dd>
           <dt>会话</dt><dd>{selected.conversation_title || "未记录"}</dd>
-          <dt>会话 ID</dt><dd>{selected.conversation || "未记录"}</dd>
+          <dt>UMO</dt><dd className="full-umo">{fullUmo(selected) || "未记录"}</dd>
           <dt>用户</dt><dd>{selected.sender || "未记录"}</dd>
           <dt>消息来源 / 机器人</dt><dd>{[selected.origin, selected.bot].filter(Boolean).join(" / ") || "未记录"}</dd>
           <dt>原图状态</dt><dd>{selected.available ? "可下载" : "已过期"}</dd>
@@ -980,7 +989,7 @@ function AssetsView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
             <div className="history-media"><AssetPreview item={item} history={snapshot.history} /></div>
             <div className="history-copy">
               <strong>{item.prompt || item.filename}</strong>
-              <small>{item.source === "history" ? (item.conversation_title || item.conversation || "历史图片") : item.media_type}</small>
+              <small className="full-umo" title={fullUmo(item)}>{fullUmo(item) || "未记录 UMO"}</small>
               <small>{formatTime(item.created_at)}{item.pinned ? " · 已收藏" : ""}</small>
               <div className="asset-actions">
                 {item.media_type === "image" && item.scope === scope && item.source !== "history" && <>
@@ -3162,6 +3171,7 @@ const providerFieldLabels: Record<string, string> = {
   ratio: "默认画幅", xai_resolution: "视频分辨率", xai_reference_mode: "参考图模式",
   image_handling_method: "图片处理方式", nai_reference_mode: "参考图模式", nai_auth_mode: "鉴权模式",
   nai_sampler: "采样器", nai_noise_schedule: "噪声调度",
+  nai_artist: "默认画师串", nai_prompt_prefix: "默认前缀 Tag", nai_llm_provider_id: "Tag 转换 LLM ID", negative_prompt: "默认负面 Tag",
   supports_edit: "支持改图", supports_video: "支持视频", extra_body: "额外请求参数",
   endpoint: "接口路径", submit_path: "提交路径", query_path: "查询路径", download_path: "下载路径",
   image_field: "参考图字段名", reference_field: "参考图字段名", aspect_ratio: "默认画幅", default_duration: "默认时长（秒）",
@@ -3207,7 +3217,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   const providers = snapshot.config.providers || [];
   const [templatePanelOpen, setTemplatePanelOpen] = useState(false);
   const [templateKey, setTemplateKey] = useState("openai_images");
-  const [templateMedia, setTemplateMedia] = useState<"image" | "video">("image");
+  const [templateMedia, setTemplateMedia] = useState<"image" | "video" | "nai">("image");
   const [newProviderId, setNewProviderId] = useState("");
   const [selectedId, setSelectedId] = useState(String(providers[0]?.id || ""));
   const [draft, setDraft] = useState<Record<string, unknown>>({});
@@ -3270,7 +3280,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     if (typeof value === "number") return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><input type="number" value={value} disabled={busy} onChange={(event) => updateField(key, event.target.value === "" ? "" : Number(event.target.value))} /></label>;
     if (Array.isArray(value)) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)} <small>每行一项</small></span><textarea rows={Math.min(5, Math.max(2, value.length))} value={value.map(String).join("\n")} disabled={busy} onChange={(event) => updateField(key, event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>;
     if (value && typeof value === "object") return null;
-    const multiline = /prompt|template|body|instruction|header/i.test(key);
+    const multiline = /prompt|template|body|instruction|header|nai_artist/i.test(key);
     const inputType = /url|path|endpoint/i.test(key) ? "url" : "text";
     return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span>{multiline
       ? <textarea rows={3} value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)} />
@@ -3326,9 +3336,10 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   }
 
   const templateEntries = Object.entries(PROVIDER_TEMPLATES as Record<string, { label?: string }>);
-  const imageTemplates = templateEntries.filter(([key]) => !VIDEO_PROVIDER_TYPES.has(key));
+  const naiTemplates = templateEntries.filter(([key]) => key.startsWith("nai_"));
+  const imageTemplates = templateEntries.filter(([key]) => !VIDEO_PROVIDER_TYPES.has(key) && !key.startsWith("nai_"));
   const videoTemplates = templateEntries.filter(([key]) => VIDEO_PROVIDER_TYPES.has(key));
-  const availableTemplates = templateMedia === "video" ? videoTemplates : imageTemplates;
+  const availableTemplates = templateMedia === "nai" ? naiTemplates : templateMedia === "video" ? videoTemplates : imageTemplates;
 
   async function createFromTemplate() {
     const template = (PROVIDER_TEMPLATES as Record<string, Record<string, unknown>>)[templateKey];
@@ -3356,7 +3367,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
 
   return <section className="workspace">
     <div className="workspace-heading"><div><span className="section-kicker">PROVIDERS</span><h1>服务商</h1><p>维护连接参数与凭据；调用链路在“设置”页配置。</p></div><button type="button" className="secondary-action" onClick={() => { setTemplatePanelOpen((open) => !open); setError(""); }}><ImagePlus size={16} aria-hidden="true" />{templatePanelOpen ? "关闭模板面板" : "添加服务商模板"}</button></div>
-    {templatePanelOpen && <section className="provider-template-panel"><div className="subsection-heading"><div><h3>添加服务商</h3><p>选择图片或视频协议模板，并设置唯一 ID。</p></div></div><div className="template-media-switch" role="group" aria-label="模板媒体类型"><button type="button" aria-pressed={templateMedia === "image"} disabled={busy} onClick={() => { setTemplateMedia("image"); setTemplateKey(imageTemplates[0]?.[0] || ""); }}>图片</button><button type="button" aria-pressed={templateMedia === "video"} disabled={busy} onClick={() => { setTemplateMedia("video"); setTemplateKey(videoTemplates[0]?.[0] || ""); }}>视频</button></div><div className="provider-template-controls"><label className="stack-field"><span>{templateMedia === "video" ? "视频" : "图片"}协议模板</span><select value={availableTemplates.some(([key]) => key === templateKey) ? templateKey : ""} disabled={busy} onChange={(event) => setTemplateKey(event.target.value)}><option value="">选择{templateMedia === "video" ? "视频" : "图片"}协议模板</option>{availableTemplates.map(([key, template]) => <option key={key} value={key}>{key} · {template.label || key}</option>)}</select></label><label className="stack-field"><span>服务商 ID</span><input value={newProviderId} maxLength={120} disabled={busy} placeholder="例如：openai_primary" onChange={(event) => setNewProviderId(event.target.value)} /></label><button type="button" className="primary-action" disabled={busy || !newProviderId.trim() || !templateKey} onClick={() => void createFromTemplate()}><Save size={16} />创建模板</button></div>{error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}</section>}
+    {templatePanelOpen && <section className="provider-template-panel"><div className="subsection-heading"><div><h3>添加服务商</h3><p>选择图片或视频协议模板，并设置唯一 ID。</p></div></div><div className="template-media-switch" role="group" aria-label="模板媒体类型"><button type="button" aria-pressed={templateMedia === "image"} disabled={busy} onClick={() => { setTemplateMedia("image"); setTemplateKey(imageTemplates[0]?.[0] || ""); }}>图片</button><button type="button" aria-pressed={templateMedia === "video"} disabled={busy} onClick={() => { setTemplateMedia("video"); setTemplateKey(videoTemplates[0]?.[0] || ""); }}>视频</button><button type="button" aria-pressed={templateMedia === "nai"} disabled={busy} onClick={() => { setTemplateMedia("nai"); setTemplateKey(naiTemplates[0]?.[0] || ""); }}>NAI</button></div><div className="provider-template-controls"><label className="stack-field"><span>{templateMedia === "nai" ? "NAI" : templateMedia === "video" ? "视频" : "图片"}协议模板</span><select value={availableTemplates.some(([key]) => key === templateKey) ? templateKey : ""} disabled={busy} onChange={(event) => setTemplateKey(event.target.value)}><option value="">选择{templateMedia === "nai" ? "NAI" : templateMedia === "video" ? "视频" : "图片"}协议模板</option>{availableTemplates.map(([key, template]) => <option key={key} value={key}>{key} · {template.label || key}</option>)}</select></label><label className="stack-field"><span>服务商 ID</span><input value={newProviderId} maxLength={120} disabled={busy} placeholder="例如：openai_primary" onChange={(event) => setNewProviderId(event.target.value)} /></label><button type="button" className="primary-action" disabled={busy || !newProviderId.trim() || !templateKey} onClick={() => void createFromTemplate()}><Save size={16} />创建模板</button></div>{error && <p className="form-error" role="alert"><AlertCircle size={16} />{error}</p>}</section>}
     <div className="provider-editor-layout">
       <aside className="provider-list" aria-label="服务商列表">
         <div className="provider-list-heading"><strong>已添加的服务商</strong><span>{providers.length}</span></div>
@@ -3737,7 +3748,7 @@ export default function StudioApp() {
           <img className="brand-symbol small" src={brandIcon} alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.12.3</small>
+            <small>v4.13.0</small>
           </div>
         </div>
       </aside>
@@ -3757,6 +3768,7 @@ export default function StudioApp() {
             <section className="workspace"><h1>Studio 已关闭</h1><button type="button" className="secondary-action" onClick={() => setRoute("settings")}>工作台设置</button></section>
           ) : <>
             {route === "create" && <CreateView snapshot={snapshot} scope={activeScope} onScopeChange={changeActiveScope} onSubmitted={() => void refresh()} />}
+            {route === "nai" && <NaiWorkbench snapshot={snapshot} scope={activeScope} onRefresh={() => void refresh()} />}
             {route === "canvas" && <CanvasView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}
             {route === "assets" && <AssetsView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}
             {route === "tasks" && (

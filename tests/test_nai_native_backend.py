@@ -45,6 +45,19 @@ class NaiNativeTests(unittest.IsolatedAsyncioTestCase):
         backend._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         return backend, requests
 
+    async def test_reviewed_prompt_is_not_prefixed_or_changed_again(self):
+        backend, requests = self.backend("img2img")
+        backend.settings.update(nai_artist="artist:default", nai_prompt_prefix="default-prefix")
+        prompt = "masterpiece, {{artist:chosen}}, 1girl, {blue_eyes}"
+        try:
+            await backend.generate(prompt, nai_prepared=True, negative_prompt="lowres")
+            payload = requests[0][1]
+            self.assertEqual(payload["input"], prompt)
+            self.assertEqual(payload["parameters"]["v4_prompt"]["caption"]["base_caption"], prompt)
+            self.assertEqual(payload["parameters"]["negative_prompt"], "lowres")
+        finally:
+            await backend.close()
+
     async def test_img2img_and_zip(self):
         backend, requests = self.backend("img2img")
         try:

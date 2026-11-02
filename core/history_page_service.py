@@ -48,7 +48,7 @@ class HistoryPageService:
                     "mode": str(meta.get("mode") or ""),
                     "provider": provider, "output": str(meta.get("size") or meta.get("resolution") or ""),
                     "parent_image_id": meta.get("parent_image_id"),
-                    "origin": origin, "bot": bot, "sender": sender,
+                    "origin": origin, "umo": origin, "bot": bot, "sender": sender,
                     "conversation": conversation, "available": available,
                     "conversation_title": str(meta.get("conversation_title") or ""),
                 })

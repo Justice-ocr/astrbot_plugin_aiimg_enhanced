@@ -70,6 +70,7 @@ from .core.image_manager import ImageManager
 from .core.image_history import ImageHistory
 from .core.session_personas import SessionPersonas
 from .core.task_manager import TaskManager, managed_task, STATUS_LABELS
+from .core.nai_workflow import NaiWorkflow, is_nai_provider, parse_nai_input
 from .core.nanobanana import NanoBananaService
 from .core.persona_manager import PersonaManager, PersonaProfile
 from .core.provider_registry import ProviderRegistry, leased_backend
@@ -166,6 +167,7 @@ class GiteeAIImagePlugin(
         self.studio_appearance = StudioAppearanceStore(self.data_dir)
         self.studio_projects = StudioProjectStore(self.data_dir)
         self.studio_generation = StudioGenerationService(self)
+        self.nai_workflow = NaiWorkflow()
         # 持久化：AstrBot原生config对象（可能有save_config方法）
         self._native_config = config if hasattr(config, "save_config") else None
         # 持久化：自管理的JSON文件路径（兜底）
@@ -2063,6 +2065,124 @@ class GiteeAIImagePlugin(
             event.stop_event()
             event.should_call_llm(True)
 
+    @filter.command("nai", alias={"NAI"})
+    async def nai_command(self, event: AstrMessageEvent):
+        """/nai [@服务商] 画师串：... 正面：... 负面：...，自然语言先审阅。"""
+        arg = event.message_str.partition(" ")[2].strip()
+        await self._handle_nai_request(event, arg)
+
+    async def _handle_nai_request(self, event: AstrMessageEvent, arg: str):
+        key = (str(event.unified_msg_origin), str(event.get_sender_id() or ""))
+        if arg in {"取消", "cancel"}:
+            self.nai_workflow.preparing.pop(key, None)
+            self.nai_workflow.pending.pop(key, None)
+            await event.send(event.plain_result("NAI 草稿已取消。"))
+            event.stop_event()
+            return
+        conversion_token = ""
+        try:
+            provider_id, arg = self._parse_provider_override_prefix(arg)
+            if arg.startswith("@") and not provider_id:
+                raise ValueError("找不到指定的 NAI 服务商，请检查 @服务商ID")
+            if not provider_id:
+                provider_id = next((pid for pid in self.registry.provider_ids()
+                                    if is_nai_provider(self.registry.get(pid) or {})), None)
+            provider = self.registry.get(provider_id) if provider_id else None
+            if not provider or not is_nai_provider(provider):
+                raise ValueError("请先配置 NAI 原生或 OpenAI 兼容模板，使用 /nai @服务商ID 描述")
+            if not arg:
+                raise ValueError("用法：/nai @服务商ID 画师串：... 正面：... 负面：...\n自然语言先转换草稿，/nai确认 编号 后生图；/nai 取消 删除草稿。")
+            conversion_token = self.nai_workflow.begin(key)
+            draft = await self.nai_workflow.prepare(
+                self.context, arg, provider, str(event.unified_msg_origin),
+            )
+            if not self.nai_workflow.finish(key, conversion_token):
+                return
+            draft["provider_id"] = provider_id
+            draft["size"] = str(provider.get("default_size") or "")
+            fields = parse_nai_input(arg)
+            # Explicit artist + tag input is already authored by the user.
+            has_artist = bool(fields["artist"]) or bool(re.search(r"artist\s*:", fields["tags"], re.I))
+            if has_artist and not draft["converted"]:
+                self.nai_workflow.pending.pop(key, None)
+                await self._nai_generate_confirmed(event, draft)
+                return
+            draft = self.nai_workflow.remember(key, draft, provider)
+            artist_note = draft["artist"] or "（未填写；可重新发送 /nai 画师串：... 正面：...，或确认不指定画师）"
+            await event.send(event.plain_result(
+                f"NAI 草稿（尚未生图，15 分钟内有效）\n服务商：{provider_id}\n"
+                f"前缀：{draft['prefix'] or '（空）'}\n画师串：{artist_note}\n"
+                f"正面 Tag：{draft['tags']}\n负面 Tag：{draft['negative'] or '（空）'}\n"
+                f"最终提示词：{draft['prompt']}\n\n"
+                f"检查后发送 /nai确认 {draft['token']}；修改请重新发送 /nai；取消请发送 /nai 取消。"
+            ))
+        except Exception as exc:
+            await event.send(event.plain_result(f"NAI 请求失败：{exc}"))
+        finally:
+            if conversion_token:
+                self.nai_workflow.finish(key, conversion_token)
+            event.stop_event()
+
+    @filter.command("nai确认")
+    async def nai_confirm_command(self, event: AstrMessageEvent):
+        parts = event.message_str.partition(" ")[2].strip().split()
+        token = parts[0] if len(parts) == 1 else ""
+        key = (str(event.unified_msg_origin), str(event.get_sender_id() or ""))
+        try:
+            draft = self.nai_workflow.pending.get(key) or {}
+            provider_id = str(draft.get("provider_id") or "")
+            provider = self.registry.get(provider_id) if provider_id else None
+            if not provider:
+                raise ValueError("没有待确认草稿，或原服务商已删除，请重新发送 /nai")
+            item = self.nai_workflow.consume(key, token, provider)
+            await self._nai_generate_confirmed(event, item)
+        except Exception as exc:
+            await event.send(event.plain_result(f"NAI 确认失败：{exc}"))
+        finally:
+            event.stop_event()
+
+    async def _nai_generate_confirmed(self, event: AstrMessageEvent, draft: dict):
+        user_id = str(event.get_sender_id() or "")
+        if self.debouncer.hit(self._debounce_key(event, "generate", user_id)):
+            raise ValueError("请求过于频繁，请重新发送 /nai 后再确认")
+        if not await self._begin_user_job(user_id, kind="image"):
+            raise ValueError("当前生图并发已满，请完成后重新发送 /nai")
+        try:
+            self.debouncer.hit(self._debounce_key(event, "aiimg", user_id))
+            await self._capture_history_scope(event)
+            prompt = draft["prompt"]
+            started = time.perf_counter()
+            await asyncio.gather(event.send(event.plain_result(self._pending_msg_draw(prompt))),
+                                 mark_processing(event), return_exceptions=True)
+
+            async def generate():
+                image_path, tries = await self.draw.generate(
+                    prompt, provider_id=draft["provider_id"],
+                    session_id=event.unified_msg_origin, size=draft.get("size") or None,
+                    negative_prompt=draft.get("negative", ""), nai_prepared=True,
+                )
+                self._remember_last_image(event, image_path)
+                await self._record_image_history(event, image_path, {
+                    "mode": "nai", "user_prompt": prompt, "effective_prompt": prompt,
+                    "negative_prompt": draft.get("negative", ""), "provider_tries": tries,
+                    "nai_artist": draft.get("artist", ""), "nai_tags": draft.get("tags", ""),
+                })
+                sent = await self._send_image_with_fallback(
+                    event, image_path, elapsed=time.perf_counter() - started, provider_tries=tries,
+                )
+                if sent:
+                    await mark_success(event)
+                else:
+                    await mark_failed(event)
+
+            scope = await self._history_scope(event)
+            await self.tasks.run(scope, "image", prompt, generate)
+        except Exception:
+            await mark_failed(event)
+            raise
+        finally:
+            await self._end_user_job(user_id, kind="image")
+
     @filter.command("aiimg", alias={"生图", "画图", "绘图", "出图"})
     @managed_task()
     async def generate_image_command(self, event: AstrMessageEvent, prompt: str):
@@ -2082,6 +2202,10 @@ class GiteeAIImagePlugin(
         provider_override, arg = self._parse_provider_override_prefix(arg)
         if not arg:
             await self._fail_cmd(event)
+            return
+
+        if provider_override and is_nai_provider(self.registry.get(provider_override) or {}):
+            await self._handle_nai_request(event, f"@{provider_override} {arg}")
             return
 
         from .core.image_command_prompt import split_negative_prompt
