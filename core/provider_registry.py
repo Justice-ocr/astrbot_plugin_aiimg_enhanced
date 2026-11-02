@@ -633,10 +633,10 @@ class ProviderRegistry:
                     if str(x).strip()
                 ],
                 timeout=int(conf.get("timeout") or 120),
-                max_retries=int(conf.get("max_retries") or 2),
+                max_retries=int(conf["max_retries"]) if conf.get("max_retries") is not None else (0 if template_key == "nai_openai_images" else 2),
                 default_model=str(conf.get("model") or "").strip(),
-                default_size=str(conf.get("default_size") or "4096x4096").strip(),
-                supports_edit=bool(conf.get("supports_edit", True)),
+                default_size=str(conf.get("default_size") or ("832x1216" if template_key == "nai_openai_images" else "4096x4096")).strip(),
+                supports_edit=bool(conf.get("supports_edit", template_key != "nai_openai_images")),
                 extra_body=_as_dict(conf.get("extra_body")) or None,
                 proxy_url=str(conf.get("proxy_url") or "").strip() or None,
             )

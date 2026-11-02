@@ -91,3 +91,55 @@ async def test_history_and_asset_api_expose_full_umo_not_conversation_uuid(tmp_p
     history = next(item for item in assets['items'] if item.get('source') == 'history')
     assert history['umo'] == 'group'
     assert history['conversation'] == 'session'
+
+
+@pytest.mark.asyncio
+async def test_workbench_conversion_does_not_inherit_hidden_legacy_defaults(tmp_path):
+    plugin, client, scope, _, _ = await setup(tmp_path)
+    provider = {'id': 'nai', '__template_key': 'nai_openai_images', 'nai_artist': 'old_artist',
+                'nai_prompt_prefix': 'old_prefix', 'negative_prompt': 'old_negative', 'nai_llm_provider_id': 'old_llm'}
+    plugin.registry = types.SimpleNamespace(get=lambda pid: provider)
+    plugin.context = types.SimpleNamespace(get_current_chat_provider_id=AsyncMock(return_value='session-llm'),
+        llm_generate=AsyncMock(return_value=types.SimpleNamespace(completion_text='{"tags":"1girl, blue_eyes"}')))
+    client.app.add_url_rule('/nai', view_func=plugin._pages_prepare_nai_prompt, methods=['POST'])
+    result = await client.post('/nai', json={'scope': scope, 'provider_id': 'nai', 'prompt': '女孩', 'workbench': True})
+    assert result.status_code == 200
+    draft = (await result.get_json())['draft']
+    assert draft['artist'] == draft['prefix'] == draft['negative'] == ''
+    assert draft['tags'] == '1girl, blue_eyes'
+    plugin.context.get_current_chat_provider_id.assert_awaited_once_with(umo='group')
+    assert plugin.context.llm_generate.await_args.kwargs['chat_provider_id'] == 'session-llm'
+    assert provider['nai_artist'] == 'old_artist'
+
+
+@pytest.mark.asyncio
+async def test_nai_presets_persist_exact_fields_and_validate_scope_revision(tmp_path):
+    plugin, client, scope, _, _ = await setup(tmp_path)
+    client.app.add_url_rule('/preset', view_func=plugin._pages_save_project, methods=['POST'])
+    client.app.add_url_rule('/presets', view_func=plugin._pages_get_projects)
+    document = {'version': 1, 'artist': '{{artist:foo}}, [artist:bar]', 'tags': '1girl, {{{blue_eyes}}}, 1.2::long_hair::',
+                'negative': 'lowres, {bad_hands}', 'prefix': '{masterpiece}, best_quality', 'llm_provider_id': 'text-llm', 'size': '832x1216'}
+    payload = {'scope': scope, 'kind': 'nai_preset', 'name': '画师预设 A', 'document': document}
+    response = await client.post('/preset', json=payload)
+    assert response.status_code == 200
+    item = (await response.get_json())['item']
+    response = await client.get('/presets', query_string={'scope': scope, 'kind': 'nai_preset'})
+    assert (await response.get_json())['items'][0]['document'] == document
+    updated = await client.post('/preset', json={**payload, 'id': item['id'], 'revision': item['revision'], 'name': '改名'})
+    assert updated.status_code == 200
+    conflict = await client.post('/preset', json={**payload, 'id': item['id'], 'revision': item['revision']})
+    assert conflict.status_code == 409
+    denied = await client.post('/preset', json={**payload, 'scope': '["fake","fake","fake","fake"]'})
+    assert denied.status_code == 403
+    assert (await plugin.studio_projects.get(item['id']))['document'] == document
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('field,value', [('artist', ['not-a-string']), ('prefix', 'x' * 8001), ('api_key', 'forbidden'), ('version', 99)])
+async def test_nai_presets_reject_malformed_or_secret_fields(tmp_path, field, value):
+    plugin, client, scope, _, _ = await setup(tmp_path)
+    client.app.add_url_rule('/preset', view_func=plugin._pages_save_project, methods=['POST'])
+    response = await client.post('/preset', json={'scope': scope, 'kind': 'nai_preset', 'name': 'invalid',
+        'document': {'version': 1, field: value}})
+    assert response.status_code == 400
+    assert await plugin.studio_projects.list(scope=scope, kind='nai_preset') == []

@@ -1,3 +1,11 @@
+import NAI_TEMPLATE_DEFINITIONS from './nai_templates.json' with { type: 'json' };
+
+// Keep Web defaults and field definitions in the same source; schema parity is tested.
+const NAI_PROVIDER_TEMPLATES = Object.fromEntries(Object.entries(NAI_TEMPLATE_DEFINITIONS).map(([key, definition]) => [key, {
+  label: definition.name,
+  ...Object.fromEntries(Object.entries(definition.items).filter(([name]) => !['id', 'label'].includes(name)).map(([name, field]) => [name, field.default])),
+}]));
+
 function inferProviderType(p) {
   if (!p || typeof p !== 'object') return 'openai_images';
   if (p.__template_key) return p.__template_key;
@@ -29,10 +37,8 @@ function inferProviderType(p) {
 }
 
 const PROVIDER_TEMPLATES = {
+  ...NAI_PROVIDER_TEMPLATES,
   xai_video: { label:'xAI 原生视频', base_url:'https://api.x.ai', api_keys:[], model:'grok-imagine-video-1.5', timeout:300, poll_interval:5, poll_timeout:1200, duration:'8', aspect_ratio:'16:9', xai_resolution:'720p', xai_reference_mode:'reference', proxy_url:'' },
-  nai_openai_images: { label:'NAI OpenAI 兼容', base_url:'', api_keys:[], model:'nai-diffusion-4-5-full', timeout:120, max_retries:0, default_size:'832x1216', supports_edit:false, nai_artist:'', nai_prompt_prefix:'', negative_prompt:'', nai_llm_provider_id:'', proxy_url:'' },
-  nai_native: { label:'NovelAI 原生协议中转', base_url:'', api_keys:[], model:'nai-diffusion-4-5-full', timeout:120, default_size:'832x1216', nai_reference_mode:'img2img', nai_strength:0.6, nai_vibe_information:1, nai_translate_prompt:false, nai_llm_provider_id:'', nai_prompt_prefix:'', nai_artist:'', negative_prompt:'', nai_sampler:'k_euler_ancestral', num_inference_steps:28, guidance_scale:5, nai_cfg:0, nai_noise_schedule:'karras', seed:'', proxy_url:'' },
-  nai_gateway: { label:'NovelAI 第三方 GET 网关', base_url:'', generate_path:'/generate', api_keys:[], model:'nai-diffusion-4-5-full', timeout:120, default_size:'832x1216', nai_auth_mode:'token', nai_translate_prompt:false, nai_llm_provider_id:'', nai_prompt_prefix:'', nai_artist:'', negative_prompt:'', nai_sampler:'', num_inference_steps:28, guidance_scale:5, nai_cfg:'', nai_noise_schedule:'', seed:'', proxy_url:'', extra_body:'' },
   openai_images:          { label:'OpenAI Images', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto', nai_translate_prompt:false, nai_llm_provider_id:'' },
   openai_chat:            { label:'OpenAI Chat图', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto', nai_translate_prompt:false, nai_llm_provider_id:'' },
   gemini_native:          { label:'Gemini 原生', api_url:'https://generativelanguage.googleapis.com', api_keys:[], model:'gemini-3-pro-image-preview', timeout:120, use_proxy:false, proxy_url:'', default_resolution:'4096x4096', generate_request_mode:'auto', edit_request_mode:'auto' },
@@ -92,6 +98,7 @@ const VIDEO_PROVIDER_TYPES = new Set(['xai_video', 'agnes_video', 'minimax_h3_vi
 
 export {
   inferProviderType,
+  NAI_TEMPLATE_DEFINITIONS,
   PROVIDER_TEMPLATES,
   PROVIDER_NAMES,
   VIDEO_PROVIDER_TYPES,

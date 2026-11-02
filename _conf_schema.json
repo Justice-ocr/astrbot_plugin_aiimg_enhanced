@@ -2160,8 +2160,7 @@
       },
       "nai_openai_images": {
         "name": "NAI OpenAI 兼容",
-        "description": "NAI 专用 Images 接口；画师串和 Tag 可在 NAI 工作台审阅。",
-        "hint": "若服务商只在 Chat 返回图片，请改用 OpenAI Chat 图模板。",
+        "description": "OpenAI Images 协议；不提供原生采样器和 Vibe 等未映射字段。",
         "items": {
           "id": {
             "type": "string",
@@ -2175,9 +2174,9 @@
           },
           "base_url": {
             "type": "string",
-            "description": "Base URL",
-            "hint": "可填 https://api.example.com 或 https://api.example.com/v1（会自动规范化为包含 /v1）。",
-            "default": ""
+            "description": "API 根地址",
+            "default": "",
+            "hint": "填写 OpenAI Images 兼容入口，根地址或 /v1 均可；请求 /v1/images/generations，不是 NAI 原生接口。"
           },
           "api_keys": {
             "type": "list",
@@ -2188,54 +2187,22 @@
           "model": {
             "type": "string",
             "description": "模型名称",
-            "default": "nai-diffusion-4-5-full"
-          },
-          "supports_edit": {
-            "type": "bool",
-            "description": "支持改图 (/v1/images/edits)",
-            "default": false
-          },
-          "generate_request_mode": {
-            "type": "string",
-            "description": "文生图请求模式",
-            "options": [
-              "auto",
-              "stream",
-              "non_stream"
-            ],
-            "hint": "auto 由当前后端自己决定；stream 强制优先走流式；non_stream 强制直接走非流式。不支持双路径的后端会自动忽略。",
-            "default": "auto"
-          },
-          "edit_request_mode": {
-            "type": "string",
-            "description": "改图请求模式",
-            "options": [
-              "auto",
-              "stream",
-              "non_stream"
-            ],
-            "hint": "auto 由当前后端自己决定；stream 强制优先走流式；non_stream 强制直接走非流式。不支持双路径的后端会自动忽略。",
-            "default": "auto"
+            "default": "nai-diffusion-4-5-full",
+            "hint": "以服务商实际模型名称为准，不同协议的模型别名不一定相同。"
           },
           "timeout": {
             "type": "int",
-            "description": "超时(秒)",
+            "description": "请求超时（秒）",
             "default": 120
-          },
-          "max_retries": {
-            "type": "int",
-            "description": "最大重试次数",
-            "default": 2
           },
           "proxy_url": {
             "type": "string",
             "description": "代理地址（可选）",
-            "hint": "如果 SDK 不支持，请使用系统代理环境变量。",
             "default": ""
           },
           "default_size": {
             "type": "string",
-            "description": "默认输出尺寸",
+            "description": "默认图片尺寸",
             "default": "832x1216",
             "options": [
               "832x1216",
@@ -2247,38 +2214,30 @@
               "1024x1536"
             ]
           },
+          "max_retries": {
+            "type": "int",
+            "description": "最大重试次数",
+            "default": 0,
+            "hint": "0 表示不重试。请求失败可能已经被上游接收，请先核实任务状态。"
+          },
+          "supports_edit": {
+            "type": "bool",
+            "description": "服务商支持 Images 改图",
+            "default": false,
+            "hint": "仅在服务商明确支持 /v1/images/edits 时启用。"
+          },
           "extra_body": {
             "type": "object",
             "description": "额外请求体（高级）",
+            "default": {},
             "items": {},
-            "default": {}
-          },
-          "nai_artist": {
-            "type": "string",
-            "description": "默认画师串",
-            "default": ""
-          },
-          "nai_prompt_prefix": {
-            "type": "string",
-            "description": "默认前缀 Tag",
-            "default": ""
-          },
-          "negative_prompt": {
-            "type": "string",
-            "description": "默认负面 Tag",
-            "default": ""
-          },
-          "nai_llm_provider_id": {
-            "type": "string",
-            "description": "自然语言转换 LLM ID（空时跟随会话）",
-            "default": ""
+            "hint": "只填写服务商支持的字段，不能覆盖已确认的 prompt 或画师串。"
           }
         }
       },
       "nai_native": {
         "name": "NAI 原生",
-        "description": "NovelAI 原生 JSON/ZIP 协议，独立 Tag 工作流。",
-        "hint": "若服务商只在 Chat 返回图片，请改用 OpenAI Chat 图模板。",
+        "description": "原生 JSON/ZIP 协议；文生图及原生参考图使用 /ai/generate-image。",
         "items": {
           "id": {
             "type": "string",
@@ -2292,9 +2251,9 @@
           },
           "base_url": {
             "type": "string",
-            "description": "Base URL",
-            "hint": "可填 https://api.example.com 或 https://api.example.com/v1（会自动规范化为包含 /v1）。",
-            "default": ""
+            "description": "API 根地址",
+            "default": "",
+            "hint": "填写原生接口根地址；后端直接追加 /ai/generate-image，不会自动补 /v1。不要填写 /v1/images/generations。"
           },
           "api_keys": {
             "type": "list",
@@ -2305,32 +2264,22 @@
           "model": {
             "type": "string",
             "description": "模型名称",
-            "default": "nai-diffusion-4-5-full"
-          },
-          "supports_edit": {
-            "type": "bool",
-            "description": "支持改图 (/v1/images/edits)",
-            "default": true
+            "default": "nai-diffusion-4-5-full",
+            "hint": "以服务商实际模型名称为准，不同协议的模型别名不一定相同。"
           },
           "timeout": {
             "type": "int",
-            "description": "超时(秒)",
+            "description": "请求超时（秒）",
             "default": 120
-          },
-          "max_retries": {
-            "type": "int",
-            "description": "最大重试次数",
-            "default": 2
           },
           "proxy_url": {
             "type": "string",
             "description": "代理地址（可选）",
-            "hint": "如果 SDK 不支持，请使用系统代理环境变量。",
             "default": ""
           },
           "default_size": {
             "type": "string",
-            "description": "默认输出尺寸",
+            "description": "默认图片尺寸",
             "default": "832x1216",
             "options": [
               "832x1216",
@@ -2342,41 +2291,26 @@
               "1024x1536"
             ]
           },
-          "extra_body": {
-            "type": "object",
-            "description": "额外请求体（高级）",
-            "items": {},
-            "default": {}
-          },
-          "nai_artist": {
-            "type": "string",
-            "description": "默认画师串",
-            "default": ""
-          },
-          "nai_prompt_prefix": {
-            "type": "string",
-            "description": "默认前缀 Tag",
-            "default": ""
-          },
-          "negative_prompt": {
-            "type": "string",
-            "description": "默认负面 Tag",
-            "default": ""
-          },
-          "nai_llm_provider_id": {
-            "type": "string",
-            "description": "自然语言转换 LLM ID（空时跟随会话）",
-            "default": ""
-          },
           "nai_reference_mode": {
             "type": "string",
-            "description": "参考图模式",
+            "description": "原生参考图模式",
             "default": "img2img",
             "options": [
               "img2img",
               "character",
               "vibe"
-            ]
+            ],
+            "hint": "仅用于有参考图的请求；纯文生图不需要选择 text。"
+          },
+          "nai_strength": {
+            "type": "float",
+            "description": "参考图强度",
+            "default": 0.6
+          },
+          "nai_vibe_information": {
+            "type": "float",
+            "description": "Vibe 信息提取",
+            "default": 1.0
           },
           "nai_sampler": {
             "type": "string",
@@ -2388,6 +2322,21 @@
               "k_dpmpp_2m"
             ]
           },
+          "num_inference_steps": {
+            "type": "int",
+            "description": "采样步数",
+            "default": 28
+          },
+          "guidance_scale": {
+            "type": "float",
+            "description": "提示词引导（Scale）",
+            "default": 5.0
+          },
+          "nai_cfg": {
+            "type": "float",
+            "description": "CFG Rescale",
+            "default": 0.0
+          },
           "nai_noise_schedule": {
             "type": "string",
             "description": "噪声调度",
@@ -2397,30 +2346,119 @@
               "native"
             ]
           },
+          "seed": {
+            "type": "string",
+            "description": "随机种子",
+            "default": "",
+            "hint": "留空随机；范围 0–4294967295。"
+          }
+        }
+      },
+      "nai_gateway": {
+        "name": "NAI GET 网关",
+        "description": "GET /generate 协议，与原生和 OpenAI Images 不互通。",
+        "items": {
+          "id": {
+            "type": "string",
+            "description": "服务商 ID（唯一）",
+            "default": "nai_gateway"
+          },
+          "label": {
+            "type": "string",
+            "description": "显示名称（可选）",
+            "default": ""
+          },
+          "base_url": {
+            "type": "string",
+            "description": "API 根地址",
+            "default": "",
+            "hint": "填写 GET 网关根地址；将直接追加“生成路径”，不补 /v1。仅适用于提供 tag/artist 参数的 GET 网关。"
+          },
+          "api_keys": {
+            "type": "list",
+            "description": "API Key 池",
+            "default": [],
+            "obvious_hint": true
+          },
+          "model": {
+            "type": "string",
+            "description": "模型名称",
+            "default": "nai-diffusion-4-5-full",
+            "hint": "以服务商实际模型名称为准，不同协议的模型别名不一定相同。"
+          },
+          "timeout": {
+            "type": "int",
+            "description": "请求超时（秒）",
+            "default": 120
+          },
+          "proxy_url": {
+            "type": "string",
+            "description": "代理地址（可选）",
+            "default": ""
+          },
+          "default_size": {
+            "type": "string",
+            "description": "默认图片尺寸",
+            "default": "832x1216",
+            "options": [
+              "832x1216",
+              "1216x832",
+              "1024x1024",
+              "1152x896",
+              "896x1152",
+              "1536x1024",
+              "1024x1536"
+            ]
+          },
+          "generate_path": {
+            "type": "string",
+            "description": "生成路径",
+            "default": "/generate"
+          },
+          "nai_auth_mode": {
+            "type": "string",
+            "description": "鉴权模式",
+            "default": "token",
+            "options": [
+              "token",
+              "bearer"
+            ]
+          },
+          "nai_sampler": {
+            "type": "string",
+            "description": "采样器",
+            "default": ""
+          },
           "num_inference_steps": {
             "type": "int",
             "description": "采样步数",
             "default": 28
           },
           "guidance_scale": {
-            "type": "int",
-            "description": "提示词引导",
-            "default": 5
-          },
-          "nai_strength": {
             "type": "float",
-            "description": "参考图强度",
-            "default": 0.6
-          },
-          "nai_vibe_information": {
-            "type": "int",
-            "description": "Vibe 信息提取",
-            "default": 1
+            "description": "提示词引导（Scale）",
+            "default": 5.0
           },
           "nai_cfg": {
-            "type": "int",
-            "description": "CFG Rescale",
-            "default": 0
+            "type": "string",
+            "description": "CFG 参数（按网关要求）",
+            "default": ""
+          },
+          "nai_noise_schedule": {
+            "type": "string",
+            "description": "噪声调度",
+            "default": ""
+          },
+          "seed": {
+            "type": "string",
+            "description": "随机种子",
+            "default": ""
+          },
+          "extra_body": {
+            "type": "object",
+            "description": "额外查询参数（高级）",
+            "default": {},
+            "items": {}
           }
         }
       }

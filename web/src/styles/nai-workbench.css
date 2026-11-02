@@ -1,0 +1,81 @@
+.nai-workbench { --nai-accent: var(--primary-color); display: grid; gap: 22px; max-width: 1440px; margin: 0 auto; padding-bottom: 24px; }
+.nai-workbench *, .nai-workbench *::before, .nai-workbench *::after { box-sizing: border-box; }
+.nai-hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 6px 0 4px; }
+.nai-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--nai-accent); font-size: 11px; font-weight: 750; letter-spacing: 2px; }
+.nai-hero h1 { margin: 12px 0 10px; color: var(--text-color); font-size: clamp(23px, 2.6vw, 34px); font-weight: 750; letter-spacing: -.8px; line-height: 1.4; }
+.nai-hero p, .nai-caption { margin: 0; color: var(--text-color-lighten); font-size: 13px; line-height: 1.8; }
+.nai-hero-badge { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; border: 1px solid var(--border-color); border-radius: 999px; padding: 10px 15px; color: var(--nai-accent); background: var(--card-color); font-size: 12px; }
+.nai-steps { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; color: var(--text-color-lighten); font-size: 12px; }
+.nai-steps > span { display: inline-flex; align-items: center; gap: 8px; }
+.nai-steps b { color: var(--nai-accent); font-size: 11px; letter-spacing: 1px; }
+.nai-card { min-width: 0; padding: 24px; border: 1px solid var(--border-color); border-radius: 18px; background: var(--card-color); box-shadow: 0 4px 18px var(--shadow-color); }
+.nai-connection { display: grid; grid-template-columns: minmax(160px, .8fr) minmax(180px, 1fr) minmax(180px, 1fr); align-items: center; gap: 24px; padding-top: 18px; padding-bottom: 18px; }
+.nai-connection-label { display: flex; align-items: center; gap: 12px; color: var(--nai-accent); }
+.nai-connection-label > span { display: grid; gap: 5px; color: var(--text-color); font-size: 13px; font-weight: 650; }
+.nai-connection-label small { color: var(--text-color-lighten); font-size: 11px; font-weight: 400; }
+.nai-model { display: grid; gap: 6px; min-width: 0; padding-left: 20px; border-left: 1px solid var(--border-color); }
+.nai-model > span { color: var(--nai-accent); font-size: 11px; }
+.nai-model strong { overflow-wrap: anywhere; color: var(--text-color); font-size: 12px; font-weight: 550; }
+.nai-workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(285px, 340px); align-items: start; gap: 22px; }
+.nai-editor-column { display: grid; gap: 20px; min-width: 0; }
+.nai-card-heading, .nai-card-heading > div { display: flex; align-items: center; gap: 9px; }
+.nai-card-heading { justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.nai-card-heading > div > svg { color: var(--nai-accent); }
+.nai-card-heading h2 { margin: 0; color: var(--text-color); font-size: 15px; font-weight: 700; }
+.nai-card-heading > span { color: var(--text-color-lighten); font-size: 10px; }
+.nai-workbench .nai-field { display: grid; gap: 9px; min-width: 0; }
+.nai-field > span { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--text-color); font-size: 12px; font-weight: 600; }
+.nai-field > span > small { color: var(--text-color-lighten); font-size: 10px; font-weight: 400; letter-spacing: .3px; }
+.nai-workbench .nai-field textarea, .nai-workbench .nai-field input, .nai-workbench .nai-field select { width: 100%; min-width: 0; margin: 0; padding: 11px 13px; border: 1px solid var(--border-color); border-radius: 10px; outline: none; background: var(--surface-muted); color: var(--text-color); font: inherit; font-size: 12px; line-height: 1.65; transition: border-color .16s, box-shadow .16s; }
+.nai-workbench .nai-field select { min-height: 42px; padding-right: 28px; }
+.nai-workbench .nai-field textarea { resize: vertical; min-height: 78px; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.85; }
+.nai-workbench .nai-field textarea::placeholder, .nai-workbench .nai-field input::placeholder { color: var(--text-color-lighten); opacity: .65; }
+.nai-workbench .nai-field textarea:focus, .nai-workbench .nai-field input:focus, .nai-workbench .nai-field select:focus { border-color: var(--nai-accent); box-shadow: 0 0 0 3px var(--primary-color-lighten); }
+.nai-field em { color: var(--text-color-lighten); font-size: 10px; font-style: normal; line-height: 1.7; }
+.nai-tag-editor { display: grid; gap: 20px; }
+.nai-tag-editor .nai-card-heading { margin-bottom: 0; }
+.nai-workbench .nai-artist-field textarea { border-left: 3px solid var(--nai-accent); }
+.nai-workbench .nai-positive-field textarea { min-height: 190px; }
+.nai-secondary-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.nai-presets > .nai-caption, .nai-converter > .nai-caption { margin-bottom: 16px; }
+.nai-preset-controls, .nai-preset-save, .nai-convert-controls { display: flex; align-items: end; gap: 10px; }
+.nai-preset-controls .nai-field, .nai-preset-save .nai-field, .nai-convert-controls .nai-field { flex: 1; }
+.nai-preset-save { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-color); flex-wrap: wrap; }
+.nai-legacy { margin-top: 14px; color: var(--text-color-lighten); font-size: 11px; line-height: 1.8; }
+.nai-legacy summary { cursor: pointer; }
+.nai-legacy p { margin: 8px 0; }
+.nai-button, .nai-icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex-shrink: 0; min-height: 42px; padding: 10px 14px; border: 1px solid transparent; border-radius: 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; transition: opacity .16s, transform .16s, background .16s; }
+.nai-button:hover:not(:disabled), .nai-icon-button:hover:not(:disabled) { transform: translateY(-1px); }
+.nai-button:disabled, .nai-icon-button:disabled { cursor: not-allowed; opacity: .45; }
+.nai-button-soft { background: var(--primary-color-lighten); color: var(--nai-accent); border-color: var(--border-color); }
+.nai-button-solid { color: #fff; background: var(--nai-accent); }
+.nai-icon-button { padding: 9px; color: var(--text-color-lighten); background: transparent; border-color: var(--border-color); }
+.nai-converter .nai-convert-controls { margin-top: 16px; }
+.nai-card-heading .nai-status-pill { padding: 4px 9px; border-radius: 999px; background: var(--primary-color-lighten); color: var(--nai-accent); font-size: 10px; }
+.nai-conversion-draft { margin-top: 18px; padding: 16px; border: 1px dashed var(--nai-accent); border-radius: 12px; background: var(--surface-muted); }
+.nai-draft-heading { display: flex; align-items: center; justify-content: space-between; }
+.nai-draft-heading strong { display: flex; gap: 7px; align-items: center; color: var(--nai-accent); font-size: 12px; }
+.nai-draft-heading .nai-icon-button { min-height: 28px; padding: 5px; border: 0; }
+.nai-conversion-draft pre { margin: 12px 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-color); font-size: 12px; line-height: 1.8; }
+.nai-review-column { position: sticky; top: calc(var(--topbar-height) + 22px); min-width: 0; }
+.nai-review { display: grid; gap: 18px; }
+.nai-review .nai-card-heading { margin: 0; }
+.nai-review-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
+.nai-review-meta > span { display: grid; gap: 6px; color: var(--text-color-lighten); font-size: 10px; }
+.nai-review-meta strong { overflow-wrap: anywhere; color: var(--text-color); font-size: 12px; font-weight: 600; }
+.nai-review-prompt > span, .nai-review-negative > span { color: var(--text-color-lighten); font-size: 10px; }
+.nai-review-prompt pre { margin: 8px 0 0; min-height: 140px; max-height: 320px; overflow: auto; padding: 13px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--surface-muted); color: var(--text-color); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 11px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
+.nai-review-negative p { margin: 6px 0 0; color: var(--text-color-lighten); font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; max-height: 140px; overflow: auto; }
+.nai-review-check { display: flex; align-items: flex-start; gap: 9px; padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--surface-muted); color: var(--text-color-lighten); font-size: 11px; line-height: 1.75; cursor: pointer; }
+.nai-review-check input { margin: 3px 0 0; accent-color: var(--nai-accent); flex-shrink: 0; }
+.nai-review-check.is-reviewed { border-color: var(--nai-accent); color: var(--nai-accent); background: var(--primary-color-lighten); }
+.nai-generate { width: 100%; min-height: 46px; }
+.nai-submit-note { display: flex; justify-content: center; align-items: center; gap: 5px; margin-top: -9px; color: var(--text-color-lighten); font-size: 10px; }
+.nai-tasks-link { display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--nai-accent); font-size: 11px; text-decoration: none; }
+.nai-feedback { display: flex; align-items: center; gap: 8px; padding: 13px 16px; margin: 0; border: 1px solid var(--border-color); border-radius: 10px; background: var(--card-color); color: var(--text-color); font-size: 12px; line-height: 1.7; }
+.nai-spinning { animation: nai-spin 1s linear infinite; }
+@keyframes nai-spin { to { transform: rotate(360deg); } }
+@media (max-width: 1150px) { .nai-workspace-grid { grid-template-columns: minmax(0, 1fr) minmax(250px, 290px); gap: 16px; } .nai-card { padding: 18px; } .nai-connection { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; } .nai-connection-label { grid-column: 1 / -1; } .nai-hero-badge { display: none; } }
+@media (max-width: 850px) { .nai-workspace-grid { grid-template-columns: minmax(0, 1fr); } .nai-review-column { position: static; } .nai-review-prompt pre { min-height: 90px; max-height: 240px; } }
+@media (max-width: 520px) { .nai-workbench { gap: 16px; } .nai-hero h1 { font-size: 23px; } .nai-hero p { font-size: 12px; } .nai-steps { gap: 10px; font-size: 10px; } .nai-steps > svg { display: none; } .nai-steps > span { gap: 5px; } .nai-card { padding: 16px; border-radius: 14px; } .nai-connection { grid-template-columns: minmax(0, 1fr); } .nai-model { padding: 0; border: 0; } .nai-secondary-fields { grid-template-columns: minmax(0, 1fr); } .nai-preset-controls, .nai-convert-controls, .nai-preset-save { flex-wrap: wrap; } .nai-preset-controls > .nai-field, .nai-convert-controls > .nai-field, .nai-preset-save > .nai-field { flex-basis: 100%; } .nai-convert-controls > .nai-button { width: 100%; } .nai-field > span > small { font-size: 9px; } .nai-card-heading > span { font-size: 9px; } }
+@media (prefers-reduced-motion: reduce) { .nai-button, .nai-icon-button, .nai-field input, .nai-field textarea, .nai-field select { transition: none; } .nai-spinning { animation-duration: 2s; } }

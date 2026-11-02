@@ -1,0 +1,306 @@
+{
+  "nai_native": {
+    "name": "NAI 原生",
+    "description": "原生 JSON/ZIP 协议；文生图及原生参考图使用 /ai/generate-image。",
+    "items": {
+      "id": {
+        "type": "string",
+        "description": "服务商 ID（唯一）",
+        "default": "nai_native"
+      },
+      "label": {
+        "type": "string",
+        "description": "显示名称（可选）",
+        "default": ""
+      },
+      "base_url": {
+        "type": "string",
+        "description": "API 根地址",
+        "default": "",
+        "hint": "填写原生接口根地址；后端直接追加 /ai/generate-image，不会自动补 /v1。不要填写 /v1/images/generations。"
+      },
+      "api_keys": {
+        "type": "list",
+        "description": "API Key 池",
+        "default": [],
+        "obvious_hint": true
+      },
+      "model": {
+        "type": "string",
+        "description": "模型名称",
+        "default": "nai-diffusion-4-5-full",
+        "hint": "以服务商实际模型名称为准，不同协议的模型别名不一定相同。"
+      },
+      "timeout": {
+        "type": "int",
+        "description": "请求超时（秒）",
+        "default": 120
+      },
+      "proxy_url": {
+        "type": "string",
+        "description": "代理地址（可选）",
+        "default": ""
+      },
+      "default_size": {
+        "type": "string",
+        "description": "默认图片尺寸",
+        "default": "832x1216",
+        "options": [
+          "832x1216",
+          "1216x832",
+          "1024x1024",
+          "1152x896",
+          "896x1152",
+          "1536x1024",
+          "1024x1536"
+        ]
+      },
+      "nai_reference_mode": {
+        "type": "string",
+        "description": "原生参考图模式",
+        "default": "img2img",
+        "options": [
+          "img2img",
+          "character",
+          "vibe"
+        ],
+        "hint": "仅用于有参考图的请求；纯文生图不需要选择 text。"
+      },
+      "nai_strength": {
+        "type": "float",
+        "description": "参考图强度",
+        "default": 0.6
+      },
+      "nai_vibe_information": {
+        "type": "float",
+        "description": "Vibe 信息提取",
+        "default": 1.0
+      },
+      "nai_sampler": {
+        "type": "string",
+        "description": "采样器",
+        "default": "k_euler_ancestral",
+        "options": [
+          "k_euler_ancestral",
+          "k_euler",
+          "k_dpmpp_2m"
+        ]
+      },
+      "num_inference_steps": {
+        "type": "int",
+        "description": "采样步数",
+        "default": 28
+      },
+      "guidance_scale": {
+        "type": "float",
+        "description": "提示词引导（Scale）",
+        "default": 5.0
+      },
+      "nai_cfg": {
+        "type": "float",
+        "description": "CFG Rescale",
+        "default": 0.0
+      },
+      "nai_noise_schedule": {
+        "type": "string",
+        "description": "噪声调度",
+        "default": "karras",
+        "options": [
+          "karras",
+          "native"
+        ]
+      },
+      "seed": {
+        "type": "string",
+        "description": "随机种子",
+        "default": "",
+        "hint": "留空随机；范围 0–4294967295。"
+      }
+    }
+  },
+  "nai_openai_images": {
+    "name": "NAI OpenAI 兼容",
+    "description": "OpenAI Images 协议；不提供原生采样器和 Vibe 等未映射字段。",
+    "items": {
+      "id": {
+        "type": "string",
+        "description": "服务商 ID（唯一）",
+        "default": "nai_openai"
+      },
+      "label": {
+        "type": "string",
+        "description": "显示名称（可选）",
+        "default": ""
+      },
+      "base_url": {
+        "type": "string",
+        "description": "API 根地址",
+        "default": "",
+        "hint": "填写 OpenAI Images 兼容入口，根地址或 /v1 均可；请求 /v1/images/generations，不是 NAI 原生接口。"
+      },
+      "api_keys": {
+        "type": "list",
+        "description": "API Key 池",
+        "default": [],
+        "obvious_hint": true
+      },
+      "model": {
+        "type": "string",
+        "description": "模型名称",
+        "default": "nai-diffusion-4-5-full",
+        "hint": "以服务商实际模型名称为准，不同协议的模型别名不一定相同。"
+      },
+      "timeout": {
+        "type": "int",
+        "description": "请求超时（秒）",
+        "default": 120
+      },
+      "proxy_url": {
+        "type": "string",
+        "description": "代理地址（可选）",
+        "default": ""
+      },
+      "default_size": {
+        "type": "string",
+        "description": "默认图片尺寸",
+        "default": "832x1216",
+        "options": [
+          "832x1216",
+          "1216x832",
+          "1024x1024",
+          "1152x896",
+          "896x1152",
+          "1536x1024",
+          "1024x1536"
+        ]
+      },
+      "max_retries": {
+        "type": "int",
+        "description": "最大重试次数",
+        "default": 0,
+        "hint": "0 表示不重试。请求失败可能已经被上游接收，请先核实任务状态。"
+      },
+      "supports_edit": {
+        "type": "bool",
+        "description": "服务商支持 Images 改图",
+        "default": false,
+        "hint": "仅在服务商明确支持 /v1/images/edits 时启用。"
+      },
+      "extra_body": {
+        "type": "object",
+        "description": "额外请求体（高级）",
+        "default": {},
+        "items": {},
+        "hint": "只填写服务商支持的字段，不能覆盖已确认的 prompt 或画师串。"
+      }
+    }
+  },
+  "nai_gateway": {
+    "name": "NAI GET 网关",
+    "description": "GET /generate 协议，与原生和 OpenAI Images 不互通。",
+    "items": {
+      "id": {
+        "type": "string",
+        "description": "服务商 ID（唯一）",
+        "default": "nai_gateway"
+      },
+      "label": {
+        "type": "string",
+        "description": "显示名称（可选）",
+        "default": ""
+      },
+      "base_url": {
+        "type": "string",
+        "description": "API 根地址",
+        "default": "",
+        "hint": "填写 GET 网关根地址；将直接追加“生成路径”，不补 /v1。仅适用于提供 tag/artist 参数的 GET 网关。"
+      },
+      "api_keys": {
+        "type": "list",
+        "description": "API Key 池",
+        "default": [],
+        "obvious_hint": true
+      },
+      "model": {
+        "type": "string",
+        "description": "模型名称",
+        "default": "nai-diffusion-4-5-full",
+        "hint": "以服务商实际模型名称为准，不同协议的模型别名不一定相同。"
+      },
+      "timeout": {
+        "type": "int",
+        "description": "请求超时（秒）",
+        "default": 120
+      },
+      "proxy_url": {
+        "type": "string",
+        "description": "代理地址（可选）",
+        "default": ""
+      },
+      "default_size": {
+        "type": "string",
+        "description": "默认图片尺寸",
+        "default": "832x1216",
+        "options": [
+          "832x1216",
+          "1216x832",
+          "1024x1024",
+          "1152x896",
+          "896x1152",
+          "1536x1024",
+          "1024x1536"
+        ]
+      },
+      "generate_path": {
+        "type": "string",
+        "description": "生成路径",
+        "default": "/generate"
+      },
+      "nai_auth_mode": {
+        "type": "string",
+        "description": "鉴权模式",
+        "default": "token",
+        "options": [
+          "token",
+          "bearer"
+        ]
+      },
+      "nai_sampler": {
+        "type": "string",
+        "description": "采样器",
+        "default": ""
+      },
+      "num_inference_steps": {
+        "type": "int",
+        "description": "采样步数",
+        "default": 28
+      },
+      "guidance_scale": {
+        "type": "float",
+        "description": "提示词引导（Scale）",
+        "default": 5.0
+      },
+      "nai_cfg": {
+        "type": "string",
+        "description": "CFG 参数（按网关要求）",
+        "default": ""
+      },
+      "nai_noise_schedule": {
+        "type": "string",
+        "description": "噪声调度",
+        "default": ""
+      },
+      "seed": {
+        "type": "string",
+        "description": "随机种子",
+        "default": ""
+      },
+      "extra_body": {
+        "type": "object",
+        "description": "额外查询参数（高级）",
+        "default": {},
+        "items": {}
+      }
+    }
+  }
+}

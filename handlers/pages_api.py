@@ -331,6 +331,10 @@ class PagesAPIMixin:
             if not provider:
                 raise ValueError("请选择 NAI 服务商")
             from ..core.nai_workflow import NaiWorkflow
+            if data.get("workbench") is True:
+                provider = {key: value for key, value in provider.items() if key not in {
+                    "nai_artist", "nai_prompt_prefix", "negative_prompt", "nai_llm_provider_id",
+                }}
             draft = await NaiWorkflow().prepare(
                 self.context, str(data.get("prompt") or ""), provider, json.loads(scope)[0],
                 force=True, llm_id=str(data.get("llm_provider_id") or ""),
@@ -975,7 +979,7 @@ class PagesAPIMixin:
             if not isinstance(document, dict):
                 raise ValueError("项目文档必须是对象")
             kind = str(data.get("kind") or "canvas").strip().lower()
-            if kind not in {"canvas", "gif", "design", "web_replica"}:
+            if kind not in {"canvas", "gif", "design", "web_replica", "nai_preset"}:
                 raise ValueError("不支持的项目类型")
             await self._validate_studio_project_document(scope, kind, document)
             item = await self.studio_projects.save(
@@ -1007,6 +1011,15 @@ class PagesAPIMixin:
             raise ValueError("项目文档无法序列化") from exc
 
         references: list[str] = []
+        if kind == "nai_preset":
+            allowed = {"version", "artist", "tags", "negative", "prefix", "llm_provider_id", "size"}
+            if set(document) - allowed or type(document.get("version")) is not int or document["version"] != 1:
+                raise ValueError("NAI 预设格式无效")
+            for key in allowed - {"version"}:
+                value = document.get(key, "")
+                if not isinstance(value, str) or len(value) > (160 if key in {"llm_provider_id", "size"} else 8000):
+                    raise ValueError(f"NAI 预设字段 {key} 无效或过长")
+            return
         if kind == "canvas":
             nodes = document.get("nodes", [])
             if not isinstance(nodes, list) or len(nodes) > 500:

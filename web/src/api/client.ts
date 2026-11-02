@@ -399,3 +399,12 @@ export async function prepareNaiPrompt(payload: Record<string, unknown>): Promis
   const result = await requireSuccess<any>(getBridge().apiPost("prepare_nai_prompt", payload));
   return result.draft;
 }
+
+export async function loadNaiPresets(scope: string): Promise<StudioProject[]> {
+  const result = await requireSuccess<{ items: StudioProject[] }>(getBridge().apiGet("get_projects", { scope, kind: "nai_preset" }));
+  return result.items;
+}
+
+export async function deleteNaiPreset(id: string, revision: number, scope: string): Promise<void> {
+  await requireSuccess(getBridge().apiPost("delete_project", { id, revision, scope }));
+}

@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
-import { PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
+import { NAI_TEMPLATE_DEFINITIONS, PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
 import {
   cancelTask,
   cancelStudioJob,
@@ -3157,6 +3157,9 @@ function PersonasView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
   );
 }
 
+type NaiTemplateField = { type: string; description: string; hint?: string; options?: string[]; default: unknown };
+const naiTemplateDefinitions = NAI_TEMPLATE_DEFINITIONS as unknown as Record<string, { items: Record<string, NaiTemplateField> }>;
+
 const providerSecretFields = new Set([
   "api_key", "api_keys", "apikey", "token", "access_token", "refresh_token", "cookie", "cookies",
   "cookie_list", "authorization", "password", "secret", "graphql_api_key", "third_party_token",
@@ -3190,7 +3193,7 @@ const providerSelectOptions: Record<string, Array<[string, string]>> = {
   xai_resolution: [["480p", "480p"], ["720p", "720p"], ["1080p", "1080p"]],
   xai_reference_mode: [["reference", "参考图"], ["image", "图片"], ["text", "纯文生"]],
   image_handling_method: [["auto", "自动"], ["data_uri", "Data URI"], ["astrbot", "AstrBot 文件服务"], ["third_party", "第三方文件服务"], ["free_public", "公共文件服务"]],
-  nai_reference_mode: [["img2img", "图生图"], ["character", "角色参考"], ["vibe", "Vibe"], ["text", "纯文生"]],
+  nai_reference_mode: [["img2img", "图生图"], ["character", "角色参考"], ["vibe", "Vibe"]],
   nai_auth_mode: [["token", "Token"], ["bearer", "Bearer"]],
   default_size: [["1024x1024", "1024×1024"], ["832x1216", "832×1216"], ["1216x832", "1216×832"], ["1152x896", "1152×896"], ["896x1152", "896×1152"], ["1536x1024", "1536×1024"], ["1024x1536", "1024×1536"], ["2048x2048", "2048×2048"], ["4096x4096", "4096×4096"]],
   default_resolution: [["1K", "1K"], ["2K", "2K"], ["4K", "4K"], ["1024x1024", "1024×1024"], ["2048x2048", "2048×2048"], ["4096x4096", "4096×4096"]],
@@ -3236,7 +3239,9 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   );
 
   function loadProvider(provider?: ProviderConfig) {
-    const next = provider ? { ...provider } : {};
+    const definitions = provider ? naiTemplateDefinitions[String(provider.__template_key || provider.__type || "")] : undefined;
+    const defaults = definitions ? Object.fromEntries(Object.entries(definitions.items).map(([key, field]) => [key, field.default])) : {};
+    const next = provider ? { ...defaults, ...provider } : {};
     setDraft(next);
     setRawJson(JSON.stringify(next, null, 2));
     const secrets: Record<string, { value: string; clear: boolean }> = {};
@@ -3271,18 +3276,27 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
 
   function renderField(key: string, value: unknown) {
     if (key === "label" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
-    const options = providerSelectOptions[key];
+    if (naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")] && ["nai_artist", "nai_prompt_prefix", "negative_prompt", "nai_llm_provider_id", "nai_translate_prompt"].includes(key)) return null;
+    const definition = naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")]?.items[key];
+    const fieldLabel = definition?.description || providerFieldLabel(key);
+    const options: Array<[string, string]> | undefined = definition?.options
+      ? definition.options.map((option) => [option, providerSelectOptions[key]?.find(([value]) => value === option)?.[1] || option])
+      : definition ? undefined : providerSelectOptions[key];
     const selectOptions = options && !options.some(([option]) => option === String(value ?? ""))
       ? [[String(value ?? ""), `${String(value ?? "")}（当前值）`], ...options] as Array<[string, string]>
       : options;
-    if (typeof value === "boolean") return <label className="provider-toggle" key={key}><input type="checkbox" checked={value} disabled={busy} onChange={(event) => updateField(key, event.target.checked)} /><span><strong>{providerFieldLabel(key)}</strong><small>{value ? "已启用" : "已关闭"}</small></span></label>;
-    if (selectOptions) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><select value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}>{selectOptions.map(([option, label]) => <option key={option} value={option}>{label}</option>)}</select></label>;
-    if (typeof value === "number") return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span><input type="number" value={value} disabled={busy} onChange={(event) => updateField(key, event.target.value === "" ? "" : Number(event.target.value))} /></label>;
-    if (Array.isArray(value)) return <label className="stack-field" key={key}><span>{providerFieldLabel(key)} <small>每行一项</small></span><textarea rows={Math.min(5, Math.max(2, value.length))} value={value.map(String).join("\n")} disabled={busy} onChange={(event) => updateField(key, event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>;
+    if (key === "nai_llm_provider_id") {
+      const choices = snapshot.config.astrbot_providers || [];
+      return <label className="stack-field" key={key}><span>{fieldLabel}</span><select value={String(value || "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}><option value="">跟随当前会话</option>{Boolean(value) && !choices.some((item) => item.id === value) && <option value={String(value)}>{String(value)}（当前值）</option>}{choices.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.model}</option>)}</select></label>;
+    }
+    if (typeof value === "boolean") return <label className="provider-toggle" key={key}><input type="checkbox" checked={value} disabled={busy} onChange={(event) => updateField(key, event.target.checked)} /><span><strong>{fieldLabel}</strong><small>{value ? "已启用" : "已关闭"}</small></span></label>;
+    if (selectOptions) return <label className="stack-field" key={key}><span title={definition?.hint}>{fieldLabel}</span><select value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}>{selectOptions.map(([option, label]) => <option key={option} value={option}>{label}</option>)}</select></label>;
+    if (typeof value === "number") return <label className="stack-field" key={key}><span title={definition?.hint}>{fieldLabel}</span><input type="number" step={definition?.type === "float" ? "any" : 1} value={value} disabled={busy} onChange={(event) => updateField(key, event.target.value === "" ? "" : Number(event.target.value))} /></label>;
+    if (Array.isArray(value)) return <label className="stack-field" key={key}><span>{fieldLabel} <small>每行一项</small></span><textarea rows={Math.min(5, Math.max(2, value.length))} value={value.map(String).join("\n")} disabled={busy} onChange={(event) => updateField(key, event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>;
     if (value && typeof value === "object") return null;
     const multiline = /prompt|template|body|instruction|header|nai_artist/i.test(key);
     const inputType = /url|path|endpoint/i.test(key) ? "url" : "text";
-    return <label className="stack-field" key={key}><span>{providerFieldLabel(key)}</span>{multiline
+    return <label className="stack-field" key={key}><span title={definition?.hint}>{fieldLabel}</span>{multiline
       ? <textarea rows={3} value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)} />
       : <input type={inputType} value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)} />}</label>;
   }
@@ -3381,6 +3395,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
       <div className="provider-workspace">
         {selected ? <>
         <div className="provider-detail-heading"><div><span className="section-kicker">{selected.__template_key || selected.__type || "PROVIDER"}</span><h2>{selected.id}</h2><p>{selected.model || "请填写模型名称"}</p></div><span className={providerIsConfigured(selected) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(selected) ? "配置完整，未测试连通性" : "需要补充配置"}</span></div>
+          {naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")] && <p className="capability-notice">这里仅配置服务商连接和协议参数。画师串、前缀、正负面 Tag 及转换 LLM 请到 <a href="#/nai">NAI 工作台</a> 编辑并保存为提示词预设；已有旧配置保持保留，可在工作台手动导入。</p>}
           <div className="provider-field-grid">{Object.entries(draft).map(([key, value]) => renderField(key, value))}</div>
           {Object.keys(secretDraft).length > 0 && <section className="provider-secret-section"><div className="subsection-heading"><div><h3>访问凭据</h3><p>现有密钥不会回显；留空保持不变，输入内容将替换。</p></div></div><div className="provider-secret-grid">{Object.entries(secretDraft).map(([key, item]) => <label className="stack-field" key={key}><span>{providerFieldLabel(key)}{selected[`${key}_configured`] ? <em className="credential-present">已保存</em> : <em className="credential-missing">未设置</em>}</span>{key === "api_keys"
             ? <textarea rows={3} value={item.value} disabled={busy || item.clear} placeholder={selected.api_keys_configured ? "留空以保留现有密钥；多个密钥每行一项" : "每行填写一个 API Key"} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} />

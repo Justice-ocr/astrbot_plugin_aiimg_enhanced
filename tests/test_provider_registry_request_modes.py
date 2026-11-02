@@ -290,6 +290,22 @@ class ProviderRegistryRequestModeTests(unittest.TestCase):
         self.assertFalse(backend.kwargs["enable_stream_generate"])
         self.assertTrue(backend.kwargs["enable_stream_edit"])
 
+    def test_nai_compat_defaults_and_zero_retries_are_respected(self):
+        mod = _load_module()
+        for template in ("nai_openai_images", "openai_images", "gemini_openai_images"):
+            registry = mod.ProviderRegistry(
+                config={"providers": [{"id": "nai", "__template_key": template,
+                                      "base_url": "https://fixture.invalid/v1",
+                                      "model": "nai-diffusion-4-5-full", "api_keys": ["fake"],
+                                      "max_retries": 0}]},
+                imgr=object(), data_dir=Path("/tmp"),
+            )
+            backend = registry.get_backend("nai")
+            self.assertEqual(backend.kwargs["max_retries"], 0)
+            if template == "nai_openai_images":
+                self.assertEqual(backend.kwargs["default_size"], "832x1216")
+                self.assertFalse(backend.kwargs["supports_edit"])
+
     def test_validate_rejects_invalid_request_mode(self):
         mod = _load_module()
         registry = mod.ProviderRegistry(
