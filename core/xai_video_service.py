@@ -39,6 +39,22 @@ class XaiVideoService(OpenAIVideoService):
         return f"{self._api_root()}/videos/generations"
 
     @staticmethod
+    def _submission_id(data):
+        return str(data.get("request_id") or "").strip()
+
+    @staticmethod
+    def _poll_data(data):
+        return data
+
+    @staticmethod
+    def _reference_payload(refs, mode):
+        if not refs:
+            return {}
+        if mode == "image":
+            return {"image": {"url": refs[0]}}
+        return {"reference_images": [{"url": url} for url in refs]}
+
+    @staticmethod
     def _result_url(data):
         # Check moderation before considering alternative gateway URL fields.
         containers = [data]
@@ -97,11 +113,7 @@ class XaiVideoService(OpenAIVideoService):
         }
         if selected_ratio != "auto":
             payload["aspect_ratio"] = selected_ratio
-        if refs:
-            if selected_mode == "image":
-                payload["image"] = {"url": refs[0]}
-            else:
-                payload["reference_images"] = [{"url": url} for url in refs]
+        payload.update(self._reference_payload(refs, selected_mode))
         # Do not automatically retry a potentially billable submission.
         try:
             async with self._client(timeout=float(self.timeout)) as client:
@@ -122,7 +134,7 @@ class XaiVideoService(OpenAIVideoService):
             raise VideoSubmissionUnknownError(
                 "xAI 视频提交成功但响应无法解析，不会自动重试"
             ) from exc
-        request_id = str(data.get("request_id") or "").strip()
+        request_id = self._submission_id(data) if isinstance(data, dict) else ""
         if not request_id:
             raise VideoSubmissionUnknownError(
                 "xAI 视频提交成功但响应缺少 request_id，不会自动重试"
@@ -174,6 +186,7 @@ class XaiVideoService(OpenAIVideoService):
             consecutive_errors = 0
             if not isinstance(data, dict):
                 raise RuntimeError(f"xAI 查询响应不是 JSON 对象, request_id={request_id}")
+            data = self._poll_data(data)
             status = str(data.get("status") or "").strip().lower()
             if status in {"failed", "expired", "cancelled", "canceled"}:
                 raise RuntimeError(f"xAI 视频任务 {status}: {self._error_detail(data)}")

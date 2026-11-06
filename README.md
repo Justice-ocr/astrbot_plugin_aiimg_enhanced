@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>AstrBot &gt;= 4.16.0, &lt; 5</strong>
-  · v4.13.0
+  · v4.13.1
   · MIT
   · <a href="https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced">GitHub 仓库</a>
 </p>
@@ -258,6 +258,18 @@ Web **任务管理** 展示图片、批量与后台视频任务的会话、用�
 - 配置页面参考：[astrbot_plugin_omnidraw](https://github.com/diaomin66/astrbot_plugin_omnidraw)，作者雪碧bir
 
 本项目是在原有工作基础上的持续增强与维护，感谢相关作者和社区贡献者。
+
+## Xpivot / Muse 视频（Grok 映射）
+
+添加服务商 → 视频 → **xpivot_video · Xpivot / Muse 视频（Grok 映射）**，填入自己的 API 密钥。默认根地址 `https://www.xpivot.top`，模型 `grok-imagine-video-1.5`，时长 5 秒、720p、16:9；这些参数已实测完成生成。将该服务商加入设置页的视频调用链，或在创作页明确选择它。
+
+- 默认“自动参考”支持无图文生视频、单图和多图：1 张通过 `image.url` 提交，2～7 张通过 `reference_images` 提交；支持本地图片转 Data URI，不需要图床。
+- 参考图上限 **7 张**；8 张在上传/提交前拦截。仅单图模式限制为 1 张；纯文生模式不接受参考图。
+- 专用适配使用 `POST /v1/video/generations` 提交，读取 `id/task_id`，并通过 `GET /v1/video/generations/{id}` 轮询完整结果；兼容 `result_url` 和嵌套 `data.video.url`。原生 xAI/OpenAI Videos 模板不能直接替代此适配。
+- 提交响应丢失不自动重提；已接受任务保留上游 ID，可继续查询。不会因轮询故障再次提交收费任务。
+- 本站实测 7 张任务可完成生成，但生成画面可能遗漏部分参考内容，不保证每张内容都完整出现。
+
+视频模板入口现仅保留 **Agnes、OpenAI Videos、自定义视频、Xpivot / Muse**，AstrBot 配置与 Web 表单保持一致。旧 xAI、MiniMax H3、Grok、Grok2API、Flow2API 视频配置不会被自动删除，仍可运行和编辑，但不再提供新建模板。已配置服务商按 **图片 / 视频 / NAI** 分组显示。
 
 ## NAI 独立工作流
 

@@ -10,6 +10,7 @@ VERIFIED_DATE = "2026-09-22"
 
 
 _PROTOCOLS: dict[str, tuple[str, str]] = {
+    "xpivot_video": ("xpivot-muse-video", "2026-11-06"),
     "xai_video": ("xai-videos-v1", VERIFIED_DATE),
     "openai_video": ("openai-compatible-videos", VERIFIED_DATE),
     "minimax_h3_video": ("minimax-video-generation-v2", VERIFIED_DATE),
@@ -62,6 +63,7 @@ _IMAGE_TEMPLATES = {
 }
 
 _VIDEO_TEMPLATES = {
+    "xpivot_video",
     "xai_video",
     "agnes_video",
     "minimax_h3_video",
@@ -408,8 +410,15 @@ def _apply_video_capabilities(
         "unknown" if template_key == "custom_video" else "unsupported"
     )
 
-    if template_key == "xai_video":
+    if template_key in {"xai_video", "xpivot_video"}:
         _apply_xai_video(result, provider)
+        if template_key == "xpivot_video":
+            # Only advertise the dimensions actually verified on this mapping.
+            for mode in result["references"]["modes"]:
+                mode["resolutions"] = ["720p"]
+            result["parameters"]["resolutions"] = _enum_parameter(["720p"], provider.get("xai_resolution", "720p"))
+            result["parameters"]["duration"] = _range_parameter(1, 15, provider.get("duration", 5))
+            result["references"]["modes"][2]["label"] = "自动参考（单图或多图，最多7张）"
     elif template_key == "openai_video":
         _apply_openai_video(result, provider)
     elif template_key == "minimax_h3_video":

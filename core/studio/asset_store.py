@@ -125,6 +125,7 @@ class StudioAssetStore:
             conn = self._connect()
             try:
                 with conn:
+                    conn.execute("BEGIN IMMEDIATE")
                     existing = conn.execute(
                         "SELECT * FROM assets WHERE scope=? AND content_hash=?",
                         (scope, digest),

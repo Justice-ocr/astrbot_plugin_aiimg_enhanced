@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
-import { NAI_TEMPLATE_DEFINITIONS, PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
+import { inferProviderType, VIDEO_TEMPLATE_DEFINITIONS, NAI_TEMPLATE_DEFINITIONS, PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
 import {
   cancelTask,
   cancelStudioJob,
@@ -93,7 +93,7 @@ import type {
   ProviderConfig,
 } from "../api/contracts";
 import { readRoute, routeHref, routes, type RouteId } from "./routes";
-import { NaiWorkbench } from "../features/nai/NaiWorkbench";
+import { isNaiProvider, NaiWorkbench } from "../features/nai/NaiWorkbench";
 import { PresetEditor } from "../features/prompts/PresetEditor";
 import { buildStaticPreview } from "../features/design/static-preview";
 import brandIcon from "../assets/yukina-favicon.svg?inline";
@@ -272,7 +272,7 @@ function CreateView({
   const referenceOptions = selected?.references.modes.filter(
     (item) => item.status === "supported",
   ) || [];
-  const activeReferenceMode = referenceOptions.find((item) => item.id === referenceMode);
+  const activeReferenceMode = referenceOptions.find((item) => item.id === (referenceMode || selected?.references.active_mode));
   const referenceLimit = Math.min(9, activeReferenceMode?.max_images ?? 9);
   const presetFeature = mode === "image" ? "draw" : mode === "video" ? "video" : "edit";
   const presets = (snapshot.config.features?.[presetFeature]?.presets || []).flatMap((value) => {
@@ -3159,13 +3159,14 @@ function PersonasView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
 
 type NaiTemplateField = { type: string; description: string; hint?: string; options?: string[]; default: unknown };
 const naiTemplateDefinitions = NAI_TEMPLATE_DEFINITIONS as unknown as Record<string, { items: Record<string, NaiTemplateField> }>;
+const videoTemplateDefinitions = VIDEO_TEMPLATE_DEFINITIONS as unknown as Record<string, { items: Record<string, NaiTemplateField> }>;
 
 const providerSecretFields = new Set([
   "api_key", "api_keys", "apikey", "token", "access_token", "refresh_token", "cookie", "cookies",
   "cookie_list", "authorization", "password", "secret", "graphql_api_key", "third_party_token",
 ]);
 const providerFieldLabels: Record<string, string> = {
-  id: "服务商 ID", api_url: "API 地址", base_url: "API 地址", model: "模型名称",
+  id: "服务商 ID", api_keys: "API 密钥", api_url: "API 地址", base_url: "API 地址", model: "模型名称",
   timeout: "请求超时（秒）", max_retries: "最大重试次数", use_proxy: "启用代理", proxy_url: "代理地址",
   default_size: "默认图片尺寸", default_resolution: "默认分辨率", size: "默认尺寸", resolution: "默认分辨率",
   generate_request_mode: "文生图请求模式", edit_request_mode: "改图请求模式", video_request_mode: "视频请求模式",
@@ -3191,7 +3192,7 @@ const providerSelectOptions: Record<string, Array<[string, string]>> = {
   ratio: [["16:9", "16:9"], ["9:16", "9:16"], ["1:1", "1:1"], ["4:3", "4:3"], ["3:4", "3:4"], ["adaptive", "自适应"]],
   aspect_ratio: [["auto", "自动"], ["16:9", "16:9"], ["9:16", "9:16"], ["1:1", "1:1"], ["4:3", "4:3"], ["3:4", "3:4"], ["3:2", "3:2"], ["2:3", "2:3"]],
   xai_resolution: [["480p", "480p"], ["720p", "720p"], ["1080p", "1080p"]],
-  xai_reference_mode: [["reference", "参考图"], ["image", "图片"], ["text", "纯文生"]],
+  xai_reference_mode: [["reference", "自动参考（单图或多图，最多7张）"], ["image", "仅单图"], ["text", "纯文生"]],
   image_handling_method: [["auto", "自动"], ["data_uri", "Data URI"], ["astrbot", "AstrBot 文件服务"], ["third_party", "第三方文件服务"], ["free_public", "公共文件服务"]],
   nai_reference_mode: [["img2img", "图生图"], ["character", "角色参考"], ["vibe", "Vibe"]],
   nai_auth_mode: [["token", "Token"], ["bearer", "Bearer"]],
@@ -3239,7 +3240,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   );
 
   function loadProvider(provider?: ProviderConfig) {
-    const definitions = provider ? naiTemplateDefinitions[String(provider.__template_key || provider.__type || "")] : undefined;
+    const definitions = provider ? (naiTemplateDefinitions[String(provider.__template_key || provider.__type || "")] || videoTemplateDefinitions[String(provider.__template_key || provider.__type || "")]) : undefined;
     const defaults = definitions ? Object.fromEntries(Object.entries(definitions.items).map(([key, field]) => [key, field.default])) : {};
     const next = provider ? { ...defaults, ...provider } : {};
     setDraft(next);
@@ -3277,7 +3278,8 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   function renderField(key: string, value: unknown) {
     if (key === "label" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
     if (naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")] && ["nai_artist", "nai_prompt_prefix", "negative_prompt", "nai_llm_provider_id", "nai_translate_prompt"].includes(key)) return null;
-    const definition = naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")]?.items[key];
+    const templateType = String(draft.__template_key || draft.__type || "");
+    const definition = (naiTemplateDefinitions[templateType] || videoTemplateDefinitions[templateType])?.items[key];
     const fieldLabel = definition?.description || providerFieldLabel(key);
     const options: Array<[string, string]> | undefined = definition?.options
       ? definition.options.map((option) => [option, providerSelectOptions[key]?.find(([value]) => value === option)?.[1] || option])
@@ -3385,17 +3387,22 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     <div className="provider-editor-layout">
       <aside className="provider-list" aria-label="服务商列表">
         <div className="provider-list-heading"><strong>已添加的服务商</strong><span>{providers.length}</span></div>
-        {providers.map((provider) => <button type="button" className={String(provider.id) === selectedId ? "provider-row active" : "provider-row"} key={provider.id} onClick={() => choose(provider)}>
+        {[{ key: "image", label: "图片" }, { key: "video", label: "视频" }, { key: "nai", label: "NAI" }].map((group) => {
+          const members = providers.filter((provider) => (isNaiProvider(provider) ? "nai" : VIDEO_PROVIDER_TYPES.has(inferProviderType(provider)) ? "video" : "image") === group.key);
+          return <section className="provider-category" key={group.key} aria-label={`${group.label}服务商`}><h3 className="provider-category-heading">{group.label}<span>{members.length}</span></h3>
+          {members.map((provider) => <button type="button" className={String(provider.id) === selectedId ? "provider-row active" : "provider-row"} key={provider.id} onClick={() => choose(provider)}>
           <span className="provider-mark" aria-hidden="true">{String(provider.id).slice(0, 1).toUpperCase()}</span>
           <span className="provider-row-copy"><strong>{provider.id}</strong><small>{provider.model || "未指定模型"} · {provider.__template_key || provider.__type || "自定义"}</small></span>
           <span className={providerIsConfigured(provider) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(provider) ? "配置完整" : "待配置"}</span>
-        </button>)}
+          </button>)}{!members.length && <p className="provider-category-empty">暂无{group.label}服务商</p>}</section>;
+        })}
         {providers.length === 0 && <div className="empty-state">尚未添加服务商，请使用上方“添加服务商模板”。</div>}
       </aside>
       <div className="provider-workspace">
         {selected ? <>
         <div className="provider-detail-heading"><div><span className="section-kicker">{selected.__template_key || selected.__type || "PROVIDER"}</span><h2>{selected.id}</h2><p>{selected.model || "请填写模型名称"}</p></div><span className={providerIsConfigured(selected) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(selected) ? "配置完整，未测试连通性" : "需要补充配置"}</span></div>
           {naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")] && <p className="capability-notice">这里仅配置服务商连接和协议参数。画师串、前缀、正负面 Tag 及转换 LLM 请到 <a href="#/nai">NAI 工作台</a> 编辑并保存为提示词预设；已有旧配置保持保留，可在工作台手动导入。</p>}
+          {String(draft.__template_key || draft.__type || "") === "xpivot_video" && <p className="capability-notice">Muse 映射为 grok-imagine-video-1.5。单张自动使用 image.url，2–7 张使用 reference_images；最多 7 张。已实测 5 秒 / 720p / 16:9；提交后轮询完整任务结果，不重复提交。</p>}
           <div className="provider-field-grid">{Object.entries(draft).map(([key, value]) => renderField(key, value))}</div>
           {Object.keys(secretDraft).length > 0 && <section className="provider-secret-section"><div className="subsection-heading"><div><h3>访问凭据</h3><p>现有密钥不会回显；留空保持不变，输入内容将替换。</p></div></div><div className="provider-secret-grid">{Object.entries(secretDraft).map(([key, item]) => <label className="stack-field" key={key}><span>{providerFieldLabel(key)}{selected[`${key}_configured`] ? <em className="credential-present">已保存</em> : <em className="credential-missing">未设置</em>}</span>{key === "api_keys"
             ? <textarea rows={3} value={item.value} disabled={busy || item.clear} placeholder={selected.api_keys_configured ? "留空以保留现有密钥；多个密钥每行一项" : "每行填写一个 API Key"} onChange={(event) => setSecretDraft((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} />
@@ -3763,7 +3770,7 @@ export default function StudioApp() {
           <img className="brand-symbol small" src={brandIcon} alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.13.0</small>
+            <small>v4.13.1</small>
           </div>
         </div>
       </aside>

@@ -1931,129 +1931,6 @@
           }
         }
       },
-      "grok_video": {
-        "name": "Grok（视频）",
-        "description": "用于视频生成链路（Image-to-Video）。",
-        "hint": "仅对 features.video.chain 生效；图片生成/改图请用其它模板。",
-        "items": {
-          "id": {
-            "type": "string",
-            "description": "服务商 ID（唯一）",
-            "default": "grok_video"
-          },
-          "label": {
-            "type": "string",
-            "description": "显示名称（可选）",
-            "default": ""
-          },
-          "server_url": {
-            "type": "string",
-            "description": "API 服务地址",
-            "hint": "默认：https://api.x.ai（内部补全 /v1/chat/completions）",
-            "default": "https://api.x.ai"
-          },
-          "api_key": {
-            "type": "string",
-            "description": "API Key",
-            "default": "",
-            "obvious_hint": true
-          },
-          "model": {
-            "type": "string",
-            "description": "模型 ID",
-            "default": "grok-imagine-0.9"
-          },
-          "timeout_seconds": {
-            "type": "int",
-            "description": "请求超时(秒)",
-            "slider": {
-              "min": 1,
-              "max": 3600,
-              "step": 10
-            },
-            "default": 180
-          },
-          "max_retries": {
-            "type": "int",
-            "description": "最大重试次数",
-            "slider": {
-              "min": 0,
-              "max": 5,
-              "step": 1
-            },
-            "default": 2
-          },
-          "empty_response_retry": {
-            "type": "int",
-            "description": "无视频URL重试次数",
-            "slider": {
-              "min": 0,
-              "max": 10,
-              "step": 1
-            },
-            "default": 2
-          },
-          "retry_delay": {
-            "type": "int",
-            "description": "重试基础间隔(秒)",
-            "slider": {
-              "min": 0,
-              "max": 30,
-              "step": 1
-            },
-            "default": 2
-          }
-        }
-      },
-      "flow2api_video": {
-        "name": "Flow2API（视频）",
-        "description": "用于视频生成链路（通过 /v1/chat/completions 流式输出视频 URL）。",
-        "hint": "与官方示例一致：POST /v1/chat/completions + stream=true；可文生视频，也可附带图片做图生视频（若模型支持）。",
-        "items": {
-          "id": {
-            "type": "string",
-            "description": "服务商 ID（唯一）",
-            "default": "flow2api_video"
-          },
-          "label": {
-            "type": "string",
-            "description": "显示名称（可选）",
-            "default": ""
-          },
-          "api_url": {
-            "type": "string",
-            "description": "API URL",
-            "hint": "可填 http(s)://host 或 /v1/chat/completions（会自动补齐）。",
-            "default": ""
-          },
-          "api_keys": {
-            "type": "list",
-            "description": "API Key 池",
-            "default": [],
-            "obvious_hint": true
-          },
-          "model": {
-            "type": "string",
-            "description": "模型名称",
-            "default": ""
-          },
-          "timeout": {
-            "type": "int",
-            "description": "超时(秒)",
-            "default": 300
-          },
-          "use_proxy": {
-            "type": "bool",
-            "description": "启用代理",
-            "default": false
-          },
-          "proxy_url": {
-            "type": "string",
-            "description": "代理地址",
-            "default": ""
-          }
-        }
-      },
       "modelscope_openai_images": {
         "name": "魔搭 Images",
         "description": "魔搭社区 OpenAI 兼容的 Images API（具体能力以网关实现为准）。",
@@ -2459,6 +2336,412 @@
             "description": "额外查询参数（高级）",
             "default": {},
             "items": {}
+          }
+        }
+      },
+      "agnes_video": {
+        "name": "Agnes 视频",
+        "items": {
+          "id": {
+            "type": "string",
+            "description": "服务商 ID",
+            "default": "agnes_video"
+          },
+          "base_url": {
+            "type": "string",
+            "description": "API 地址",
+            "default": "https://apihub.agnes-ai.com/v1"
+          },
+          "api_keys": {
+            "type": "list",
+            "description": "API 密钥",
+            "default": []
+          },
+          "model": {
+            "type": "string",
+            "description": "模型名称",
+            "default": "agnes-video-2.5-flash"
+          },
+          "timeout": {
+            "type": "int",
+            "description": "请求超时（秒）",
+            "default": 120
+          },
+          "max_retries": {
+            "type": "int",
+            "description": "最大重试次数",
+            "default": 1
+          },
+          "poll_interval": {
+            "type": "int",
+            "description": "轮询间隔（秒）",
+            "default": 2
+          },
+          "poll_timeout": {
+            "type": "int",
+            "description": "轮询超时（秒）",
+            "default": 900
+          },
+          "seconds": {
+            "type": "string",
+            "description": "视频时长（秒）",
+            "default": "5"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "description": "默认画幅",
+            "default": "16:9",
+            "options": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "image_handling_method": {
+            "type": "string",
+            "description": "图片处理方式",
+            "default": "auto",
+            "options": [
+              "auto",
+              "data_uri",
+              "astrbot",
+              "third_party",
+              "free_public"
+            ]
+          },
+          "file_service_base_url": {
+            "type": "string",
+            "description": "文件服务地址",
+            "default": ""
+          },
+          "enable_file_service_magic": {
+            "type": "bool",
+            "description": "启用文件服务快捷配置",
+            "default": true
+          },
+          "third_party_upload_url": {
+            "type": "string",
+            "description": "第三方上传地址",
+            "default": ""
+          },
+          "third_party_token": {
+            "type": "string",
+            "description": "第三方上传凭据",
+            "default": ""
+          },
+          "proxy_url": {
+            "type": "string",
+            "description": "代理地址",
+            "default": ""
+          }
+        }
+      },
+      "openai_video": {
+        "name": "OpenAI Videos",
+        "items": {
+          "id": {
+            "type": "string",
+            "description": "服务商 ID",
+            "default": "openai_video"
+          },
+          "base_url": {
+            "type": "string",
+            "description": "API 地址",
+            "default": "https://api.openai.com"
+          },
+          "api_keys": {
+            "type": "list",
+            "description": "API 密钥",
+            "default": []
+          },
+          "model": {
+            "type": "string",
+            "description": "模型名称",
+            "default": "sora-2"
+          },
+          "timeout": {
+            "type": "int",
+            "description": "请求超时（秒）",
+            "default": 300
+          },
+          "max_retries": {
+            "type": "int",
+            "description": "最大重试次数",
+            "default": 1
+          },
+          "poll_interval": {
+            "type": "int",
+            "description": "轮询间隔（秒）",
+            "default": 10
+          },
+          "poll_timeout": {
+            "type": "int",
+            "description": "轮询超时（秒）",
+            "default": 1200
+          },
+          "seconds": {
+            "type": "string",
+            "description": "视频时长（秒）",
+            "default": "4"
+          },
+          "size": {
+            "type": "string",
+            "description": "默认尺寸",
+            "default": "",
+            "options": [
+              "",
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "1280x720",
+              "720x1280"
+            ]
+          },
+          "video_resolution": {
+            "type": "string",
+            "description": "视频分辨率",
+            "default": "",
+            "options": [
+              "",
+              "480p",
+              "768p",
+              "1080p"
+            ]
+          },
+          "seed": {
+            "type": "string",
+            "description": "随机种子",
+            "default": ""
+          },
+          "request_mode": {
+            "type": "string",
+            "description": "视频请求模式",
+            "default": "auto",
+            "options": [
+              "auto",
+              "json",
+              "multipart"
+            ]
+          },
+          "image_input_mode": {
+            "type": "string",
+            "description": "参考图输入模式",
+            "default": "auto",
+            "options": [
+              "auto",
+              "input_reference",
+              "image_urls",
+              "first_last_frame",
+              "roles_reference",
+              "roles_frames"
+            ]
+          },
+          "input_reference_field": {
+            "type": "string",
+            "description": "文件参考图字段名",
+            "default": "input_reference"
+          },
+          "max_download_mb": {
+            "type": "int",
+            "description": "最大下载大小（MB）",
+            "default": 500
+          },
+          "extra_form": {
+            "type": "string",
+            "description": "额外请求字段（JSON）",
+            "default": ""
+          },
+          "proxy_url": {
+            "type": "string",
+            "description": "代理地址",
+            "default": ""
+          }
+        }
+      },
+      "custom_video": {
+        "name": "自定义视频",
+        "items": {
+          "id": {
+            "type": "string",
+            "description": "服务商 ID",
+            "default": "custom_video"
+          },
+          "base_url": {
+            "type": "string",
+            "description": "API 地址",
+            "default": ""
+          },
+          "generate_path": {
+            "type": "string",
+            "description": "提交路径",
+            "default": "/v1/chat/completions"
+          },
+          "poll_path": {
+            "type": "string",
+            "description": "查询路径",
+            "default": ""
+          },
+          "api_keys": {
+            "type": "list",
+            "description": "API 密钥",
+            "default": []
+          },
+          "model": {
+            "type": "string",
+            "description": "模型名称",
+            "default": ""
+          },
+          "timeout": {
+            "type": "int",
+            "description": "请求超时（秒）",
+            "default": 300
+          },
+          "max_retries": {
+            "type": "int",
+            "description": "最大重试次数",
+            "default": 0
+          },
+          "poll_interval": {
+            "type": "int",
+            "description": "轮询间隔（秒）",
+            "default": 5
+          },
+          "poll_timeout": {
+            "type": "int",
+            "description": "轮询超时（秒）",
+            "default": 300
+          },
+          "response_url_path": {
+            "type": "string",
+            "description": "结果 URL 字段路径",
+            "default": ""
+          },
+          "task_id_path": {
+            "type": "string",
+            "description": "任务 ID 字段路径",
+            "default": ""
+          },
+          "status_path": {
+            "type": "string",
+            "description": "状态字段路径",
+            "default": ""
+          },
+          "done_statuses": {
+            "type": "string",
+            "description": "完成状态列表",
+            "default": "succeeded,completed,done,finished,success"
+          },
+          "fail_statuses": {
+            "type": "string",
+            "description": "失败状态列表",
+            "default": "failed,error,cancelled"
+          },
+          "extra_body": {
+            "type": "string",
+            "description": "额外请求参数",
+            "default": ""
+          },
+          "request_mode": {
+            "type": "string",
+            "description": "视频请求模式",
+            "default": "auto",
+            "options": [
+              "auto",
+              "json",
+              "multipart"
+            ]
+          },
+          "image_field": {
+            "type": "string",
+            "description": "参考图字段名",
+            "default": "image"
+          },
+          "proxy_url": {
+            "type": "string",
+            "description": "代理地址",
+            "default": ""
+          }
+        }
+      },
+      "xpivot_video": {
+        "name": "Xpivot / Muse 视频（Grok 映射）",
+        "items": {
+          "id": {
+            "type": "string",
+            "description": "服务商 ID",
+            "default": "xpivot_video"
+          },
+          "base_url": {
+            "type": "string",
+            "description": "API 地址",
+            "default": "https://www.xpivot.top",
+            "hint": "使用 /v1/video/generations 提交，完整任务端点轮询；根地址或带 /v1 均可。"
+          },
+          "api_keys": {
+            "type": "list",
+            "description": "API 密钥",
+            "default": []
+          },
+          "model": {
+            "type": "string",
+            "description": "模型名称",
+            "default": "grok-imagine-video-1.5"
+          },
+          "timeout": {
+            "type": "int",
+            "description": "请求超时（秒）",
+            "default": 300
+          },
+          "poll_interval": {
+            "type": "int",
+            "description": "轮询间隔（秒）",
+            "default": 5
+          },
+          "poll_timeout": {
+            "type": "int",
+            "description": "轮询超时（秒）",
+            "default": 1200
+          },
+          "duration": {
+            "type": "string",
+            "description": "视频时长（秒）",
+            "default": "5"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "description": "默认画幅",
+            "default": "16:9",
+            "options": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "xai_resolution": {
+            "type": "string",
+            "description": "视频分辨率",
+            "default": "720p",
+            "options": [
+              "720p"
+            ]
+          },
+          "xai_reference_mode": {
+            "type": "string",
+            "description": "参考图模式",
+            "default": "reference",
+            "options": [
+              "reference",
+              "image",
+              "text"
+            ],
+            "hint": "自动参考：单张使用 image.url，2–7 张使用 reference_images；最多 7 张。"
+          },
+          "proxy_url": {
+            "type": "string",
+            "description": "代理地址",
+            "default": ""
           }
         }
       }

@@ -2089,4 +2089,9 @@
   }
 }
 
+.provider-category { padding: 8px 0; border-top: 1px solid var(--border-color); }
+.provider-category-heading { display: flex; align-items: center; justify-content: space-between; margin: 5px 12px 10px; color: var(--text-color-lighten); font-size: 12px; font-weight: 650; }
+.provider-category-heading span { padding: 2px 7px; border-radius: 999px; background: var(--surface-muted); font-size: 10px; }
+.provider-category-empty { margin: 12px; color: var(--text-color-lighten); font-size: 11px; }
+
 .history-copy .full-umo, .history-details .full-umo { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; user-select: text; }

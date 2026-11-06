@@ -443,6 +443,18 @@ class ProviderRegistryRequestModeTests(unittest.TestCase):
             ],
         )
 
+    def test_xpivot_video_builds_backend_and_requires_connection_fields(self):
+        mod = _load_module()
+        _install_stub_module(f"{CORE_PACKAGE_NAME}.xpivot_video_service", XpivotVideoService=_StubBackend)
+        provider = {"id": "muse", "__template_key": "xpivot_video", "base_url": "https://www.xpivot.top", "model": "grok-imagine-video-1.5", "api_keys": ["fixture"]}
+        registry = mod.ProviderRegistry(config={"providers": [provider]}, imgr=object(), data_dir=Path('/tmp/plugin-data'))
+        backend = registry.get_video_backend('muse')
+        self.assertEqual(registry.validate(), [])
+        self.assertEqual(backend.kwargs['settings']['__template_key'], 'xpivot_video')
+        self.assertIs(backend, registry.get_video_backend('muse'))
+        registry = mod.ProviderRegistry(config={"providers": [{**provider, "api_keys": [], "base_url": "", "model": ""}]}, imgr=object(), data_dir=Path('/tmp'))
+        self.assertEqual(len(registry.validate()), 3)
+
     def test_openai_video_template_builds_dedicated_backend(self):
         mod = _load_module()
         registry = mod.ProviderRegistry(
