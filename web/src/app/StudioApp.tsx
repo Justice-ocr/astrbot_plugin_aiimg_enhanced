@@ -38,6 +38,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
 import { inferProviderType, SPICY_TEMPLATE_DEFINITIONS, VIDEO_TEMPLATE_DEFINITIONS, NAI_TEMPLATE_DEFINITIONS, PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
 import {
+  fetchProviderModels,
+  type ProviderModelOption,
   cancelTask,
   cancelStudioJob,
   createStudioGif,
@@ -3233,6 +3235,10 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [deleteArmed, setDeleteArmed] = useState(false);
+  const [modelOptions, setModelOptions] = useState<ProviderModelOption[]>([]);
+  const [modelStatus, setModelStatus] = useState("");
+  const [modelsBusy, setModelsBusy] = useState(false);
+  const modelRequest = useRef(0);
   const selected = providers.find((provider) => String(provider.id) === selectedId);
   const secretKeys = (provider?: ProviderConfig) => Object.keys(provider || {}).filter((key) => providerSecretFields.has(key));
   const providerDirty = Boolean(selected) && (
@@ -3252,6 +3258,10 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     setStatus("");
     setError("");
     setDeleteArmed(false);
+    modelRequest.current += 1;
+    setModelOptions([]);
+    setModelStatus("");
+    setModelsBusy(false);
   }
 
   useEffect(() => {
@@ -3276,6 +3286,56 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     setDeleteArmed(false);
   }
 
+  function modelSecretUpdates() {
+    const updates: Record<string, unknown> = {};
+    Object.entries(secretDraft).forEach(([key, item]) => {
+      if (item.clear) updates[key] = { clear: true };
+      else if (item.value.trim()) {
+        let value: unknown = item.value.trim();
+        if (key === "api_keys") {
+          try {
+            value = item.value.trim().startsWith("[") ? JSON.parse(item.value) : item.value.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+          } catch {
+            throw new Error("API 密钥列表 JSON 格式无效，请改为每行一个密钥。");
+          }
+        }
+        updates[key] = { value };
+      }
+    });
+    return updates;
+  }
+
+  async function getModels() {
+    const requestId = ++modelRequest.current;
+    setModelsBusy(true);
+    setModelStatus("正在获取模型列表…");
+    try {
+      const options = await fetchProviderModels({ ...draft, __template_key: inferProviderType(draft) }, snapshot.configRevision || "", selectedId, modelSecretUpdates());
+      if (requestId !== modelRequest.current) return;
+      setModelOptions(options);
+      setModelStatus(options.length ? `已获取 ${options.length} 个模型，可输入搜索并选择，也可手动填写。` : "未获取到可用模型，请手动填写模型 ID。");
+    } catch (reason) {
+      if (requestId !== modelRequest.current) return;
+      setModelOptions([]);
+      setModelStatus(reason instanceof Error ? reason.message : "获取失败，请手动填写模型 ID。");
+    } finally {
+      if (requestId === modelRequest.current) setModelsBusy(false);
+    }
+  }
+
+  const modelConnection = JSON.stringify([selectedId, draft.__template_key, draft.__type, draft.base_url, draft.api_url, draft.full_generate_url, draft.proxy_url, secretDraft]);
+  useEffect(() => {
+    modelRequest.current += 1;
+    setModelOptions([]);
+    setModelStatus("");
+    setModelsBusy(false);
+    const endpoint = String(draft.base_url || draft.api_url || draft.full_generate_url || "");
+    const hasKey = ["api_key", "api_keys"].some((key) => secretDraft[key]?.value.trim() || (!secretDraft[key]?.clear && draft[`${key}_configured`]));
+    if (!endpoint || !hasKey) return;
+    const timer = window.setTimeout(() => { void getModels(); }, 900);
+    return () => { window.clearTimeout(timer); modelRequest.current += 1; };
+  }, [modelConnection, snapshot.configRevision]);
+
   function renderField(key: string, value: unknown) {
     if (key === "label" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
     if (naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")] && ["nai_artist", "nai_prompt_prefix", "negative_prompt", "nai_llm_provider_id", "nai_translate_prompt"].includes(key)) return null;
@@ -3288,6 +3348,13 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     const selectOptions = options && !options.some(([option]) => option === String(value ?? ""))
       ? [[String(value ?? ""), `${String(value ?? "")}（当前值）`], ...options] as Array<[string, string]>
       : options;
+    if (["model", "edit_model", "default_model"].includes(key)) {
+      const kind = inferProviderType(draft);
+      const remoteChoices = kind === "spicy_images" ? modelOptions.filter((item) => !item.tasks.length || item.tasks.some((task) => key === "edit_model" ? ["edit", "image-to-image"].includes(task) : task === "text-to-image")) : modelOptions;
+      const choices = remoteChoices.length ? remoteChoices : (selectOptions || []).map(([id, label]) => ({ id, label, tasks: [] }));
+      const listId = `provider-model-${key}`;
+      return <div className="stack-field" key={key}><label htmlFor={`${listId}-input`}>{fieldLabel}</label><input id={`${listId}-input`} list={listId} type="text" value={String(value ?? "")} disabled={busy} placeholder="获取列表后搜索选择，或手动填写模型 ID" onChange={(event) => updateField(key, event.target.value)} /><datalist id={listId}>{choices.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</datalist><button type="button" className="secondary" disabled={busy || modelsBusy} onClick={() => void getModels()}>{modelsBusy ? "正在获取…" : modelOptions.length ? "刷新模型列表" : "获取模型列表"}</button><small role="status">{modelStatus || "填写地址和密钥后自动获取；获取不到时可直接手动填写。"}</small></div>;
+    }
     if (key === "nai_llm_provider_id") {
       const choices = snapshot.config.astrbot_providers || [];
       return <label className="stack-field" key={key}><span>{fieldLabel}</span><select value={String(value || "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)}><option value="">跟随当前会话</option>{Boolean(value) && !choices.some((item) => item.id === value) && <option value={String(value)}>{String(value)}（当前值）</option>}{choices.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.model}</option>)}</select></label>;
@@ -3772,7 +3839,7 @@ export default function StudioApp() {
           <img className="brand-symbol small" src={brandIcon} alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.13.2</small>
+            <small>v4.13.3</small>
           </div>
         </div>
       </aside>

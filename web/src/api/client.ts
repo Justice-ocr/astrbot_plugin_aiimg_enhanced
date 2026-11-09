@@ -299,6 +299,15 @@ export async function saveStudioPresets(feature: string, presets: string[], revi
   return result.revision;
 }
 
+export type ProviderModelOption = { id: string; label: string; tasks: string[] };
+
+export async function fetchProviderModels(provider: Record<string, unknown>, revision: string, originalId: string, secretUpdates: Record<string, unknown>): Promise<ProviderModelOption[]> {
+  const result = await requireSuccess<{ models: ProviderModelOption[] }>(getBridge().apiPost("fetch_provider_models", {
+    provider, revision, original_id: originalId, secret_updates: secretUpdates,
+  }));
+  return result.models;
+}
+
 export async function saveStudioProvider(
   provider: Record<string, unknown>,
   revision = "",

@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>AstrBot &gt;= 4.16.0, &lt; 5</strong>
-  · v4.13.2
+  · v4.13.3
   · MIT
   · <a href="https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced">GitHub 仓库</a>
 </p>
@@ -85,6 +85,14 @@ https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced
 | OpenAI ImagesURL | 完整 URL 直连模式 | `Full Generate URL` 填完整文生图接口，`Full Edit URL` 填完整改图接口；可用于 `/v1/images/generations`、`/v1/images/edits` 或 `/v1/responses` 类网关 | 插件不会再自动拼接路径，直接向填写的完整 URL 发请求 |
 
 如果你拿到的是类似 `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent` 的 Gemini 原生端点，建议选择 **Gemini 原生**：`API URL` 填 `https://generativelanguage.googleapis.com` 或 `https://generativelanguage.googleapis.com/v1beta/models`，`Model` 填 `gemini-3.1-flash-image-preview`。如果服务商只提供 OpenAI 兼容的 `/v1/chat/completions`，则选择 **Gemini Chat图** 或 **Flow2API**。
+
+#### 自动获取模型列表
+
+服务商表单填写 API 地址和密钥后，会自动读取模型列表；也可点击模型字段旁的“获取模型列表”或“刷新模型列表”。模型框支持输入搜索、选择和手动填写，获取失败、目录为空或当前模型不在目录中时，仍保留现有模型 ID。
+
+支持 SpicyAPI、OpenAI 兼容协议和 Gemini 原生目录；其他模板可继续使用原有候选项或手动输入。SpicyAPI 只展示目录中已启用且可用的模型，并区分文生图和改图。通用 OpenAI 目录可能包含聊天等非图片模型，请按实际用途选择；目录可见不代表该模型支持所有生成参数。
+
+获取列表可直接使用未保存的地址和新密钥，不保存配置、不提交生成任务。已保存密钥仅在服务端读取；更换 API 域名后需要重新填写该地址的密钥，避免将旧密钥发送到新地址。
 
 #### SpicyAPI 图片与多参考图编辑
 

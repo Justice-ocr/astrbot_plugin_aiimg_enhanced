@@ -14,6 +14,7 @@ from ..core.pages_config_service import PagesConfigService
 from ..core.persona_ref_service import PersonaRefService
 from ..core.history_page_service import HistoryPageService
 from ..core.studio.capability_catalog import build_provider_capabilities
+from ..core.provider_models import ProviderModelDiscovery, discovery_provider
 from ..core.studio.asset_store import StudioAssetStore
 
 class PagesAPIMixin:
@@ -77,6 +78,7 @@ class PagesAPIMixin:
             ("save_studio_appearance", self._pages_save_studio_appearance, ["POST"], "保存Studio外观"),
             ("save_studio_preferences", self._pages_save_studio_preferences, ["POST"], "保存Studio设置"),
             ("save_studio_presets", self._pages_save_studio_presets, ["POST"], "保存Studio预设"),
+            ("fetch_provider_models", self._pages_fetch_provider_models, ["POST"], "读取服务商模型列表"),
             ("save_studio_provider", self._pages_save_studio_provider, ["POST"], "保存Studio服务商"),
             ("delete_studio_provider", self._pages_delete_studio_provider, ["POST"], "删除Studio服务商"),
             (
@@ -1682,6 +1684,23 @@ class PagesAPIMixin:
         except Exception as exc:
             logger.error("[Pages] save_studio_preferences 失败: %s", exc, exc_info=True)
             return jsonify({"success": False, "error": "Studio 设置保存失败"}), 500
+
+    async def _pages_fetch_provider_models(self):
+        """Read the draft connection without saving it or returning secrets."""
+        try:
+            data = await request.get_json(force=True) or {}
+            if not isinstance(data, dict):
+                raise ValueError("请求参数必须是对象")
+            if str(data.get("revision") or "") != await self._pages_get_studio_revision_value():
+                return jsonify({"success": False, "error": "配置已变化，请刷新后获取模型列表"}), 409
+            provider = discovery_provider(self.config, data.get("provider"), str(data.get("original_id") or ""), data.get("secret_updates") or {})
+            models = await ProviderModelDiscovery(self.config).fetch(provider)
+            return jsonify({"success": True, "models": models})
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        except Exception:
+            # Transport exceptions can include query parameters or credentials.
+            return jsonify({"success": False, "error": "模型列表连接失败，可稍后重试或手动填写模型 ID"}), 502
 
     async def _pages_save_studio_provider(self):
         """Save one provider without exposing existing secrets to the browser."""
