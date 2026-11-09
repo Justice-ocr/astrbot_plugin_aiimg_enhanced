@@ -35,6 +35,7 @@ import {
   Video,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { ProviderModelPicker } from "../features/providers/ProviderModelPicker";
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
 import { inferProviderType, SPICY_TEMPLATE_DEFINITIONS, VIDEO_TEMPLATE_DEFINITIONS, NAI_TEMPLATE_DEFINITIONS, PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
 import {
@@ -3352,8 +3353,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
       const kind = inferProviderType(draft);
       const remoteChoices = kind === "spicy_images" ? modelOptions.filter((item) => !item.tasks.length || item.tasks.some((task) => key === "edit_model" ? ["edit", "image-to-image"].includes(task) : task === "text-to-image")) : modelOptions;
       const choices = remoteChoices.length ? remoteChoices : (selectOptions || []).map(([id, label]) => ({ id, label, tasks: [] }));
-      const listId = `provider-model-${key}`;
-      return <div className="stack-field" key={key}><label htmlFor={`${listId}-input`}>{fieldLabel}</label><input id={`${listId}-input`} list={listId} type="text" value={String(value ?? "")} disabled={busy} placeholder="获取列表后搜索选择，或手动填写模型 ID" onChange={(event) => updateField(key, event.target.value)} /><datalist id={listId}>{choices.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</datalist><button type="button" className="secondary" disabled={busy || modelsBusy} onClick={() => void getModels()}>{modelsBusy ? "正在获取…" : modelOptions.length ? "刷新模型列表" : "获取模型列表"}</button><small role="status">{modelStatus || "填写地址和密钥后自动获取；获取不到时可直接手动填写。"}</small></div>;
+      return <ProviderModelPicker key={`${selectedId}-${key}`} label={fieldLabel} value={String(value ?? "")} choices={choices} disabled={busy} loading={modelsBusy} status={modelStatus} onChange={(next) => updateField(key, next)} onRefresh={() => void getModels()} />;
     }
     if (key === "nai_llm_provider_id") {
       const choices = snapshot.config.astrbot_providers || [];
@@ -3839,7 +3839,7 @@ export default function StudioApp() {
           <img className="brand-symbol small" src={brandIcon} alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.13.3</small>
+            <small>v4.13.4</small>
           </div>
         </div>
       </aside>
