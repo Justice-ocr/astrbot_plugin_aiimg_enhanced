@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>AstrBot &gt;= 4.16.0, &lt; 5</strong>
-  · v4.13.1
+  · v4.13.2
   · MIT
   · <a href="https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced">GitHub 仓库</a>
 </p>
@@ -85,6 +85,26 @@ https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced
 | OpenAI ImagesURL | 完整 URL 直连模式 | `Full Generate URL` 填完整文生图接口，`Full Edit URL` 填完整改图接口；可用于 `/v1/images/generations`、`/v1/images/edits` 或 `/v1/responses` 类网关 | 插件不会再自动拼接路径，直接向填写的完整 URL 发请求 |
 
 如果你拿到的是类似 `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent` 的 Gemini 原生端点，建议选择 **Gemini 原生**：`API URL` 填 `https://generativelanguage.googleapis.com` 或 `https://generativelanguage.googleapis.com/v1beta/models`，`Model` 填 `gemini-3.1-flash-image-preview`。如果服务商只提供 OpenAI 兼容的 `/v1/chat/completions`，则选择 **Gemini Chat图** 或 **Flow2API**。
+
+#### SpicyAPI 图片与多参考图编辑
+
+选择 **SpicyAPI 图片 / 多图编辑** 模板，填写自己的密钥。默认使用 Seedream 5.0 Flash：
+
+| 字段 | 默认值 |
+| --- | --- |
+| Base URL | `https://api.spicyapi.ai` |
+| 文生图模型 | `bytedance/seedream-5.0-flash/text-to-image` |
+| 改图模型 | `bytedance/seedream-5.0-flash/edit` |
+| 默认分辨率 | `2k` |
+| 参考图上限 | 10 |
+
+如需 Qwen Image 2.1 Turbo，将两个模型 ID 分别改为 `alibaba/qwen-image-2.1-turbo/text-to-image` 和 `alibaba/qwen-image-2.1-turbo/edit`；额外 input 参数可填 `{"enable_prompt_expansion":false,"num_outputs":1}`。其他模型需按官方目录同步调整模型 ID、分辨率、参考图上限及额外字段，不会根据显示名称猜测协议。当前每次任务只接收一张输出，禁止配置多张输出数量。
+
+参考图按选择顺序转换为 Data URI，支持 JPEG、PNG、WebP；单图上限 30 MB，实际总请求大小仍受上游限制。分辨率使用档位；像素尺寸只换算画面比例，不承诺精确像素输出。
+
+适配使用 `createTask` / `recordInfo`，并固定用创建任务时的密钥查询。提交网络中断时仅使用同一幂等编号和密钥重放一次；结果链接下载失败会重新查询原任务刷新链接。本地超时或取消不会取消远端任务，错误保留 taskId；不要直接重复生成以免创建收费新任务。后台提供 `resume_image(task_id, api_key=原密钥)` 收集方法，当前 Studio 图片任务尚无恢复按钮。原任务结果查询不产生新的生成任务。
+
+本轮使用公开文档与本地模拟上游验证，未进行 SpicyAPI 收费生成，也未验证其内容政策的实际通过率。官方协议见 [SpicyAPI Tasks](https://docs.spicyapi.ai/docs/tasks)。
 
 ### 3. 配置功能链路
 

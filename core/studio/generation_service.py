@@ -69,9 +69,11 @@ class StudioGenerationService:
             "seconds": str(payload.get("seconds") or "").strip(),
             "aspect_ratio": str(payload.get("aspect_ratio") or "").strip(),
             "reference_mode": str(payload.get("reference_mode") or "").strip(),
-            "reference_paths": [str(item).strip() for item in (payload.get("reference_paths") or []) if str(item).strip()][:9],
-            "reference_asset_ids": [str(item).strip() for item in (payload.get("reference_asset_ids") or []) if str(item).strip()][:9],
+            "reference_paths": [str(item).strip() for item in (payload.get("reference_paths") or []) if str(item).strip()],
+            "reference_asset_ids": [str(item).strip() for item in (payload.get("reference_asset_ids") or []) if str(item).strip()],
         }
+        if len(request["reference_paths"]) + len(request["reference_asset_ids"]) > 10:
+            raise ValueError("参考图不能超过 10 张")
         if payload.get("nai_workbench") is True:
             from ..nai_workflow import is_nai_provider, compose_nai_prompt
             nai_provider = self.plugin.registry.get(request["provider_id"])

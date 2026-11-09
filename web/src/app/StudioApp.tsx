@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
-import { inferProviderType, VIDEO_TEMPLATE_DEFINITIONS, NAI_TEMPLATE_DEFINITIONS, PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
+import { inferProviderType, SPICY_TEMPLATE_DEFINITIONS, VIDEO_TEMPLATE_DEFINITIONS, NAI_TEMPLATE_DEFINITIONS, PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
 import {
   cancelTask,
   cancelStudioJob,
@@ -273,7 +273,7 @@ function CreateView({
     (item) => item.status === "supported",
   ) || [];
   const activeReferenceMode = referenceOptions.find((item) => item.id === (referenceMode || selected?.references.active_mode));
-  const referenceLimit = Math.min(9, activeReferenceMode?.max_images ?? 9);
+  const referenceLimit = Math.min(10, activeReferenceMode?.max_images ?? 9);
   const presetFeature = mode === "image" ? "draw" : mode === "video" ? "video" : "edit";
   const presets = (snapshot.config.features?.[presetFeature]?.presets || []).flatMap((value) => {
     if (typeof value !== "string") return [];
@@ -3159,6 +3159,7 @@ function PersonasView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRef
 
 type NaiTemplateField = { type: string; description: string; hint?: string; options?: string[]; default: unknown };
 const naiTemplateDefinitions = NAI_TEMPLATE_DEFINITIONS as unknown as Record<string, { items: Record<string, NaiTemplateField> }>;
+const spicyTemplateDefinitions = SPICY_TEMPLATE_DEFINITIONS as unknown as Record<string, { items: Record<string, NaiTemplateField> }>;
 const videoTemplateDefinitions = VIDEO_TEMPLATE_DEFINITIONS as unknown as Record<string, { items: Record<string, NaiTemplateField> }>;
 
 const providerSecretFields = new Set([
@@ -3240,7 +3241,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
   );
 
   function loadProvider(provider?: ProviderConfig) {
-    const definitions = provider ? (naiTemplateDefinitions[String(provider.__template_key || provider.__type || "")] || videoTemplateDefinitions[String(provider.__template_key || provider.__type || "")]) : undefined;
+    const definitions = provider ? (naiTemplateDefinitions[String(provider.__template_key || provider.__type || "")] || spicyTemplateDefinitions[String(provider.__template_key || provider.__type || "")] || videoTemplateDefinitions[String(provider.__template_key || provider.__type || "")]) : undefined;
     const defaults = definitions ? Object.fromEntries(Object.entries(definitions.items).map(([key, field]) => [key, field.default])) : {};
     const next = provider ? { ...defaults, ...provider } : {};
     setDraft(next);
@@ -3279,7 +3280,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     if (key === "label" || key.startsWith("__") || key.endsWith("_configured") || providerSecretFields.has(key)) return null;
     if (naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")] && ["nai_artist", "nai_prompt_prefix", "negative_prompt", "nai_llm_provider_id", "nai_translate_prompt"].includes(key)) return null;
     const templateType = String(draft.__template_key || draft.__type || "");
-    const definition = (naiTemplateDefinitions[templateType] || videoTemplateDefinitions[templateType])?.items[key];
+    const definition = (naiTemplateDefinitions[templateType] || spicyTemplateDefinitions[templateType] || videoTemplateDefinitions[templateType])?.items[key];
     const fieldLabel = definition?.description || providerFieldLabel(key);
     const options: Array<[string, string]> | undefined = definition?.options
       ? definition.options.map((option) => [option, providerSelectOptions[key]?.find(([value]) => value === option)?.[1] || option])
@@ -3296,7 +3297,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
     if (typeof value === "number") return <label className="stack-field" key={key}><span title={definition?.hint}>{fieldLabel}</span><input type="number" step={definition?.type === "float" ? "any" : 1} value={value} disabled={busy} onChange={(event) => updateField(key, event.target.value === "" ? "" : Number(event.target.value))} /></label>;
     if (Array.isArray(value)) return <label className="stack-field" key={key}><span>{fieldLabel} <small>每行一项</small></span><textarea rows={Math.min(5, Math.max(2, value.length))} value={value.map(String).join("\n")} disabled={busy} onChange={(event) => updateField(key, event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>;
     if (value && typeof value === "object") return null;
-    const multiline = /prompt|template|body|instruction|header|nai_artist/i.test(key);
+    const multiline = definition?.type === "text" || /prompt|template|body|instruction|header|nai_artist/i.test(key);
     const inputType = /url|path|endpoint/i.test(key) ? "url" : "text";
     return <label className="stack-field" key={key}><span title={definition?.hint}>{fieldLabel}</span>{multiline
       ? <textarea rows={3} value={String(value ?? "")} disabled={busy} onChange={(event) => updateField(key, event.target.value)} />
@@ -3402,6 +3403,7 @@ function ProvidersView({ snapshot, onRefresh }: { snapshot: StudioSnapshot; onRe
         {selected ? <>
         <div className="provider-detail-heading"><div><span className="section-kicker">{selected.__template_key || selected.__type || "PROVIDER"}</span><h2>{selected.id}</h2><p>{selected.model || "请填写模型名称"}</p></div><span className={providerIsConfigured(selected) ? "provider-state ready" : "provider-state"}>{providerIsConfigured(selected) ? "配置完整，未测试连通性" : "需要补充配置"}</span></div>
           {naiTemplateDefinitions[String(draft.__template_key || draft.__type || "")] && <p className="capability-notice">这里仅配置服务商连接和协议参数。画师串、前缀、正负面 Tag 及转换 LLM 请到 <a href="#/nai">NAI 工作台</a> 编辑并保存为提示词预设；已有旧配置保持保留，可在工作台手动导入。</p>}
+          {String(draft.__template_key || draft.__type || "") === "spicy_images" && <p className="capability-notice">使用 SpicyAPI 专用异步任务协议。文生图与改图分别填写完整模型 ID，默认 Flash 支持最多 10 张参考图。任务超时不会取消远端生成；请保留错误中的 taskId。切换 Qwen / Spicy 模型时，请同步核对参考图上限和额外 input 参数。</p>}
           {String(draft.__template_key || draft.__type || "") === "xpivot_video" && <p className="capability-notice">Muse 映射为 grok-imagine-video-1.5。单张自动使用 image.url，2–7 张使用 reference_images；最多 7 张。已实测 5 秒 / 720p / 16:9；提交后轮询完整任务结果，不重复提交。</p>}
           <div className="provider-field-grid">{Object.entries(draft).map(([key, value]) => renderField(key, value))}</div>
           {Object.keys(secretDraft).length > 0 && <section className="provider-secret-section"><div className="subsection-heading"><div><h3>访问凭据</h3><p>现有密钥不会回显；留空保持不变，输入内容将替换。</p></div></div><div className="provider-secret-grid">{Object.entries(secretDraft).map(([key, item]) => <label className="stack-field" key={key}><span>{providerFieldLabel(key)}{selected[`${key}_configured`] ? <em className="credential-present">已保存</em> : <em className="credential-missing">未设置</em>}</span>{key === "api_keys"
@@ -3770,7 +3772,7 @@ export default function StudioApp() {
           <img className="brand-symbol small" src={brandIcon} alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.13.1</small>
+            <small>v4.13.2</small>
           </div>
         </div>
       </aside>

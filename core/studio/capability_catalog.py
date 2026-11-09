@@ -10,6 +10,7 @@ VERIFIED_DATE = "2026-09-22"
 
 
 _PROTOCOLS: dict[str, tuple[str, str]] = {
+    "spicy_images": ("spicyapi-image-tasks", "2026-11-09"),
     "xpivot_video": ("xpivot-muse-video", "2026-11-06"),
     "xai_video": ("xai-videos-v1", VERIFIED_DATE),
     "openai_video": ("openai-compatible-videos", VERIFIED_DATE),
@@ -41,6 +42,7 @@ _PROTOCOLS: dict[str, tuple[str, str]] = {
 }
 
 _IMAGE_TEMPLATES = {
+    "spicy_images",
     "nai_openai_images",
     "nai_native",
     "nai_gateway",
@@ -75,6 +77,7 @@ _VIDEO_TEMPLATES = {
 }
 
 _IMAGE_EDIT_DEFAULTS = {
+    "spicy_images": True,
     "nai_openai_images": False,
     "nai_native": True,
     "nai_gateway": False,
@@ -247,6 +250,15 @@ def _apply_image_capabilities(
         "default": default_size,
     }
 
+    if template_key == "spicy_images":
+        result["parameters"]["sizes"] = {"status": "unsupported", "values": [], "default": ""}
+        result["parameters"]["resolutions"] = _enum_parameter(
+            ["1k", "1.5k", "2k"], provider.get("default_resolution", "2k")
+        )
+        result["parameters"]["aspect_ratios"] = _enum_parameter(
+            ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "2:1", "1:2", "3:1", "1:3", "5:4", "4:5"],
+            provider.get("aspect_ratio", "auto"),
+        )
     if not supports_edit:
         result["references"] = {
             "status": "unsupported",
@@ -262,6 +274,9 @@ def _apply_image_capabilities(
             _reference_mode("character", "角色参考", 1, 1),
             _reference_mode("vibe", "Vibe 参考", 1, 9),
         ]
+    elif template_key == "spicy_images":
+        active_mode = "reference_images"
+        modes = [_reference_mode("reference_images", "参考图", 1, max(1, _integer(provider.get("max_reference_images"), 10)))]
     else:
         active_mode = "reference_images"
         modes = [_reference_mode("reference_images", "参考图", 1, 9)]

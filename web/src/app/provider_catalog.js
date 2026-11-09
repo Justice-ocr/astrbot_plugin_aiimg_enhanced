@@ -1,3 +1,4 @@
+import SPICY_TEMPLATE_DEFINITIONS from './spicy_templates.json' with { type: 'json' };
 import VIDEO_TEMPLATE_DEFINITIONS from './video_templates.json' with { type: 'json' };
 import NAI_TEMPLATE_DEFINITIONS from './nai_templates.json' with { type: 'json' };
 
@@ -12,12 +13,18 @@ const VIDEO_PROVIDER_TEMPLATES = Object.fromEntries(Object.entries(VIDEO_TEMPLAT
   ...Object.fromEntries(Object.entries(definition.items).filter(([name]) => !['id', 'label'].includes(name)).map(([name, field]) => [name, field.default])),
 }]));
 
+const SPICY_PROVIDER_TEMPLATES = Object.fromEntries(Object.entries(SPICY_TEMPLATE_DEFINITIONS).map(([key, definition]) => [key, {
+  label: definition.name,
+  ...Object.fromEntries(Object.entries(definition.items).filter(([name]) => !['id', 'label'].includes(name)).map(([name, field]) => [name, field.default])),
+}]));
+
 function inferProviderType(p) {
   if (!p || typeof p !== 'object') return 'openai_images';
   if (p.__template_key) return p.__template_key;
   if ('nai_reference_mode' in p) return 'nai_native';
   if ('nai_auth_mode' in p) return 'nai_gateway';
   if (String(p.model || '').toLowerCase() === 'grok-imagine-image-edit') return 'grok_images_edit';
+  if ('edit_model' in p && String(p.base_url || '').includes('spicy')) return 'spicy_images';
   if ('poll_interval' in p || 'poll_timeout' in p) return 'gitee_async';
   if ('cookie_list' in p || 'apikey' in p) return 'jimeng';
   if ('recaptcha_base_api' in p || 'graphql_api_key' in p) return 'vertex_ai_anonymous';
@@ -43,6 +50,7 @@ function inferProviderType(p) {
 }
 
 const PROVIDER_TEMPLATES = {
+  ...SPICY_PROVIDER_TEMPLATES,
   ...NAI_PROVIDER_TEMPLATES,
   ...VIDEO_PROVIDER_TEMPLATES,
   openai_images:          { label:'OpenAI Images', base_url:'', api_keys:[], model:'', timeout:120, max_retries:2, proxy_url:'', default_size:'4096x4096', supports_edit:true, generate_request_mode:'auto', edit_request_mode:'auto', nai_translate_prompt:false, nai_llm_provider_id:'' },
@@ -64,6 +72,7 @@ const PROVIDER_TEMPLATES = {
 };
 
 const PROVIDER_NAMES = {
+  spicy_images:'SpicyAPI 图片 / 多图编辑',
   xpivot_video:'Xpivot / Muse 视频（Grok 映射）',
   xai_video:'xAI 原生视频',
   nai_openai_images:'NAI OpenAI 兼容',
@@ -98,6 +107,7 @@ const VIDEO_PROVIDER_TYPES = new Set(['xpivot_video', 'xai_video', 'agnes_video'
 
 export {
   inferProviderType,
+  SPICY_TEMPLATE_DEFINITIONS,
   VIDEO_TEMPLATE_DEFINITIONS,
   NAI_TEMPLATE_DEFINITIONS,
   PROVIDER_TEMPLATES,

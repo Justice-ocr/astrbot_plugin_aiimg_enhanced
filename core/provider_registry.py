@@ -233,6 +233,8 @@ class ProviderRegistry:
             return "openai_video"
 
         # 最终兜底：根据字段特征推断（处理任意自定义 id 的服务商）
+        if "edit_model" in item and "spicy" in str(item.get("base_url") or ""):
+            return "spicy_images"
         if "poll_interval" in item or "poll_timeout" in item:
             return "gitee_async"
         if "cookie_list" in item or "apikey" in item:
@@ -489,7 +491,28 @@ class ProviderRegistry:
                 keys = item.get("api_keys") or []
                 if not keys or not any(str(k).strip() for k in keys):
                     errors.append(f"provider '{provider_id}' missing api_keys")
-            if template_key in {"openai_video", "xai_video", "xpivot_video", "nai_gateway", "nai_native"}:
+            if template_key == "spicy_images":
+                if item.get("supports_edit", True) and not str(item.get("edit_model") or "").strip():
+                    errors.append(f"provider '{provider_id}' missing edit_model")
+                try:
+                    import json
+                    extra = item.get("extra_input") or {}
+                    if isinstance(extra, str):
+                        extra = json.loads(extra)
+                    if not isinstance(extra, dict) or {"prompt", "image_urls"} & extra.keys():
+                        raise ValueError()
+                    if any(name in extra and extra[name] != 1 for name in ("num_outputs", "n", "num_images")):
+                        raise ValueError()
+                except (ValueError, TypeError):
+                    errors.append(f"provider '{provider_id}' extra_input must be a JSON object without prompt/image_urls; output count must be 1")
+                for field, minimum, maximum in (("max_reference_images", 1, 10), ("poll_interval", 1, 60), ("poll_timeout", 1, 7200), ("timeout", 1, 600)):
+                    try:
+                        value = float(item.get(field, {"max_reference_images": 10, "poll_interval": 3, "poll_timeout": 600, "timeout": 120}[field]))
+                        if not minimum <= value <= maximum or not value.is_integer():
+                            raise ValueError()
+                    except (ValueError, TypeError):
+                        errors.append(f"provider '{provider_id}' invalid {field}")
+            if template_key in {"spicy_images", "openai_video", "xai_video", "xpivot_video", "nai_gateway", "nai_native"}:
                 if not str(item.get("base_url") or "").strip():
                     errors.append(f"provider '{provider_id}' missing base_url")
                 if not str(item.get("model") or "").strip():
@@ -572,6 +595,10 @@ class ProviderRegistry:
         return backend
 
     def _build_backend(self, pid: str, template_key: str, conf: dict) -> object:
+        if template_key == "spicy_images":
+            from .spicy_images_backend import SpicyImagesBackend
+
+            return SpicyImagesBackend(imgr=self._imgr, settings=conf)
         if template_key == "nai_native":
             from .nai_native_backend import NaiNativeBackend
 

@@ -135,6 +135,22 @@ def _load_module():
 
 
 class ProviderRegistryRequestModeTests(unittest.TestCase):
+    def test_spicy_template_builds_dedicated_backend_and_validates_input(self):
+        mod = _load_module()
+        provider = {
+            'id': 'spicy-fixture', '__template_key': 'spicy_images',
+            'base_url': 'https://api.spicyapi.ai', 'api_keys': ['fixture-only'],
+            'model': 'bytedance/seedream-5.0-flash/text-to-image',
+            'edit_model': 'bytedance/seedream-5.0-flash/edit',
+            'extra_input': '{}', 'poll_timeout': 600,
+        }
+        registry = mod.ProviderRegistry({'providers': [provider]}, imgr=object(), data_dir=Path('.'))
+        self.assertEqual(registry.validate(), [])
+        self.assertEqual(type(registry.get_backend('spicy-fixture')).__name__, 'SpicyImagesBackend')
+        for changes in ({'edit_model': ''}, {'extra_input': '{invalid'}, {'extra_input': '{"image_urls":[]}'}, {'poll_timeout': 0}, {'max_reference_images': 11}):
+            invalid = mod.ProviderRegistry({'providers': [{**provider, **changes}]}, imgr=object(), data_dir=Path('.'))
+            self.assertTrue(invalid.validate(), changes)
+
     def test_grok_images_edit_template_builds_images_backend(self):
         mod = _load_module()
         registry = mod.ProviderRegistry(
