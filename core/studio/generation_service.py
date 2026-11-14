@@ -47,6 +47,8 @@ class StudioGenerationService:
         kind = str(payload.get("kind") or "image").strip().lower()
         mode = str(payload.get("mode") or "draw").strip().lower()
         prompt = str(payload.get("prompt") or "").strip()
+        if kind == "gif":
+            return await self._submit_gif(payload, scope)
         if kind not in {"image", "video"} or mode not in {"draw", "edit", "selfie", "video"}:
             raise ValueError("不支持的 Studio 任务类型")
         if kind == "image" and mode == "video":
@@ -556,6 +558,67 @@ class StudioGenerationService:
             await self.store.update(job_id, state="cancelled", error="本地计划步骤取消，上游状态以任务记录为准")
             raise
 
+    async def _submit_gif(self, payload, scope):
+        from ..gpt_image_gif_backend import GptImageGifBackend
+        prompt = str(payload.get('prompt') or '').strip()
+        idem = str(payload.get('idempotency_key') or '').strip()
+        if not prompt or len(prompt) > 8000 or not idem or len(idem) > 200:
+            raise ValueError('GIF 提示词或请求编号无效')
+        if payload.get('project_id'):
+            raise ValueError('AI GIF 不使用旧逐帧项目，请直接提交')
+        settings = GptImageGifBackend.validate(payload)
+        provider_id = str(payload.get('provider_id') or '').strip()
+        provider = self.plugin.registry.get(provider_id)
+        if not provider:
+            raise ValueError('请选择 GIF 连接服务商')
+        GptImageGifBackend(provider, self.plugin.config)
+        # Validate scope and every reference before creating a potentially billable task.
+        await self._read_reference_assets(scope, settings['reference_asset_ids'], max_total_bytes=100 * 1024 * 1024)
+        request = dict(settings, scope=scope, kind='gif', mode='gif', prompt=prompt, provider_id=provider_id)
+        job, created = await self.store.create(idempotency_key=idem, scope=scope, kind='gif', mode='gif', prompt=prompt, request=request)
+        if created:
+            task = asyncio.create_task(self._run_gif(job['id'], request))
+            self._workers[job['id']] = task
+            task.add_done_callback(lambda _: self._workers.pop(job['id'], None))
+        return job, created
+
+    async def _run_gif(self, job_id, request, resume_job=None):
+        from ..gpt_image_gif_backend import GptImageGifBackend, GifTaskFailed
+        scope = request['scope']
+        try:
+            await self.store.update(job_id, state='running', error='', provider_id=request['provider_id'])
+            provider = self.plugin.registry.get(request['provider_id'])
+            if not provider:
+                raise ValueError('GIF 服务商已被移除')
+            backend = GptImageGifBackend(provider, self.plugin.config)
+            async def accepted(task_id, fingerprint):
+                await self.store.update(job_id, provider_id=request['provider_id'], upstream_task_id=task_id,
+                    accepted_state='accepted', delivery_state='polling', result={'gif_key_fingerprint':fingerprint})
+            async def operation():
+                if resume_job:
+                    raw = await backend.resume(request, resume_job['upstream_task_id'], (resume_job.get('result') or {}).get('gif_key_fingerprint'))
+                else:
+                    references = await self._read_reference_assets(scope, request['reference_asset_ids'], max_total_bytes=100 * 1024 * 1024)
+                    raw = await backend.generate(request, references, accepted)
+                self.tasks.update('generating', generated=1)
+                return raw
+            raw = await self.tasks.run(scope, 'gif', request['prompt'], operation, requires_delivery=False)
+            asset = await self.plugin.studio_assets.create_from_bytes(scope, f'gpt-image-2.6-{job_id[:8]}.gif', raw,
+                source_job_id=job_id, metadata={'kind':'gif','prompt':request['prompt'],'model':request['gif_model'],
+                    'frame_count':request['frame_count'],'frame_duration_ms':request['frame_duration_ms']})
+            current = await self.store.get(job_id)
+            await self.store.update(job_id, state='completed', delivery_state='downloaded', error='',
+                result={**(current.get('result') or {}), 'asset_id':asset['asset_id'], 'format':'gif'})
+        except asyncio.CancelledError:
+            await self.store.update(job_id, state='cancelled', error='本地等待已取消；远端 GIF 任务可能仍会完成并计费')
+            raise
+        except Exception as exc:
+            current = await self.store.get(job_id)
+            resumable = bool(current and current.get('upstream_task_id') and not isinstance(exc, GifTaskFailed))
+            # Avoid persisting provider response bodies, headers, or credentials.
+            message = str(exc) if isinstance(exc,(ValueError,RuntimeError)) else 'GIF 处理失败，请核对原任务记录'
+            await self.store.update(job_id, state='interrupted' if resumable else 'failed', error=message)
+
     async def _run(self, job_id: str, request: dict[str, Any]) -> None:
         scope = request["scope"]
         kind = request["kind"]
@@ -697,6 +760,16 @@ class StudioGenerationService:
         current = await self.store.get(job_id)
         if current is None:
             return None
+        if current.get('kind') == 'gif':
+            if current.get('state') not in {'interrupted', 'failed', 'cancelled'} or not current.get('upstream_task_id'):
+                raise ValueError('GIF 任务没有可恢复的上游任务 ID，勿直接重复生成')
+            worker = self._workers.get(job_id)
+            if worker is not None and not worker.done():
+                return current
+            task = asyncio.create_task(self._run_gif(job_id, current['request'], resume_job=current))
+            self._workers[job_id] = task
+            task.add_done_callback(lambda _: self._workers.pop(job_id, None))
+            return {**current, 'state':'running', 'error':''}
         if current.get("kind") != "video":
             raise ValueError("只有已记录上游任务的视频可以继续查询")
         if current.get("state") not in {"interrupted", "failed"}:
@@ -794,8 +867,9 @@ class StudioGenerationService:
             raise ValueError("改图至少需要一张参考图")
         return result
 
-    async def _read_reference_assets(self, scope: str, asset_ids: list[str]) -> list[bytes]:
+    async def _read_reference_assets(self, scope: str, asset_ids: list[str], *, max_total_bytes: int | None = None) -> list[bytes]:
         result: list[bytes] = []
+        total_bytes = 0
         for asset_id in asset_ids:
             item = await self.plugin.studio_assets.get(asset_id)
             if item is None or item.get("scope") != scope or item.get("media_type") != "image":
@@ -803,7 +877,10 @@ class StudioGenerationService:
             path = await self.plugin.studio_assets.content_path(asset_id)
             if path is None:
                 raise ValueError("参考素材不存在或已清理")
+            if max_total_bytes is not None and total_bytes + path.stat().st_size > max_total_bytes:
+                raise ValueError('参考图合计大小超过限制')
             data = await asyncio.to_thread(path.read_bytes)
+            total_bytes += len(data)
             if len(data) > 20 * 1024 * 1024:
                 raise ValueError("参考图过大")
             result.append(data)

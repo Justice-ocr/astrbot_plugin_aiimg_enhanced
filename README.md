@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>AstrBot &gt;= 4.16.0, &lt; 5</strong>
-  · v4.13.4
+  · v4.14.0
   · MIT
   · <a href="https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced">GitHub 仓库</a>
 </p>
@@ -85,6 +85,22 @@ https://github.com/Justice-ocr/astrbot_plugin_aiimg_enhanced
 | OpenAI ImagesURL | 完整 URL 直连模式 | `Full Generate URL` 填完整文生图接口，`Full Edit URL` 填完整改图接口；可用于 `/v1/images/generations`、`/v1/images/edits` 或 `/v1/responses` 类网关 | 插件不会再自动拼接路径，直接向填写的完整 URL 发请求 |
 
 如果你拿到的是类似 `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent` 的 Gemini 原生端点，建议选择 **Gemini 原生**：`API URL` 填 `https://generativelanguage.googleapis.com` 或 `https://generativelanguage.googleapis.com/v1beta/models`，`Model` 填 `gemini-3.1-flash-image-preview`。如果服务商只提供 OpenAI 兼容的 `/v1/chat/completions`，则选择 **Gemini Chat图** 或 **Flow2API**。
+
+#### GPT Image 2.6 GIF 动画工作台
+
+工作台的 **GIF** 页面现默认使用 GPT Image 2.6 专用生成流程。选择已配置的图片连接服务商、对应的接口协议和 Flare / Sunburst 模型，填写动作与循环提示词，再设置每帧尺寸、帧数、时长和质量。模型由 GIF 页单独指定，不修改服务商原有静态图片模型。
+
+- **OpenAI 同步图片接口**：无参考图时调用 `/v1/images/generations`，有参考图时使用 multipart `/v1/images/edits`，读取 Base64 或 URL 结果。中转服务需自行确认开放该模型及 GIF 参数。
+- **APIMart 异步任务**：调用 `/v1/images/generations`，使用 `image_urls` 传参考图，记录 `task_id` 后查询 `/v1/tasks/{id}`。
+- **SpicyAPI 文生 GIF**：使用 `openai/gpt-image-2.6-flare/text-to-image` 或 Sunburst 的同名任务；目前仅支持无参考图生成，不转用 `/edit`。
+
+默认 512×512、9 帧、每帧 200ms、Low 质量，一次输出一个 GIF。提供 512×512、768×768、512×768、768×512；768×768 最多 12 帧，其他提供的尺寸最多 16 帧。SpicyAPI 目前只提供方形 512 / 768 档位，未开放的复杂度参数不会转发。参考图最多 16 张静态 PNG / JPEG / WebP，单张 20MB、合计 100MB；输出 GIF 最大 20MB。
+
+GIF 按完整帧图计费，参考图还可能产生输入费用，不能按一张 512 静态图估算。完成的动画自动进入素材库，可在页面循环预览与下载；已有任务在刷新后仍可查看。相同参数重复提交使用同一请求编号；需要另一份结果时，完成后点击“按当前参数再生成一版”。
+
+提交网络中断不会自动重新生成。APIMart / SpicyAPI 受理后记录上游 ID 与原连接密钥指纹，查询或下载中断可用原地址、原密钥继续查询；同步接口缺少任务 ID 时无法恢复，需先核对上游记录。取消只停止本地等待，远端可能仍生成并计费。旧逐帧项目和合成工具保留在页面底部折叠入口。
+
+本轮采用真实插件任务、素材 API 与模拟上游验证，未进行收费 GIF 生成或生产 AstrBot 验证。协议见 [OpenAI 图片生成指南](https://developers.openai.com/api/docs/guides/image-generation) 与 [APIMart GPT Image 2.6](https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation.md)。
 
 #### 自动获取模型列表
 

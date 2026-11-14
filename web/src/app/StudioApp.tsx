@@ -35,6 +35,7 @@ import {
   Video,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { GifWorkbench } from "../features/gif/GifWorkbench";
 import { ProviderModelPicker } from "../features/providers/ProviderModelPicker";
 import GifEncodeWorker from "../features/gif/encode.worker?worker&inline";
 import { inferProviderType, SPICY_TEMPLATE_DEFINITIONS, VIDEO_TEMPLATE_DEFINITIONS, NAI_TEMPLATE_DEFINITIONS, PROVIDER_TEMPLATES, VIDEO_PROVIDER_TYPES } from "./provider_catalog.js";
@@ -673,7 +674,7 @@ function TasksView({
             </span>
             <div className="task-main">
               <strong>{job.prompt || "Studio 生成任务"}</strong>
-              <small>{formatTime(job.created_at)} · {job.mode === "draw" ? "文生图" : job.mode === "video" ? "视频" : "改图"} · {job.id}</small>
+              <small>{formatTime(job.created_at)} · {job.mode === "draw" ? "文生图" : job.mode === "gif" ? "GIF 动画" : job.mode === "video" ? "视频" : "改图"} · {job.id}</small>
               {(job.provider_id || job.upstream_task_id) && <small>{job.provider_id || "服务商未知"}{job.upstream_task_id ? ` · 上游 ${job.upstream_task_id}` : ""}</small>}
               {job.error && <p className="task-error">{job.error}</p>}
             </div>
@@ -1849,7 +1850,7 @@ function CanvasView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; 
   );
 }
 
-function GifView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; scope: string; onRefresh: () => void }) {
+function LegacyGifView({ snapshot, scope, onRefresh }: { snapshot: StudioSnapshot; scope: string; onRefresh: () => void }) {
   const [importedAssets, setImportedAssets] = useState<StudioAsset[]>([]);
   const importing = useRef(false);
   const images = [...snapshot.assets, ...importedAssets.filter((asset) => !snapshot.assets.some((item) => item.asset_id === asset.asset_id))].filter((item) => item.media_type === "image" && item.scope === scope);
@@ -3839,7 +3840,7 @@ export default function StudioApp() {
           <img className="brand-symbol small" src={brandIcon} alt="" />
           <div>
             <strong>AIIMG Studio</strong>
-            <small>v4.13.4</small>
+            <small>v4.14.0</small>
           </div>
         </div>
       </aside>
@@ -3868,7 +3869,7 @@ export default function StudioApp() {
             {route === "history" && <HistoryView snapshot={snapshot} />}
             {route === "personas" && <PersonasView snapshot={snapshot} onRefresh={refresh} />}
             {route === "prompts" && <PromptsView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}
-            {route === "gif" && <GifView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}
+            {route === "gif" && <><GifWorkbench key={activeScope} snapshot={snapshot} scope={activeScope} onRefresh={refresh} /><details className="gif-legacy-tools"><summary>旧项目与逐帧合成工具</summary><LegacyGifView snapshot={snapshot} scope={activeScope} onRefresh={refresh} /></details></>}
             {route === "design" && <DesignView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}
             {route === "agent" && <AgentView snapshot={snapshot} scope={activeScope} onRefresh={refresh} />}
             {route === "providers" && <ProvidersView snapshot={snapshot} onRefresh={() => void refresh()} />}
